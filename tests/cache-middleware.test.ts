@@ -653,6 +653,62 @@ describe('cacheMiddleware key: who asked, and where', () => {
     expect(fetchMock).toHaveBeenCalledTimes(2)
   })
 
+  it('keeps two base URLs that differ only in their query string apart', async () => {
+    const fetchMock = vi.fn(async (url: string) => mockJsonResponse({ url }))
+    vi.stubGlobal('fetch', fetchMock)
+    const me = new Request<Record<string, never>, { url: string }>({ method: 'GET', path: '/me' })
+    const cache = cacheMiddleware()
+    const a = createApi({ baseUrl: 'https://x.test?key=A', requests: { me }, middleware: [cache] })
+    const b = createApi({ baseUrl: 'https://x.test?key=B', requests: { me }, middleware: [cache] })
+
+    await a.me()
+    const { data } = await b.me()
+
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+    expect(data?.url).toContain('key=B')
+  })
+
+  it('keeps calls apart when a middleware before the cache appends a query parameter', async () => {
+    const fetchMock = vi.fn(async (url: string) => mockJsonResponse({ url }))
+    vi.stubGlobal('fetch', fetchMock)
+    let lang = 'en'
+    const addLang = async (ctx: any, next: any) => {
+      ctx.request.url += (ctx.request.url.includes('?') ? '&' : '?') + `lang=${lang}`
+      return next()
+    }
+    const me = new Request<Record<string, never>, { url: string }>({ method: 'GET', path: '/me' })
+    const api = createApi({ baseUrl: 'https://x.test', requests: { me }, middleware: [addLang, cacheMiddleware()] })
+
+    await api.me()
+    lang = 'de'
+    const { data } = await api.me()
+
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+    expect(data?.url).toContain('lang=de')
+  })
+
+  it('still hits when only the order of query pairs differs', async () => {
+    const fetchMock = vi.fn(async () => mockJsonResponse({ ok: true }))
+    vi.stubGlobal('fetch', fetchMock)
+    const me = new Request<Record<string, never>, unknown>({ method: 'GET', path: '/me' })
+    const cache = cacheMiddleware()
+    const a = createApi({ baseUrl: 'https://x.test?a=1&b=2', requests: { me }, middleware: [cache] })
+    const b = createApi({ baseUrl: 'https://x.test?b=2&a=1', requests: { me }, middleware: [cache] })
+    await a.me(); await b.me()
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+  })
+
+  it('still caches when a request-ID middleware runs after the cache', async () => {
+    const fetchMock = vi.fn(async () => mockJsonResponse({ ok: true }))
+    vi.stubGlobal('fetch', fetchMock)
+    let id = 0
+    const requestId = async (ctx: any, next: any) => { ctx.request.headers.set('X-Request-Id', String(id++)); return next() }
+    const me = new Request<Record<string, never>, unknown>({ method: 'GET', path: '/me' })
+    const api = createApi({ baseUrl: 'https://x.test', requests: { me }, middleware: [cacheMiddleware(), requestId] })
+    await api.me(); await api.me()
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+  })
+
   it('misses every time when an outer middleware adds a unique header (documented trade-off)', async () => {
     const fetchMock = vi.fn(async () => mockJsonResponse({ ok: true }))
     vi.stubGlobal('fetch', fetchMock)

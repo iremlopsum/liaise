@@ -501,10 +501,12 @@ export function cacheMiddleware(options?: {
     // configured ones, so every header is part of the key; a middleware
     // OUTSIDE the cache that adds a per-call unique header (a request ID)
     // therefore makes every call a miss. The request name stays because
-    // GraphQL operations share one URL. Two exclusions keep 4.4.3's
-    // content-keyed guarantees: the query string is dropped (GET params live
-    // there, and stableKey already covers them order-insensitively, whereas
-    // the URL spells them in call order), and Content-Type is dropped (it is
+    // GraphQL operations share one URL. The URL's query string stays in the
+    // key, with its pairs sorted (a stable sort, so repeated keys keep their
+    // order): a baseUrl like `https://x.test?key=A`, or a middleware before
+    // the cache appending `?lang=de`, must not share entries, while GET params
+    // that stableKey already covers order-insensitively must not differ by the
+    // order the URL spells them in. Content-Type is the one exclusion (it is
     // derived from the params, so {a: undefined} vs {} must not differ by it).
     // Headers iterate sorted and lower-cased, so the key is stable.
     const headerPairs: [string, string][] = []
@@ -512,8 +514,15 @@ export function cacheMiddleware(options?: {
       if (name !== 'content-type') headerPairs.push([name, value])
     })
     const headerKey = JSON.stringify(headerPairs)
-    const urlPath = ctx.request.url.split('?')[0]
-    const key = `${ctx.requestName}|${ctx.request.method}|${urlPath}|${paramsStr}|${headerKey}`
+    const fullUrl = ctx.request.url
+    const qIndex = fullUrl.indexOf('?')
+    let urlKey = fullUrl
+    if (qIndex !== -1) {
+      const sorted = new URLSearchParams(fullUrl.slice(qIndex + 1))
+      sorted.sort()
+      urlKey = `${fullUrl.slice(0, qIndex)}?${sorted.toString()}`
+    }
+    const key = `${ctx.requestName}|${ctx.request.method}|${urlKey}|${paramsStr}|${headerKey}`
 
     const cached = store.get<Result<unknown>>(key)
     if (cached !== null) {

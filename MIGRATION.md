@@ -27,8 +27,9 @@ or `toJSON`-only class on a GET is refused. If you were relying on the empty bod
 pass the object you meant: `{ ids: [...set] }`, `{ since: date.toISOString() }`.
 
 **`cacheMiddleware` entries are per URL and per header set.** The key now includes
-method, URL path and every request header except `Content-Type`, so a different
-`Authorization` or base URL never shares an entry. A warm cache is cold once after
+method, full URL (query string included, pairs sorted by name) and every request
+header except `Content-Type`, so a different `Authorization`, base URL or query
+string never shares an entry. A warm cache is cold once after
 upgrading. A middleware placed before `cacheMiddleware` that adds a per-call
 unique header (a request ID) makes every call a miss; put it after
 `cacheMiddleware` in the `middleware` array.

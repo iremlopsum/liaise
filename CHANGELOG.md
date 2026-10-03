@@ -37,8 +37,8 @@ they cannot. See [MIGRATION.md](./MIGRATION.md#upgrading-to-501).
 - **`cacheMiddleware` keys on more than name and params.** The key was the request
   name plus params, so a second user's call could be served the first user's
   cached `/me`, and one `Request` used with two base URLs shared entries. The key
-  is now request name, method, URL without the query string, params, and every
-  request header except `Content-Type`. A warm cache is cold once after
+  is now request name, method, URL (query string included, its pairs sorted by
+  name), params, and every request header except `Content-Type`. A warm cache is cold once after
   upgrading, and a middleware placed before the cache that adds a per-call unique
   header (a request ID) now makes every call a miss; place it after.
 - **A path token can no longer be hit by an unrelated param key.** Substitution
