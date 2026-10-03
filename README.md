@@ -11,7 +11,7 @@ Runtime-agnostic, type-safe HTTP client for REST and GraphQL. Built on standard 
 - **Composable middleware** — retry, cache, dedupe, auth, logging — applied at global, per-endpoint, or per-call level
 - **Types by inference** — declare params and response once on the endpoint definition; types flow to every call site automatically
 - **Runtime-agnostic** — Node.js 20+, browsers, Bun, Deno, Cloudflare Workers, React Native (its built-in `fetch`; not tested in CI) — any environment with `fetch`
-- **Tiny** — about **5.5 kB gzipped** for a REST-only import, 6.6 kB for the core entry, 7.6 kB with all middleware (measured by `npm run size`); tree-shaking drops what you do not import
+- **Tiny** — about **5.6 kB gzipped** for a REST-only import, 6.7 kB for the core entry, 7.7 kB with all middleware (measured by `npm run size`); tree-shaking drops what you do not import
 
 ```
 npm install liaise

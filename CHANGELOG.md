@@ -69,8 +69,8 @@ they cannot. See [MIGRATION.md](./MIGRATION.md#upgrading-to-501).
 
 - **The README's size numbers are measured, and CI enforces them.** The old
   "2.9 kB / 4.4 kB gzipped" had gone stale and understated the bundle. `npm run size`
-  now bundles each entry with esbuild and reports gzip and brotli: about 5.5 kB
-  gzipped for a REST-only import, 6.6 kB for the core entry and 7.6 kB with all
+  now bundles each entry with esbuild and reports gzip and brotli: about 5.6 kB
+  gzipped for a REST-only import, 6.7 kB for the core entry and 7.7 kB with all
   middleware. CI fails if one grows past its budget. `esbuild` is a new
   devDependency; the package still has no runtime dependencies.
 
