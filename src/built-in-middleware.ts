@@ -514,13 +514,22 @@ export function cacheMiddleware(options?: {
       if (name !== 'content-type') headerPairs.push([name, value])
     })
     const headerKey = JSON.stringify(headerPairs)
+    // Dependency-free: React Native's URLSearchParams polyfill has no sort().
+    // Raw segments sorted by raw name; Array.prototype.sort is stable, so
+    // repeated names keep their order and different encodings stay distinct.
     const fullUrl = ctx.request.url
     const qIndex = fullUrl.indexOf('?')
     let urlKey = fullUrl
     if (qIndex !== -1) {
-      const sorted = new URLSearchParams(fullUrl.slice(qIndex + 1))
-      sorted.sort()
-      urlKey = `${fullUrl.slice(0, qIndex)}?${sorted.toString()}`
+      const hashIndex = fullUrl.indexOf('#', qIndex)
+      const rawQuery = fullUrl.slice(qIndex + 1, hashIndex === -1 ? undefined : hashIndex)
+      const segments = rawQuery.split('&').filter(seg => seg !== '')
+      const nameOf = (seg: string): string => seg.split('=')[0]
+      segments.sort((x, y) => {
+        const nx = nameOf(x), ny = nameOf(y)
+        return nx < ny ? -1 : nx > ny ? 1 : 0
+      })
+      urlKey = `${fullUrl.slice(0, qIndex)}?${segments.join('&')}`
     }
     const key = `${ctx.requestName}|${ctx.request.method}|${urlKey}|${paramsStr}|${headerKey}`
 

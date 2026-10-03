@@ -213,6 +213,8 @@ describe('params that used to send nothing', () => {
   it('uses "an" before a vowel and "a" before a consonant in refusal messages', async () => {
     const view = await send('GET', '/items', new Int16Array([1]))
     expect((view.result.error?.body as Error).message).toMatch(/Cannot send an Int16Array/)
+    const u8 = await send('GET', '/items', new Uint8Array([1]))
+    expect((u8.result.error?.body as Error).message).toMatch(/Cannot send a Uint8Array/)
     const set = await send('POST', '/items', new Set([1]))
     expect((set.result.error?.body as Error).message).toMatch(/Cannot send a Set/)
     class Money { #c = 1; get c() { return this.#c } }

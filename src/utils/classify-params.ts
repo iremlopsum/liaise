@@ -26,7 +26,7 @@ function typeName(value: object): string {
 /** `a Map`, `an Int16Array`: the article follows the first letter. */
 function withArticle(value: object): string {
   const name = typeName(value)
-  return `${/^[aeiou]/i.test(name) ? 'an' : 'a'} ${name}`
+  return `${/^([aeio]|u(?!int))/i.test(name) ? 'an' : 'a'} ${name}`
 }
 
 /**

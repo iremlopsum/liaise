@@ -28,8 +28,9 @@ pass the object you meant: `{ ids: [...set] }`, `{ since: date.toISOString() }`.
 
 **`cacheMiddleware` entries are per URL and per header set.** The key now includes
 method, full URL (query string included, pairs sorted by name) and every request
-header except `Content-Type`, so a different `Authorization`, base URL or query
-string never shares an entry. A warm cache is cold once after
+header except `Content-Type`. A different `Authorization` or other header, base
+URL, path or query value gets its own entry; the same query params in a different
+order share one. A warm cache is cold once after
 upgrading. A middleware placed before `cacheMiddleware` that adds a per-call
 unique header (a request ID) makes every call a miss; put it after
 `cacheMiddleware` in the `middleware` array.

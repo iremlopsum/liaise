@@ -698,6 +698,24 @@ describe('cacheMiddleware key: who asked, and where', () => {
     expect(fetchMock).toHaveBeenCalledTimes(1)
   })
 
+  it('keys a query string without URLSearchParams.prototype.sort (React Native polyfill)', async () => {
+    const original = URLSearchParams.prototype.sort
+    URLSearchParams.prototype.sort = () => { throw new Error('URLSearchParams.sort is not implemented') }
+    try {
+      const fetchMock = vi.fn(async () => mockJsonResponse({ ok: true }))
+      vi.stubGlobal('fetch', fetchMock)
+      const me = new Request<Record<string, never>, unknown>({ method: 'GET', path: '/me' })
+      const cache = cacheMiddleware()
+      const a = createApi({ baseUrl: 'https://x.test?a=1&b=2', requests: { me }, middleware: [cache] })
+      const b = createApi({ baseUrl: 'https://x.test?b=2&a=1', requests: { me }, middleware: [cache] })
+      const r1 = await a.me(); await b.me()
+      expect(r1.error).toBeNull()
+      expect(fetchMock).toHaveBeenCalledTimes(1)
+    } finally {
+      URLSearchParams.prototype.sort = original
+    }
+  })
+
   it('still caches when a request-ID middleware runs after the cache', async () => {
     const fetchMock = vi.fn(async () => mockJsonResponse({ ok: true }))
     vi.stubGlobal('fetch', fetchMock)
