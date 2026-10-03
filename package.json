@@ -29,6 +29,7 @@
   ],
   "scripts": {
     "clean": "node -e \"require('node:fs').rmSync('dist',{recursive:true,force:true})\"",
+    "size": "node scripts/size.mjs",
     "build": "npm run clean && tsc -p tsconfig.build.json && tsc -p tsconfig.types.json",
     "test": "vitest",
     "test:run": "vitest run",
@@ -69,6 +70,7 @@
   ],
   "devDependencies": {
     "@types/node": "^22.19.18",
+    "esbuild": "0.27.4",
     "typescript": "~5.8.0",
     "vitest": "^3.2.0"
   }
