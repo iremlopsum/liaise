@@ -43,6 +43,7 @@ npm install liaise
 - [Testing](#testing)
 - [Philosophy](#philosophy)
 - [API Reference](#api-reference)
+- [Contributing](#contributing)
 
 ## Getting Started
 
@@ -1392,6 +1393,10 @@ The library has no opinion about your UI framework, or whether you have one. A c
 | `RouteHandler`  | type     | `(ctx: RouteContext) => Response \| Promise<Response>` -- a route value that computes its response |
 | `RouteValue`    | type     | `Response \| RouteHandler \| Array<Response \| RouteHandler>` -- anything a route key can map to |
 | `RecordedCall`  | type     | `{ method, url, headers, body }` -- shape of each entry in `mock.calls` |
+
+## Contributing
+
+Bug reports, fixes and ideas are welcome. See [CONTRIBUTING.md](./CONTRIBUTING.md) for how to report a bug, run the tests, and the few rules a pull request is checked against.
 
 ## License
 
