@@ -380,3 +380,21 @@ describe('the URL that actually reaches fetch', () => {
     expect(globalThis.fetch).not.toHaveBeenCalled()
   })
 })
+
+describe('path tokens with regex-special param keys', () => {
+  it('a key containing a dot does not match another token', () => {
+    const { url, remaining } = buildUrl('https://x.test', '/x/:aXb', { 'a.b': 'v', aXb: 'real' }, false)
+    expect(url).toBe('https://x.test/x/real')
+    expect(remaining).toEqual({ 'a.b': 'v' })
+  })
+
+  it('still substitutes a repeated token everywhere', () => {
+    const { url } = buildUrl('https://x.test', '/orgs/:id/members/:id', { id: '7' }, false)
+    expect(url).toBe('https://x.test/orgs/7/members/7')
+  })
+
+  it('does not let :id match inside :idExtra', () => {
+    const { url } = buildUrl('https://x.test', '/a/:idExtra/:id', { id: '1', idExtra: '2' }, false)
+    expect(url).toBe('https://x.test/a/2/1')
+  })
+})

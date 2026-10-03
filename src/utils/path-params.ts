@@ -219,39 +219,24 @@ export function buildUrl(baseUrl: string, path: string, params: Record<string, u
   // -------------------------------------------------------------------------
   // Phase 1: Path parameter substitution
   // -------------------------------------------------------------------------
-  // Iterate over every param key and check if the path contains a matching
-  // `:key` token. We use a regex with a lookahead to ensure we only match
-  // complete param names — `:id` must NOT match inside `:idExtra`.
-  //
-  // The regex pattern `:key(?=[^a-zA-Z0-9_]|$)` means:
-  // - Match the literal `:key`
-  // - Followed by either a non-word character (/, ?, etc.) or end of string
-  // - This prevents `:id` from matching `:idExtra` because 'E' is alphanumeric
-  //
-  // The `g` flag matters: a template may legitimately repeat a token, as in
-  // '/orgs/:id/members/:id'. Without it only the first occurrence would be
-  // substituted and the second would survive into Phase 1b, which now throws
-  // on any leftover token — turning a working path into a hard error.
+  // Scan the template once for `:name` tokens and look each up in params.
+  // Before 5.0.1 this built a RegExp from every param KEY, unescaped, so a key
+  // like 'a.b' (where '.' matches any character) could substitute the token
+  // ':aXb'. The token grammar is the one define-request.ts's type-level parser
+  // uses: [a-zA-Z0-9_]+, matched greedily, so ':id' never matches inside
+  // ':idExtra'. A repeated token ('/orgs/:id/members/:id') is substituted at
+  // every occurrence. encodeURIComponent escapes ':' to '%3A', so a value can
+  // never produce a token of its own.
   // -------------------------------------------------------------------------
-  for (const [key, value] of Object.entries(params)) {
-    const pattern = new RegExp(`:${key}(?=[^a-zA-Z0-9_]|$)`, 'g')
-
-    // Replace first and compare, rather than test() then replace(): a global
-    // regex carries lastIndex between calls, and doing it in one pass keeps
-    // that state from mattering at all. The comparison is a reliable "did it
-    // match" signal because encodeURIComponent always escapes ':' to '%3A',
-    // so a substitution can never reproduce the token it replaced.
-    const substituted = resolvedPath.replace(pattern, encodeURIComponent(String(value)))
-
-    if (substituted !== resolvedPath) {
-      // This param matched at least one path token — substitution encoded the
-      // value so special characters (spaces, slashes) are safe in a segment.
-      resolvedPath = substituted
-    } else {
-      // This param doesn't match any path token — keep it for later use
-      // (either query string serialization or request body)
-      remaining[key] = value
-    }
+  const lookup = new Map(Object.entries(params))
+  const consumed = new Set<string>()
+  resolvedPath = resolvedPath.replace(/:([a-zA-Z0-9_]+)/g, (token: string, name: string) => {
+    if (!lookup.has(name)) return token
+    consumed.add(name)
+    return encodeURIComponent(String(lookup.get(name)))
+  })
+  for (const [key, value] of lookup) {
+    if (!consumed.has(key)) remaining[key] = value
   }
 
   // -------------------------------------------------------------------------
