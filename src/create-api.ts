@@ -1182,14 +1182,15 @@ export function createApi<TRequests extends Record<string, Request<any, any>>>(
           }
 
           // -----------------------------------------------------------------
-          // Step 9: Post-execution hooks (dedupe cleanup + onError)
+          // Step 9: Post-execution hooks (dedupe cleanup, release, onError)
           // -----------------------------------------------------------------
           // After the middleware chain completes (with any result) — or the
           // backstop settles on its behalf — we run this exactly once:
           // a. Clear the dedupe tracker for this endpoint (if dedupe is enabled)
           //    so the next call starts fresh without aborting a completed request
-          //    and release this run's merged signals (releaseAll above)
-          // b. Fire the onError callback if the final result has an error
+          // b. Release this run's merged signals (releaseAll above) — always,
+          //    whether or not dedupe is on
+          // c. Fire the onError callback if the final result has an error
           //    (only fires on final error — if retry middleware recovered, no fire)
           // -----------------------------------------------------------------
           return backstop.follow(resultPromise, (result, preempted) => {
@@ -1375,6 +1376,9 @@ export function createApi<TRequests extends Record<string, Request<any, any>>>(
       // "every call returns a Result" would otherwise not be enforced by
       // construction.
       // -----------------------------------------------------------------------
+      // Hoisted so the catch below can release it: built before acquire(), it
+      // would otherwise keep its listener if anything after it threw.
+      let builtPerCaller: AbortSignal | undefined
       try {
         // Emptiness, not truthiness: `headers: {}` and `middleware: []` are
         // both truthy, and neither changes what is requested, so neither is a
@@ -1403,6 +1407,7 @@ export function createApi<TRequests extends Record<string, Request<any, any>>>(
         // throw from here cannot strand a shared request that this caller then
         // never releases.
         const perCaller = perCallerBudget(options.timeout, options.signal)
+        builtPerCaller = perCaller
 
         // acquire() either starts the real request (first caller — exec is
         // called with the tracker's own refcounted signal, which becomes the
@@ -1524,6 +1529,8 @@ export function createApi<TRequests extends Record<string, Request<any, any>>>(
         // Setup for the share path itself threw (e.g. a BigInt timeout
         // reaching Math.min in perCallerBudget) — before acquire(), so there
         // is no operative signal yet to check provenance against.
+        // Same guard as `finish`: the caller's own signal is not ours to release.
+        if (builtPerCaller !== options.signal) releaseSignal(builtPerCaller)
         return Promise.resolve(failedResult(err, undefined, 'network'))
       }
     }

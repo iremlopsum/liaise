@@ -19,20 +19,26 @@ async function runMany(call: (signal: AbortSignal) => Promise<unknown>) {
 }
 
 describe('a long-lived caller signal ends with no listeners', () => {
-  const cases: Array<[string, Partial<RequestConfig>]> = [
-    ['plain', {}],
-    ['dedupe', { dedupe: true }],
-    ['timeout', { timeout: 5000 }],
-    ['dedupe + timeout', { dedupe: true, timeout: 5000 }],
-    ['share', { share: true }],
-    ['share + timeout', { share: true, timeout: 5000 }],
+  // [name, request config, per-call timeout]. With any timeout the operation
+  // budget is a fresh merge and every later merge (dedupe, share) listens to
+  // THAT, not to the caller's signal. The `no timeout` rows are the search-box
+  // case: the caller's signal is the budget itself, so the dedupe merge is
+  // the one listening to it, and only releasing that merge clears it.
+  const cases: Array<[string, Partial<RequestConfig>, number | undefined]> = [
+    ['plain', {}, 5000],
+    ['dedupe', { dedupe: true }, 5000],
+    ['dedupe, no timeout', { dedupe: true }, undefined],
+    ['timeout', { timeout: 5000 }, 5000],
+    ['dedupe + timeout', { dedupe: true, timeout: 5000 }, 5000],
+    ['share', { share: true }, 5000],
+    ['share + timeout', { share: true, timeout: 5000 }, 5000],
   ]
 
-  it.each(cases)('%s', async (_name, extra) => {
+  it.each(cases)('%s', async (_name, extra, timeout) => {
     vi.stubGlobal('fetch', vi.fn(async () => json({ ok: true })))
     const get = new Request<Record<string, never>, unknown>({ method: 'GET', path: '/x', ...extra })
     const api = createApi({ baseUrl: 'https://x.test', requests: { get } })
-    expect(await runMany(signal => api.get({}, { signal, timeout: 5000 }))).toBe(0)
+    expect(await runMany(signal => api.get({}, { signal, timeout }))).toBe(0)
   })
 
   it('with a retrying middleware', async () => {
@@ -44,9 +50,12 @@ describe('a long-lived caller signal ends with no listeners', () => {
     expect(await runMany(signal => api.get({}, { signal, timeout: 5000 }))).toBe(0)
   })
 
-  it('on the GraphQL client', async () => {
+  it.each([
+    ['', 5000],
+    [', no timeout', undefined],
+  ])('on the GraphQL client%s', async (_name, timeout) => {
     vi.stubGlobal('fetch', vi.fn(async () => json({ data: { me: { id: '1' } } })))
-    const me = new Operation<Record<string, never>, unknown>({ operation: gql`query { me { id } }`, dedupe: true, timeout: 5000 })
+    const me = new Operation<Record<string, never>, unknown>({ operation: gql`query { me { id } }`, dedupe: true, timeout })
     const client = createGraphQL({ endpoint: 'https://x.test/graphql', operations: { me } })
     expect(await runMany(signal => client.me({}, { signal }))).toBe(0)
   })
