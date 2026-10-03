@@ -97,7 +97,7 @@ describe('error.request.url when the URL could never be built', () => {
     const api = createApi({
       baseUrl: 'https://api.test',
       requests: {
-        put: new Request<Record<string, unknown>, unknown>({ method: 'GET', path: '/users/:id' }),
+        put: new Request<any, unknown>({ method: 'GET', path: '/users/:id' }),
       },
     })
     const r = await api.put(new Set([1]))
@@ -182,7 +182,7 @@ describe('error.request.url for a fragment-bearing baseUrl', () => {
     vi.stubGlobal('fetch', vi.fn(async () => new Response('{}', { status: 200 })))
     const both = createApi({
       baseUrl: 'https://api.test/v1#f',
-      requests: { getUser: new Request<Record<string, unknown>, unknown>({ method: 'GET', path: '/users/:id' }) },
+      requests: { getUser: new Request<any, unknown>({ method: 'GET', path: '/users/:id' }) },
     })
     const r = await both.getUser({})
 
