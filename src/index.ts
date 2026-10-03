@@ -1,5 +1,5 @@
 // =============================================================================
-// index.ts — Public API surface for the apify library
+// index.ts — Public API surface for the liaise library
 // =============================================================================
 // This barrel file re-exports everything consumers need. Internal modules
 // (middleware composition engine, utils) are NOT exported — they are

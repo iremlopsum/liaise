@@ -20,7 +20,7 @@ export interface SerializeResult {
  *
  * This utility exists because different body types require different serialization
  * strategies and content-type headers. Rather than forcing every call site to
- * handle this logic, we centralize it here so the rest of apify can simply call
+ * handle this logic, we centralize it here so the rest of liaise can simply call
  * `serializeBody(input)` and get back a ready-to-use `{ body, contentType }` pair.
  *
  * ### Serialization rules (checked in this order):

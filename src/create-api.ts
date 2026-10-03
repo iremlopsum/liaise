@@ -1,5 +1,5 @@
 // =============================================================================
-// create-api.ts — The core API client constructor for the apify library
+// create-api.ts — The core API client constructor for the liaise library
 // =============================================================================
 //
 // This is the heart of the library. It takes a set of Request definitions and
@@ -141,7 +141,7 @@ type Api<TRequests extends Record<string, Request<any, any>>> = {
  * normalizes it to `null` for `error.body` instead: a failure is already
  * being reported there, and the empty body is only diagnostic.
  */
-const EMPTY_JSON_BODY: unique symbol = Symbol('apify.emptyJsonBody')
+const EMPTY_JSON_BODY: unique symbol = Symbol('liaise.emptyJsonBody')
 
 /**
  * Parses the response body according to the configured response type.
@@ -374,7 +374,7 @@ function isEmptyHeaders(init: HeadersInit | undefined): boolean {
 /**
  * Creates a typed API client from a set of Request definitions.
  *
- * This is the primary entry point of the apify library. It takes a configuration
+ * This is the primary entry point of the liaise library. It takes a configuration
  * object containing a base URL, request definitions, optional global middleware,
  * default headers, and an error callback, and returns an object where each request
  * key becomes a callable, fully-typed method.

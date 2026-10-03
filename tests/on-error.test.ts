@@ -37,7 +37,7 @@ describe('onError and aborts', () => {
     expect(k).toEqual([])
     // `b` is the newer call that superseded `a` — it stays the live request
     // and, per the `hang()` mock above, never settles on its own in this
-    // test (nothing ever resolves or aborts its fetch). apify's Result
+    // test (nothing ever resolves or aborts its fetch). liaise's Result
     // promise never rejects, so `.catch` here is only a safety net against
     // an unhandled-rejection warning for the still-pending promise; it is
     // deliberately not awaited, since awaiting it would hang forever.

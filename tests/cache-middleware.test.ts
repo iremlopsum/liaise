@@ -252,8 +252,8 @@ describe('cacheMiddleware', () => {
     await api.getUser({ id: '1' }) // HIT
 
     expect(logSpy).toHaveBeenCalledTimes(2)
-    expect(logSpy).toHaveBeenNthCalledWith(1, expect.stringContaining('[apify cache] MISS'))
-    expect(logSpy).toHaveBeenNthCalledWith(2, expect.stringContaining('[apify cache] HIT'))
+    expect(logSpy).toHaveBeenNthCalledWith(1, expect.stringContaining('[liaise cache] MISS'))
+    expect(logSpy).toHaveBeenNthCalledWith(2, expect.stringContaining('[liaise cache] HIT'))
   })
 
   it('does not log when debug is omitted', async () => {

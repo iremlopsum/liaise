@@ -30,7 +30,7 @@ interface Entry {
  * post-execution hook recognise "nobody is waiting" and not report the
  * operation's own outcome as a second, misleading failure.)
  */
-export const ABANDONED: unique symbol = Symbol('apify.abandoned')
+export const ABANDONED: unique symbol = Symbol('liaise.abandoned')
 
 /** Whether an abort reason is the tracker's own abandonment sentinel. */
 export function isAbandoned(reason: unknown): boolean {

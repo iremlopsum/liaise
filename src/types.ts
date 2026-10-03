@@ -1,5 +1,5 @@
 // =============================================================================
-// types.ts — Foundational type definitions for the apify library
+// types.ts — Foundational type definitions for the liaise library
 // =============================================================================
 //
 // This file contains every shared type used across the library. It is the
