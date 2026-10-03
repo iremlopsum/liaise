@@ -35,6 +35,7 @@
     "test:integration": "vitest run --config vitest.integration.ts",
     "typecheck": "tsc --noEmit",
     "test:types": "vitest run --typecheck",
+    "sessions": "test -f .claude/sessions.mjs && node .claude/sessions.mjs || echo \"npm run sessions is a local-only helper (gitignored .claude/); nothing to list in this clone\"",
     "prepublishOnly": "npm run typecheck && npm run test:types && npm run test:run && npm run test:integration && npm run build"
   },
   "repository": {
