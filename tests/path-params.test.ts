@@ -398,3 +398,10 @@ describe('path tokens with regex-special param keys', () => {
     expect(url).toBe('https://x.test/a/2/1')
   })
 })
+
+describe('Date in a query string', () => {
+  it('refuses a Date in a query string with a message that says Date', () => {
+    expect(() => buildUrl('https://x.test', '/events', { since: new Date(0) }, true))
+      .toThrow(/A Date cannot be sent in a query string as is/)
+  })
+})

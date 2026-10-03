@@ -324,6 +324,13 @@ export function buildUrl(baseUrl: string, path: string, params: Record<string, u
         for (const item of value) {
           searchParams.append(key, String(item))
         }
+      } else if (value instanceof Date) {
+        // A Date is not a nested object, and the old message sent readers
+        // hunting for one. Still refused: ISO 8601 and epoch milliseconds are
+        // both common on real APIs, and picking one is the caller's call.
+        throw new TypeError(
+          `A Date cannot be sent in a query string as is. Convert param "${key}" first, e.g. ${key}: date.toISOString() or date.getTime().`
+        )
       } else if (typeof value === 'object') {
         // Nested objects can't be meaningfully serialized as query strings
         // without choosing a convention (brackets, dots, JSON). Rather than

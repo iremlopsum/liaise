@@ -443,12 +443,15 @@ never going to reach the server.
 | `{ filter: null }`            | _(omitted)_                 |
 | `{ filter: undefined }`       | _(omitted)_                 |
 | `{ meta: { nested: true } }`  | **TypeError** (see below)   |
+| `{ since: new Date() }`       | **TypeError**: convert it first (`toISOString()` or `getTime()`) |
 
 **Arrays** use repeated keys (`tags=a&tags=b`), which is the most widely supported format across server frameworks.
 
 **`null` and `undefined`** values are silently omitted from the query string.
 
 **Nested objects** throw a `TypeError` with a descriptive message. Flatten the structure before passing. This is intentional -- there is no universal standard for serializing nested objects in query strings (brackets, dots, JSON), so the library refuses to guess.
+
+**A `Date`** is refused too, with a message that names it. ISO 8601 and epoch milliseconds are both common on real APIs, so convert it yourself: `since: date.toISOString()` or `since: date.getTime()`.
 
 ### Result
 
