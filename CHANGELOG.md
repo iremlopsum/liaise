@@ -5,6 +5,25 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [5.0.0] — 2026-10-03
+
+**Renamed from `@iremlopsum/apify` to `liaise`.** Same code, same API, full git
+history; the repository moves from `iremlopsum/apify` to
+[`iremlopsum/liaise`](https://github.com/iremlopsum/liaise). This is a major
+version because the package name and one piece of observable output change — no
+function, option or type does. See [MIGRATION.md](./MIGRATION.md#upgrading-to-500).
+
+### Changed
+
+- **The package is published as `liaise`.** The three entry points become
+  `liaise`, `liaise/middleware` and `liaise/testing`.
+- **`logMiddleware` and `cacheMiddleware` log with a `[liaise]` prefix.**
+  `logMiddleware` writes `[liaise] → GET getItems /api/items` and
+  `[liaise] ← getItems OK (142ms)` where it wrote `[apify] …`;
+  `cacheMiddleware({ debug: true })` writes `[liaise cache] HIT` / `MISS` where it
+  wrote `[apify cache] …`. Anything that filters or parses those lines needs the
+  new prefix.
+
 ## [4.4.3] — 2026-10-03
 
 ### Fixed
@@ -920,6 +939,7 @@ Initial release of the rewritten client. Reconstructed from the release commit
   `ArrayBuffer` and strings
 - Response parsing as `json`, `text`, `blob`, `arrayBuffer` or `formData`
 
+[5.0.0]: https://github.com/iremlopsum/liaise/compare/v4.4.3...v5.0.0
 [4.4.3]: https://github.com/iremlopsum/liaise/compare/v4.4.2...v4.4.3
 [4.4.2]: https://github.com/iremlopsum/liaise/compare/v4.4.1...v4.4.2
 [4.4.1]: https://github.com/iremlopsum/liaise/compare/v4.4.0...v4.4.1

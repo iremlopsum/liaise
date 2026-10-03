@@ -7,6 +7,36 @@ For the full record of what changed in each release, see [CHANGELOG.md](./CHANGE
 
 ---
 
+## Upgrading to 5.0.0
+
+The package has a new name: **`@iremlopsum/apify` is now `liaise`**. Nothing
+else about the API changes — every function, option, type and behaviour is the
+same as 4.4.3.
+
+**1. Swap the package.**
+
+```bash
+npm uninstall @iremlopsum/apify
+npm install liaise
+```
+
+**2. Update the import paths** — a find-and-replace across your code:
+
+| Before | After |
+|---|---|
+| `@iremlopsum/apify` | `liaise` |
+| `@iremlopsum/apify/middleware` | `liaise/middleware` |
+| `@iremlopsum/apify/testing` | `liaise/testing` |
+
+Replacing `@iremlopsum/apify` with `liaise` everywhere covers all three.
+
+**One behaviour change, only if you read the logs.** `logMiddleware` and
+`cacheMiddleware({ debug: true })` print `[liaise]` and `[liaise cache]` where
+they printed `[apify]` and `[apify cache]`. If a log filter, alert or test
+matches on the old prefix, update it.
+
+---
+
 ## Upgrading to 4.4.3
 
 No code changes. Two things you may observe after upgrading.
