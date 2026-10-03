@@ -494,7 +494,19 @@ export function cacheMiddleware(options?: {
     // the response to a different payload never is.
     const paramsStr = stableKey(ctx.request.params)
     if (paramsStr === null) return next()
-    const key = `${ctx.requestName}|${paramsStr}`
+    // Who asked and where, not only what: before 5.0.1 the key was name +
+    // params, so user B could be served user A's /me (different
+    // Authorization), and one Request in two createApi instances shared
+    // entries across base URLs. Middleware cannot tell per-call headers from
+    // configured ones, so every header is part of the key; a middleware
+    // OUTSIDE the cache that adds a per-call unique header (a request ID)
+    // therefore makes every call a miss. The request name stays because
+    // GraphQL operations share one URL. Headers iterate sorted and
+    // lower-cased, so the key is stable.
+    const headerPairs: [string, string][] = []
+    ctx.request.headers.forEach((value, name) => headerPairs.push([name, value]))
+    const headerKey = JSON.stringify(headerPairs)
+    const key = `${ctx.requestName}|${ctx.request.method}|${ctx.request.url}|${paramsStr}|${headerKey}`
 
     const cached = store.get<Result<unknown>>(key)
     if (cached !== null) {

@@ -278,7 +278,7 @@ describe('cacheMiddleware', () => {
     vi.stubGlobal('fetch', async () => { callCount++; return mockJsonResponse({}) })
     const cache = cacheMiddleware({ ttl: 60_000 })
     const search = new Request<{ q: string; page: number }, unknown>({
-      method: 'GET',
+      method: 'POST',
       path: '/search',
       middleware: [cache],
     })
@@ -500,7 +500,7 @@ describe('cacheMiddleware', () => {
     const api = createApi({
       baseUrl: '',
       requests: {
-        list: new Request<{ a?: string }, { ok: boolean }>({ method: 'POST', path: '/list', middleware: [cache] }),
+        list: new Request<{ a?: string }, { ok: boolean }>({ method: 'GET', path: '/list', middleware: [cache] }),
       },
     })
 
@@ -598,5 +598,69 @@ describe('cacheMiddleware', () => {
     await api.search('needle')
 
     expect(fetchMock.mock.calls.length).toBe(1) // second call is a cache hit
+  })
+})
+
+describe('cacheMiddleware key: who asked, and where', () => {
+  it('keeps two users apart', async () => {
+    const fetchMock = vi.fn(async (_u: string, init: RequestInit) =>
+      mockJsonResponse({ who: new Headers(init.headers).get('authorization') }))
+    vi.stubGlobal('fetch', fetchMock)
+    const me = new Request<Record<string, never>, { who: string }>({ method: 'GET', path: '/me' })
+    const api = createApi({ baseUrl: 'https://x.test', requests: { me }, middleware: [cacheMiddleware()] })
+
+    const a = await api.me({}, { headers: { Authorization: 'Bearer A' } })
+    const b = await api.me({}, { headers: { Authorization: 'Bearer B' } })
+
+    expect(a.data?.who).toBe('Bearer A')
+    expect(b.data?.who).toBe('Bearer B')
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+  })
+
+  it('keeps two base URLs apart', async () => {
+    const fetchMock = vi.fn(async (url: string) => mockJsonResponse({ url }))
+    vi.stubGlobal('fetch', fetchMock)
+    const me = new Request<Record<string, never>, { url: string }>({ method: 'GET', path: '/me' })
+    const cache = cacheMiddleware()
+    const one = createApi({ baseUrl: 'https://one.test', requests: { me }, middleware: [cache] })
+    const two = createApi({ baseUrl: 'https://two.test', requests: { me }, middleware: [cache] })
+
+    await one.me()
+    const { data } = await two.me()
+
+    expect(data?.url).toBe('https://two.test/me')
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+  })
+
+  it('still hits for an identical call', async () => {
+    const fetchMock = vi.fn(async () => mockJsonResponse({ ok: true }))
+    vi.stubGlobal('fetch', fetchMock)
+    const me = new Request<Record<string, never>, unknown>({ method: 'GET', path: '/me' })
+    const api = createApi({ baseUrl: 'https://x.test', requests: { me }, middleware: [cacheMiddleware()] })
+    await api.me({}, { headers: { Authorization: 'Bearer A' } })
+    await api.me({}, { headers: { Authorization: 'Bearer A' } })
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+  })
+
+  it('keeps two GraphQL operations on one endpoint apart', async () => {
+    const fetchMock = vi.fn(async () => mockJsonResponse({ data: { ok: true } }))
+    vi.stubGlobal('fetch', fetchMock)
+    const a = new Operation<Record<string, never>, unknown>({ operation: 'query A { a }' })
+    const b = new Operation<Record<string, never>, unknown>({ operation: 'query B { b }' })
+    const client = createGraphQL({ endpoint: 'https://x.test/graphql', operations: { a, b }, middleware: [cacheMiddleware()] })
+    await client.a({})
+    await client.b({})
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+  })
+
+  it('misses every time when an outer middleware adds a unique header (documented trade-off)', async () => {
+    const fetchMock = vi.fn(async () => mockJsonResponse({ ok: true }))
+    vi.stubGlobal('fetch', fetchMock)
+    let id = 0
+    const requestId = async (ctx: any, next: any) => { ctx.request.headers.set('X-Request-Id', String(id++)); return next() }
+    const me = new Request<Record<string, never>, unknown>({ method: 'GET', path: '/me' })
+    const api = createApi({ baseUrl: 'https://x.test', requests: { me }, middleware: [requestId, cacheMiddleware()] })
+    await api.me(); await api.me()
+    expect(fetchMock).toHaveBeenCalledTimes(2)
   })
 })

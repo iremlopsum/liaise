@@ -840,7 +840,7 @@ const api = createApi({
 
 **`cacheMiddleware(options?)`**
 
-Caches successful responses in memory, keyed by request name and params. Calls with identical params within the TTL window are served from cache without hitting the network. Each `cacheMiddleware()` call creates an isolated store — different endpoints never share entries.
+Caches successful responses in memory, keyed by request name, method, full URL, params and every request header. Calls that agree on all of those within the TTL window are served from cache without hitting the network. A different token (`Authorization`) or base URL never shares an entry, so one user is never served another's response. The trade-off: a middleware that adds a per-call unique header (a request ID, say) must come *after* `cacheMiddleware` in the middleware array; placed before it, every call carries a fresh header and nothing is ever cached. Each `cacheMiddleware()` call creates an isolated store — different endpoints never share entries.
 
 Params are keyed by content, at every depth: plain data as sorted JSON with `undefined` members dropped (so `{ a: undefined }` and `{}` are one key), anything with `toJSON` by what it returns (a `Date` is its ISO string), and `Map`, `Set` and typed arrays by their entries. A call whose params cannot be keyed soundly — a BigInt, an `ArrayBuffer`, `Blob`, `FormData` or `URLSearchParams`, or an object with no enumerable state such as a class instance holding private fields — is never cached and never served from cache. The rule is the same one `share` uses; see [Sharing](#sharing).
 
