@@ -44,7 +44,7 @@ import { DedupeTracker } from './utils/dedupe.js'
 import { ShareTracker, isAbandoned } from './utils/share.js'
 import { mergeHeaders } from './utils/headers.js'
 import { abortKind, propagatesReason } from './utils/abort-kind.js'
-import { anySignal } from './utils/any-signal.js'
+import { anySignal, releaseSignal } from './utils/any-signal.js'
 import { operationBudget, perCallerBudget } from './utils/budget.js'
 import { stableKey } from './utils/stable-key.js'
 import { createBackstop } from './utils/backstop.js'
@@ -608,6 +608,23 @@ export function createApi<TRequests extends Record<string, Request<any, any>>>(
        * post-execution hook.
        */
       const execute = (sharedSignal?: AbortSignal, onSettled?: () => void): Promise<Result<unknown>> => {
+        // Every merged signal this run creates. Released once the run has a
+        // Result (or its setup failed), so a long-lived caller signal does not
+        // collect one listener per call. Released after settlement, never
+        // when fetch returns: a retrying middleware calls next() again and
+        // must still see a live signal. See releaseSignal in any-signal.ts.
+        //
+        // `own` records a signal only when it is none of its inputs. anySignal
+        // hands back its sole defined input unchanged, and that input may be a
+        // merge some other, still-running call owns: a middleware forwarding
+        // ctx.request.signal into a nested api call makes the nested call's
+        // budget the outer call's own merge. Releasing that would cut the
+        // outer call loose from its caller's signal.
+        const merged: AbortSignal[] = []
+        const own = (signal: AbortSignal | undefined, ...inputs: (AbortSignal | undefined)[]): void => {
+          if (signal && !inputs.includes(signal)) merged.push(signal)
+        }
+        const releaseAll = (): void => { for (const s of merged) releaseSignal(s) }
         try {
           // -----------------------------------------------------------------
           // Step 1: Compose the middleware chain
@@ -687,9 +704,11 @@ export function createApi<TRequests extends Record<string, Request<any, any>>>(
             options.signal,
             sharedSignal !== undefined
           )
+          own(operation, options.signal)
           const callerSignal: AbortSignal | undefined = sharedSignal
             ? anySignal([sharedSignal, operation])
             : operation
+          own(callerSignal, sharedSignal, operation)
           let dedupeController: AbortController | undefined
 
           // -----------------------------------------------------------------
@@ -738,13 +757,17 @@ export function createApi<TRequests extends Record<string, Request<any, any>>>(
               // aborts the real request: the socket stays open with nobody
               // waiting on it.
               if (sharedSignal && ctx.request.signal !== sharedSignal) {
-                ctx.request.signal = anySignal([ctx.request.signal, sharedSignal])
+                const installed = ctx.request.signal
+                ctx.request.signal = anySignal([installed, sharedSignal])
+                own(ctx.request.signal, installed, sharedSignal)
               }
 
               if (request.config.dedupe && !dedupeController) {
-                const tracked = dedupeTracker.track(name, ctx.request.signal ?? callerSignal)
+                const external = ctx.request.signal ?? callerSignal
+                const tracked = dedupeTracker.track(name, external)
                 dedupeController = tracked.controller
                 ctx.request.signal = tracked.signal
+                own(tracked.signal, external)
                 // A supersede is this operation's own cancellation too, so a
                 // call parked in response-side middleware still settles as
                 // 'abort' when a newer call replaces it.
@@ -1165,6 +1188,7 @@ export function createApi<TRequests extends Record<string, Request<any, any>>>(
           // backstop settles on its behalf — we run this exactly once:
           // a. Clear the dedupe tracker for this endpoint (if dedupe is enabled)
           //    so the next call starts fresh without aborting a completed request
+          //    and release this run's merged signals (releaseAll above)
           // b. Fire the onError callback if the final result has an error
           //    (only fires on final error — if retry middleware recovered, no fire)
           // -----------------------------------------------------------------
@@ -1210,6 +1234,11 @@ export function createApi<TRequests extends Record<string, Request<any, any>>>(
               if (preempted) dedupeController.abort()
               dedupeTracker.clear(name, dedupeController)
             }
+
+            // The operation is over on whichever side won, so its merges can
+            // let go of their inputs. Before onError, so a handler that
+            // aborts the caller's signal finds nothing of ours on it.
+            releaseAll()
 
             // Fire the global error handler if the final result has an error.
             // This is the "last chance" error hook — middleware has already had
@@ -1262,13 +1291,14 @@ export function createApi<TRequests extends Record<string, Request<any, any>>>(
             if (result.error && !abandoned) fireOnError(result.error as ApiError)
 
             return result
-          }, (err: unknown) =>
+          }, (err: unknown) => {
             // Only reachable with a signal-shaped value whose `reason` throws —
             // `retry` called with arbitrary arguments, or a fake signal from
             // plain JS — so the backstop could not build its Result. Never
             // throws holds regardless.
-            failedResult(err, undefined, 'abort')
-          )
+            releaseAll()
+            return failedResult(err, undefined, 'abort')
+          })
         } catch (err) {
           // -----------------------------------------------------------------
           // Catch synchronous errors
@@ -1293,6 +1323,9 @@ export function createApi<TRequests extends Record<string, Request<any, any>>>(
           // the caller has ALSO aborted around the same time — silently
           // reclassifying a real setup failure as 'abort' just because a
           // signal happens to be aborted would hide it from onError.
+          // Setup may have merged signals before it threw; nothing will
+          // settle this run later, so release them now.
+          releaseAll()
           return Promise.resolve(failedResult(err, undefined, 'network'))
         }
       }
@@ -1414,6 +1447,12 @@ export function createApi<TRequests extends Record<string, Request<any, any>>>(
             if (done) return
             done = true
             perCaller.removeEventListener('abort', onAbort)
+            // perCaller may be a merge of this caller's signal and its own
+            // timeout; it is this caller's alone, so it goes as soon as this
+            // caller has its answer. Unless it IS the caller's signal (no
+            // per-call timeout): that may be another call's merge — see `own`
+            // in execute().
+            if (perCaller !== options.signal) releaseSignal(perCaller)
             resolve(r)
           }
 
