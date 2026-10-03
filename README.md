@@ -881,7 +881,7 @@ Request bodies are automatically serialized based on the input type. The `Conten
 | `ReadableStream`  | as-is (streaming upload; `duplex: 'half'` is set for you) | `application/octet-stream` |
 | Plain object      | `JSON.stringify()` | `application/json`                    |
 
-A `ReadableStream` body can be sent once. A retry (`retryMiddleware`, `result.retry()`) returns an error Result telling you to read the stream into a `Blob` or `ArrayBuffer` first.
+A `ReadableStream` body can be sent once. A retry (`retryMiddleware`, `result.retry()`) returns an error Result telling you to read the stream into a `Blob` or `ArrayBuffer` first. Under `retryMiddleware` that is the Result you end up with: after a 5xx, the final Result is the "cannot resend" `TypeError` (status 0), so the original 503 is not in it.
 
 #### What params can be
 
@@ -1352,7 +1352,7 @@ Type safety comes from inference, not annotation. Define `Request<TParams, TResp
 
 ### Runtime-agnostic
 
-No assumptions about Node.js, browsers, or any specific runtime. If your environment has `fetch`, the library works -- browsers, Node.js 20+, Bun, Deno, React Native (its built-in `fetch`; not tested in CI), Cloudflare Workers, edge runtimes.
+No assumptions about Node.js, browsers, or any specific runtime. If your environment has `fetch`, the library works -- browsers, Node.js 20+, Bun, Deno, React Native (its built-in `fetch`; not tested in CI), Cloudflare Workers, edge runtimes. Where `AbortSignal.timeout` is missing (React Native's Hermes), `timeout` falls back to `AbortController` plus `setTimeout`; the failure is `kind: 'timeout'` where the runtime's `AbortController` carries abort reasons, and possibly `'abort'` where it does not. Not tested on a device.
 
 ### Framework-agnostic
 

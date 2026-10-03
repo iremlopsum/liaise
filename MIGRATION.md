@@ -35,7 +35,8 @@ unique header (a request ID) makes every call a miss; put it after
 `cacheMiddleware` in the `middleware` array.
 
 **Repeated header names within one source are joined.** A header-pairs array
-with two entries for one name now sends `a, b`, where the last used to win. A
+with two entries for one name now sends `a, b`, where the last used to win; so
+does a record with case-variant duplicates (`{ Accept: 'a', accept: 'b' }`). A
 later source (per-call over request over config) still replaces an earlier one.
 
 **After a call settles, a later abort no longer reaches it.** Aborting the

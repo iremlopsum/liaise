@@ -53,11 +53,14 @@ they cannot. See [MIGRATION.md](./MIGRATION.md#upgrading-to-501).
   `getTime()`. It is still refused.
 - **A header name repeated within one source is joined, not overwritten.** Two
   entries for one name in an array of header pairs kept only the last; they are now
-  joined as `a, b`, as the platform's `Headers` does. A later source still
-  replaces an earlier one.
+  joined as `a, b`, as the platform's `Headers` does. So are case-variant
+  duplicates inside one record (`{ Accept: 'a', accept: 'b' }` sends `a, b`). A
+  later source still replaces an earlier one.
 - **`timeout` works where `AbortSignal.timeout` does not exist** (React Native's
-  Hermes). A fallback built from `AbortController` and `setTimeout` is used, and
-  the result is still `kind: 'timeout'`. Nothing global is patched.
+  Hermes). A fallback built from `AbortController` and `setTimeout` is used. The
+  result is `kind: 'timeout'` where the runtime's `AbortController` carries abort
+  reasons (Node's does; this is what the tests cover), and possibly `'abort'`
+  where it ignores them. Not tested on a device. Nothing global is patched.
 - **A call with no params is no longer keyed the same as a bare `[undefined]`
   param.** For `share` and `cacheMiddleware` the two collided, so one could be
   handed the other's response.
