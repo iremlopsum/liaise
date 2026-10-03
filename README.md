@@ -874,7 +874,11 @@ Request bodies are automatically serialized based on the input type. The `Conten
 | `URLSearchParams` | as-is              | `application/x-www-form-urlencoded`   |
 | `Blob`            | as-is              | `application/octet-stream`            |
 | `ArrayBuffer`     | as-is              | `application/octet-stream`            |
+| Typed array, `DataView`, `Buffer` | as-is (sent as binary) | `application/octet-stream` |
+| `ReadableStream`  | as-is (streaming upload; `duplex: 'half'` is set for you) | `application/octet-stream` |
 | Plain object      | `JSON.stringify()` | `application/json`                    |
+
+A `ReadableStream` body can be sent once. A retry (`retryMiddleware`, `result.retry()`) returns an error Result telling you to read the stream into a `Blob` or `ArrayBuffer` first.
 
 Header merge precedence (most specific wins):
 

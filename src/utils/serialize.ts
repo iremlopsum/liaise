@@ -1,3 +1,5 @@
+import { isReadableStream } from './special-body.js'
+
 /**
  * Represents the result of serializing a request body for use with the Fetch API.
  *
@@ -33,6 +35,8 @@ export interface SerializeResult {
  * | `URLSearchParams` | as-is                | `application/x-www-form-urlencoded`  |
  * | `Blob`            | as-is                | `application/octet-stream`           |
  * | `ArrayBuffer`     | as-is                | `application/octet-stream`           |
+ * | `ArrayBufferView` (typed array, `DataView`, `Buffer`) | as-is | `application/octet-stream` |
+ * | `ReadableStream`  | as-is                | `application/octet-stream`           |
  * | Plain object      | `JSON.stringify()`   | `application/json`                   |
  *
  * @param input - The raw body value to serialize. Can be any type — the function
@@ -93,6 +97,20 @@ export function serializeBody(input: unknown): SerializeResult {
   // ArrayBuffers are raw binary data, similar to Blobs but without MIME metadata.
   // Same treatment as Blob — pass it through and mark it as octet-stream.
   if (input instanceof ArrayBuffer) {
+    return { body: input, contentType: 'application/octet-stream' }
+  }
+
+  // --- Typed arrays, DataView, Node's Buffer: pass through as binary ---
+  // fetch accepts any ArrayBufferView as a body. Before 5.0.1 these fell
+  // through to JSON.stringify, which encodes a Uint8Array as {"0":1,"1":2,...}.
+  if (ArrayBuffer.isView(input)) {
+    return { body: input as BodyInit, contentType: 'application/octet-stream' }
+  }
+
+  // --- ReadableStream: a streaming upload ---
+  // Sent as is. The core fetch adds `duplex: 'half'`, and refuses a second
+  // attempt with the same stream (a stream can be read once).
+  if (isReadableStream(input)) {
     return { body: input, contentType: 'application/octet-stream' }
   }
 

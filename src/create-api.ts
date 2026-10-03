@@ -48,7 +48,7 @@ import { anySignal } from './utils/any-signal.js'
 import { operationBudget, perCallerBudget } from './utils/budget.js'
 import { stableKey } from './utils/stable-key.js'
 import { createBackstop } from './utils/backstop.js'
-import { isSpecialBody } from './utils/special-body.js'
+import { isSpecialBody, isReadableStream } from './utils/special-body.js'
 import { runSchema } from './utils/validate.js'
 import type { SchemaOutcome } from './utils/validate.js'
 import type { ApiConfig, CallOptions, ErrorResult, Middleware, MiddlewareContext, Result, ResponseType } from './types.js'
@@ -141,6 +141,14 @@ type Api<TRequests extends Record<string, Request<any, any>>> = {
  * normalizes it to `null` for `error.body` instead: a failure is already
  * being reported there, and the empty body is only diagnostic.
  */
+/**
+ * Every ReadableStream body already handed to fetch. A stream can be read
+ * once: a second attempt (retryMiddleware, result.retry(), a middleware that
+ * calls next() twice) would otherwise send an empty or broken body. A WeakSet
+ * so a finished stream is not kept alive by this record.
+ */
+const sentStreams = new WeakSet<ReadableStream>()
+
 const EMPTY_JSON_BODY: unique symbol = Symbol('liaise.emptyJsonBody')
 
 /**
@@ -764,7 +772,19 @@ export function createApi<TRequests extends Record<string, Request<any, any>>>(
               // typically have no body, and setting body to null/undefined
               // on those methods may cause issues with some fetch implementations.
               if (ctx.request.body !== null && ctx.request.body !== undefined) {
-                fetchInit.body = ctx.request.body as BodyInit
+                const body = ctx.request.body
+                if (isReadableStream(body)) {
+                  if (sentStreams.has(body)) {
+                    throw new TypeError(
+                      'A ReadableStream body can only be sent once, so retry() and retryMiddleware cannot resend it. ' +
+                      'If this call may be retried, read the stream into a Blob or ArrayBuffer first.'
+                    )
+                  }
+                  sentStreams.add(body)
+                  // Required by Node's fetch and Chrome for a streaming request body.
+                  ;(fetchInit as RequestInit & { duplex: 'half' }).duplex = 'half'
+                }
+                fetchInit.body = body as BodyInit
               }
 
               const response = await fetch(ctx.request.url, fetchInit)

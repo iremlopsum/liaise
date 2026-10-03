@@ -1,7 +1,16 @@
 /**
+ * True for a WHATWG `ReadableStream`. Guarded with `typeof` because a runtime
+ * without streams has no global to `instanceof` against.
+ */
+export function isReadableStream(value: unknown): value is ReadableStream {
+  return typeof ReadableStream !== 'undefined' && value instanceof ReadableStream
+}
+
+/**
  * True when `value` is a body type that cannot be decomposed into key-value
- * pairs — `FormData`, `Blob`, `ArrayBuffer`, `URLSearchParams`, or a raw
- * string.
+ * pairs — `FormData`, `Blob`, `ArrayBuffer`, any `ArrayBufferView` (typed
+ * arrays, `DataView`, Node's `Buffer`), a `ReadableStream`, `URLSearchParams`,
+ * or a raw string.
  *
  * Used by `create-api.ts`'s URL-building step, which skips path/query
  * decomposition for these entirely and hands them straight to
@@ -20,6 +29,8 @@ export function isSpecialBody(value: unknown): boolean {
     value instanceof FormData ||
     value instanceof Blob ||
     value instanceof ArrayBuffer ||
+    ArrayBuffer.isView(value) ||
+    isReadableStream(value) ||
     value instanceof URLSearchParams ||
     typeof value === 'string'
   )
