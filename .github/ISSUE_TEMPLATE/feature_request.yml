@@ -1,0 +1,26 @@
+name: Feature request
+description: Suggest something liaise could do.
+labels: [enhancement]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        liaise deliberately stays small, so start with the problem rather than the API you'd like. Some things are better solved with middleware, and the answer may be a recipe instead of a new option.
+  - type: textarea
+    id: problem
+    attributes:
+      label: What are you trying to do?
+      description: The situation and what gets in your way today.
+    validations:
+      required: true
+  - type: textarea
+    id: today
+    attributes:
+      label: How do you handle it now?
+      description: Your current workaround, if you have one. Code is welcome.
+      render: ts
+  - type: textarea
+    id: idea
+    attributes:
+      label: What would help?
+      description: Optional. How you imagine it working.

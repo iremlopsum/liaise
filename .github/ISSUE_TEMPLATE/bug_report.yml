@@ -1,0 +1,43 @@
+name: Bug report
+description: Something in liaise behaves differently from what the README says.
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting. A small piece of code that shows the problem is the fastest way to a fix.
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened?
+      description: What you expected, and what you got instead.
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Code that shows it
+      description: The `Request` definition, the call, and how you read the result. Remove anything that isn't needed to see the bug.
+      render: ts
+    validations:
+      required: true
+  - type: textarea
+    id: result
+    attributes:
+      label: The result you got
+      description: The `error` object (its `kind`, `status` and `body`) or the `data` you received.
+  - type: input
+    id: version
+    attributes:
+      label: liaise version
+      placeholder: "5.0.0"
+    validations:
+      required: true
+  - type: input
+    id: runtime
+    attributes:
+      label: Where it runs
+      description: Browser, Node, Bun, Deno, Cloudflare Workers, React Native… and its version.
+      placeholder: "Node 22.18, Chrome 140"
+    validations:
+      required: true
