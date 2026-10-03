@@ -889,7 +889,7 @@ A `ReadableStream` body can be sent once. A retry (`retryMiddleware`, `result.re
 | -------- | ------------ |
 | Plain object | Decomposed into path tokens, query string and body |
 | `Map` with string keys | Same as the object it spells |
-| Class instance with fields | Same as a plain object |
+| Class instance with fields | Same as a plain object (decomposed by those fields even if the class also defines `toJSON()`; `toJSON()` is used only when there are no own fields) |
 | Class instance with only `toJSON()` | Sent as its JSON (body only; refused on a request whose params go in the query string) |
 | Typed array, `DataView`, `Buffer`, `ReadableStream` | Sent as the body, as in the table above (refused on a request whose params go in the query string) |
 | `Set`, a bare `Date`, a `Map` with non-string keys, a class with no fields | Refused: an error Result (`kind: 'network'`) naming the type. Nothing is sent. |

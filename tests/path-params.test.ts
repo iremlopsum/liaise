@@ -397,6 +397,11 @@ describe('path tokens with regex-special param keys', () => {
     const { url } = buildUrl('https://x.test', '/a/:idExtra/:id', { id: '1', idExtra: '2' }, false)
     expect(url).toBe('https://x.test/a/2/1')
   })
+
+  it('a key with non-word characters no longer substitutes a :a-b token', () => {
+    // The token grammar is [a-zA-Z0-9_]: ':a-b' is the token 'a' followed by '-b'.
+    expect(() => buildUrl('https://x.test', '/x/:a-b', { 'a-b': 'v' }, false)).toThrow(TypeError)
+  })
 })
 
 describe('Date in a query string', () => {

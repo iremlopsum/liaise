@@ -20,7 +20,7 @@ import type { RequestConfig, ResponseType, StandardSchemaV1, InferOutput } from 
  * The characters a path token name may contain.
  *
  * This list is not arbitrary and must not be "simplified": it mirrors
- * `buildUrl`'s substitution pattern, `:${key}(?=[^a-zA-Z0-9_]|$)`
+ * the `/:([a-zA-Z0-9_]+)/g` template scan in `buildUrl`
  * (src/utils/path-params.ts). If the two ever disagree, the types describe a
  * URL the runtime does not build.
  */

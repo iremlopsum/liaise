@@ -7,6 +7,44 @@ For the full record of what changed in each release, see [CHANGELOG.md](./CHANGE
 
 ---
 
+## Upgrading to 5.0.1
+
+No code changes for most callers. Five things you may observe.
+
+**Binary bodies arrive as binary.** A `Uint8Array`, other typed array, `DataView`
+or `Buffer` used to be sent as a JSON index map (`{"0":1,"1":2}`); it is now the
+raw bytes, with `Content-Type: application/octet-stream`. A `ReadableStream` is
+sent as a streaming upload and can be sent once: `retryMiddleware` and
+`result.retry()` return an error Result for it. If a call with a stream may be
+retried, read it into a `Blob` or `ArrayBuffer` first. If your server decoded the
+old index map, it needs to read bytes now.
+
+**Calls that used to send nothing now send, or fail with a Result.** A `Map` with
+string keys and a class with only `toJSON()` are now sent. A `Set`, a bare `Date`,
+a `Map` with non-string keys and a class with no fields return an error Result
+(`kind: 'network'`, `body` a `TypeError` naming the type). A typed array, stream
+or `toJSON`-only class on a GET is refused. If you were relying on the empty body,
+pass the object you meant: `{ ids: [...set] }`, `{ since: date.toISOString() }`.
+
+**`cacheMiddleware` entries are per URL and per header set.** The key now includes
+method, URL path and every request header except `Content-Type`, so a different
+`Authorization` or base URL never shares an entry. A warm cache is cold once after
+upgrading. A middleware placed before `cacheMiddleware` that adds a per-call
+unique header (a request ID) makes every call a miss; put it after
+`cacheMiddleware` in the `middleware` array.
+
+**Repeated header names within one source are joined.** A header-pairs array
+with two entries for one name now sends `a, b`, where the last used to win. A
+later source (per-call over request over config) still replaces an earlier one.
+
+**Two edge behaviours.** After a call settles, aborting the caller's signal no
+longer reaches that call's `ctx.request.signal`, so fire-and-forget middleware
+work holding it is not cancelled by the caller; keep your own controller if you
+need that. And a param key with non-word characters (`a-b`) no longer fills a
+`:a-b` path token; path tokens are `[a-zA-Z0-9_]`, so rename the token and key.
+
+---
+
 ## Upgrading to 5.0.0
 
 The package has a new name: **`@iremlopsum/apify` is now `liaise`**. Nothing
