@@ -278,7 +278,7 @@ describe('cacheMiddleware', () => {
     vi.stubGlobal('fetch', async () => { callCount++; return mockJsonResponse({}) })
     const cache = cacheMiddleware({ ttl: 60_000 })
     const search = new Request<{ q: string; page: number }, unknown>({
-      method: 'POST',
+      method: 'GET',
       path: '/search',
       middleware: [cache],
     })
@@ -500,7 +500,7 @@ describe('cacheMiddleware', () => {
     const api = createApi({
       baseUrl: '',
       requests: {
-        list: new Request<{ a?: string }, { ok: boolean }>({ method: 'GET', path: '/list', middleware: [cache] }),
+        list: new Request<{ a?: string }, { ok: boolean }>({ method: 'POST', path: '/list', middleware: [cache] }),
       },
     })
 

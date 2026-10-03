@@ -501,12 +501,19 @@ export function cacheMiddleware(options?: {
     // configured ones, so every header is part of the key; a middleware
     // OUTSIDE the cache that adds a per-call unique header (a request ID)
     // therefore makes every call a miss. The request name stays because
-    // GraphQL operations share one URL. Headers iterate sorted and
-    // lower-cased, so the key is stable.
+    // GraphQL operations share one URL. Two exclusions keep 4.4.3's
+    // content-keyed guarantees: the query string is dropped (GET params live
+    // there, and stableKey already covers them order-insensitively, whereas
+    // the URL spells them in call order), and Content-Type is dropped (it is
+    // derived from the params, so {a: undefined} vs {} must not differ by it).
+    // Headers iterate sorted and lower-cased, so the key is stable.
     const headerPairs: [string, string][] = []
-    ctx.request.headers.forEach((value, name) => headerPairs.push([name, value]))
+    ctx.request.headers.forEach((value, name) => {
+      if (name !== 'content-type') headerPairs.push([name, value])
+    })
     const headerKey = JSON.stringify(headerPairs)
-    const key = `${ctx.requestName}|${ctx.request.method}|${ctx.request.url}|${paramsStr}|${headerKey}`
+    const urlPath = ctx.request.url.split('?')[0]
+    const key = `${ctx.requestName}|${ctx.request.method}|${urlPath}|${paramsStr}|${headerKey}`
 
     const cached = store.get<Result<unknown>>(key)
     if (cached !== null) {
