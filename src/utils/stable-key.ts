@@ -35,8 +35,9 @@
  *   returns `undefined` the member is dropped, as JSON does.
  * - `Map` → `Map{k:v,...}` with entries sorted by key; `Set` → `Set[...]` in
  *   insertion order; typed arrays and `DataView` → `Uint8Array[1,2]` etc. The
- *   tag matters: a Map with entry `a: 1` does not send the same bytes as
- *   `{ a: 1 }`, so it must not share its key.
+ *   tag keeps a Map apart from an object with the same entries. A
+ *   string-keyed Map is sent as that object, so over-separating them costs
+ *   one extra miss and is harmless; sharing them wrongly would not be.
  * - arrays → `[...]`; plain objects → sorted, JSON-quoted keys. Any other
  *   object with own enumerable keys is keyed the same way, since that is what
  *   `JSON.stringify` sends for it.

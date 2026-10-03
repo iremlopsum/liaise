@@ -91,6 +91,19 @@ describe('error.request.url when the URL could never be built', () => {
     expect(r.error).not.toBeNull()
     expect(r.error?.request.url).toBe('https://api.test/search')
   })
+
+  it('reports the un-substituted template when the call is refused before a URL exists', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('{}', { status: 200 })))
+    const api = createApi({
+      baseUrl: 'https://api.test',
+      requests: {
+        put: new Request<Record<string, unknown>, unknown>({ method: 'GET', path: '/users/:id' }),
+      },
+    })
+    const r = await api.put(new Set([1]))
+    expect(r.error).not.toBeNull()
+    expect(r.error?.request.url).toBe('https://api.test/users/:id')
+  })
 })
 
 describe('error.request.url for a fragment-bearing baseUrl', () => {

@@ -268,10 +268,10 @@ export function buildUrl(baseUrl: string, path: string, params: Record<string, u
   // ship the literal token in the URL AND duplicate the value as a query
   // param — a silently wrong request that looks plausible in a network tab.
   //
-  // The substitution loop above builds its pattern from the key directly and
-  // accepts any key (including one starting with a digit, e.g. `:2fa`), so
-  // detection must accept the same character set or a mismatched token could
-  // still slip through undetected.
+  // Substitution above scans the template for tokens using the documented
+  // grammar `[a-zA-Z0-9_]` (including one starting with a digit, e.g. `:2fa`),
+  // and this detection uses the same grammar, so a token the scan reads but no
+  // param fills cannot slip through undetected.
   //
   // A token must BEGIN a path segment. Splitting on '/' and anchoring the
   // match to the start of each segment expresses that without a lookbehind:
