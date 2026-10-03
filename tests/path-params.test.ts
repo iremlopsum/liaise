@@ -380,3 +380,33 @@ describe('the URL that actually reaches fetch', () => {
     expect(globalThis.fetch).not.toHaveBeenCalled()
   })
 })
+
+describe('path tokens with regex-special param keys', () => {
+  it('a key containing a dot does not match another token', () => {
+    const { url, remaining } = buildUrl('https://x.test', '/x/:aXb', { 'a.b': 'v', aXb: 'real' }, false)
+    expect(url).toBe('https://x.test/x/real')
+    expect(remaining).toEqual({ 'a.b': 'v' })
+  })
+
+  it('still substitutes a repeated token everywhere', () => {
+    const { url } = buildUrl('https://x.test', '/orgs/:id/members/:id', { id: '7' }, false)
+    expect(url).toBe('https://x.test/orgs/7/members/7')
+  })
+
+  it('does not let :id match inside :idExtra', () => {
+    const { url } = buildUrl('https://x.test', '/a/:idExtra/:id', { id: '1', idExtra: '2' }, false)
+    expect(url).toBe('https://x.test/a/2/1')
+  })
+
+  it('a key with non-word characters no longer substitutes a :a-b token', () => {
+    // The token grammar is [a-zA-Z0-9_]: ':a-b' is the token 'a' followed by '-b'.
+    expect(() => buildUrl('https://x.test', '/x/:a-b', { 'a-b': 'v' }, false)).toThrow(TypeError)
+  })
+})
+
+describe('Date in a query string', () => {
+  it('refuses a Date in a query string with a message that says Date', () => {
+    expect(() => buildUrl('https://x.test', '/events', { since: new Date(0) }, true))
+      .toThrow(/A Date cannot be sent in a query string as is/)
+  })
+})

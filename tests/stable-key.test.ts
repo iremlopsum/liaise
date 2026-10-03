@@ -22,8 +22,13 @@ describe('stableKey — unchanged from stableStringify for plain data', () => {
     expect(stableKey(null)).toBe('null')
   })
 
-  it('keys a top-level undefined as [undefined]: a call with no params is keyable', () => {
-    expect(stableKey(undefined)).toBe('[undefined]')
+  it('keys a call with no params apart from a bare [undefined] param', () => {
+    expect(stableKey(undefined)).not.toBe(stableKey([undefined]))
+    expect(stableKey(undefined)).not.toBeNull()
+  })
+
+  it('keys a top-level undefined as the empty string: a call with no params is keyable', () => {
+    expect(stableKey(undefined)).toBe('')
   })
 
   it('sorts object keys', () => {

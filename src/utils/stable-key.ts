@@ -17,8 +17,9 @@
  *
  * Keys are built by content, in the order the rules are checked:
  *
- * - `undefined` at the top level → `[undefined]` (a call with no params is
- *   keyable). An `undefined` *object member* is dropped, since both transports
+ * - `undefined` at the top level → `''` (a call with no params is keyable,
+ *   and distinct from a bare `[undefined]` array param). An `undefined`
+ *   *object member* is dropped, since both transports
  *   omit it, so `{ a: undefined }` and `{}` key the same. As an array element,
  *   Map key/value or Set element it keys as the unquoted token `undefined`
  *   (a query string sends `ids=undefined`, not `ids=null`), and so does a
@@ -34,8 +35,9 @@
  *   returns `undefined` the member is dropped, as JSON does.
  * - `Map` → `Map{k:v,...}` with entries sorted by key; `Set` → `Set[...]` in
  *   insertion order; typed arrays and `DataView` → `Uint8Array[1,2]` etc. The
- *   tag matters: a Map with entry `a: 1` does not send the same bytes as
- *   `{ a: 1 }`, so it must not share its key.
+ *   tag keeps a Map apart from an object with the same entries. A
+ *   string-keyed Map is sent as that object, so over-separating them costs
+ *   one extra miss and is harmless; sharing them wrongly would not be.
  * - arrays → `[...]`; plain objects → sorted, JSON-quoted keys. Any other
  *   object with own enumerable keys is keyed the same way, since that is what
  *   `JSON.stringify` sends for it.
@@ -57,7 +59,10 @@
  * Never throws: a throwing getter or `toJSON` becomes `null`.
  */
 export function stableKey(value: unknown): string | null {
-  if (value === undefined) return '[undefined]'
+  // The empty string: no visited value can produce it (a string keys as its
+  // JSON, at least `""`). Before 5.0.1 this was '[undefined]', which is also
+  // exactly what a bare [undefined] array param keys as.
+  if (value === undefined) return ''
   try {
     const out = visit(value, '', new Set())
     return out === undefined ? null : out

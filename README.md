@@ -10,8 +10,8 @@ Runtime-agnostic, type-safe HTTP client for REST and GraphQL. Built on standard 
 - **Never throws** — every call returns `{ data, error, response, retry }`, no try/catch required
 - **Composable middleware** — retry, cache, dedupe, auth, logging — applied at global, per-endpoint, or per-call level
 - **Types by inference** — declare params and response once on the endpoint definition; types flow to every call site automatically
-- **Runtime-agnostic** — Node.js 20+, browsers, Bun, Deno, Cloudflare Workers, React Native — any environment with `fetch`
-- **Tiny** — about **2.9 kB gzipped** for a REST-only import, 4.4 kB for everything including GraphQL and all middleware; tree-shaking drops what you do not import
+- **Runtime-agnostic** — Node.js 20+, browsers, Bun, Deno, Cloudflare Workers, React Native (its built-in `fetch`; not tested in CI) — any environment with `fetch`
+- **Tiny** — about **5.6 kB gzipped** for a REST-only import, 6.7 kB for the core entry, 7.8 kB with all middleware (measured by `npm run size`); tree-shaking drops what you do not import
 
 ```
 npm install liaise
@@ -443,12 +443,15 @@ never going to reach the server.
 | `{ filter: null }`            | _(omitted)_                 |
 | `{ filter: undefined }`       | _(omitted)_                 |
 | `{ meta: { nested: true } }`  | **TypeError** (see below)   |
+| `{ since: new Date() }`       | **TypeError**: convert it first (`toISOString()` or `getTime()`) |
 
 **Arrays** use repeated keys (`tags=a&tags=b`), which is the most widely supported format across server frameworks.
 
 **`null` and `undefined`** values are silently omitted from the query string.
 
 **Nested objects** throw a `TypeError` with a descriptive message. Flatten the structure before passing. This is intentional -- there is no universal standard for serializing nested objects in query strings (brackets, dots, JSON), so the library refuses to guess.
+
+**A `Date`** is refused too, with a message that names it. ISO 8601 and epoch milliseconds are both common on real APIs, so convert it yourself: `since: date.toISOString()` or `since: date.getTime()`.
 
 ### Result
 
@@ -840,7 +843,7 @@ const api = createApi({
 
 **`cacheMiddleware(options?)`**
 
-Caches successful responses in memory, keyed by request name and params. Calls with identical params within the TTL window are served from cache without hitting the network. Each `cacheMiddleware()` call creates an isolated store — different endpoints never share entries.
+Caches successful responses in memory, keyed by request name, method, the full URL, params and every request header except `Content-Type` (which is derived from the params). The URL's query string is part of the key with its pairs sorted by name, so `?a=1&b=2` and `?b=2&a=1` are one entry, while `?key=A` and `?key=B` (or a `?lang=de` appended by a middleware before the cache) are not. Calls that agree on all of those within the TTL window are served from cache without hitting the network. A different `Authorization` or any other header (except `Content-Type`), a different base URL, path or query value gets its own entry, so one user is never served another's response; the same query params in a different order share one. The query is sorted by raw (undecoded) name, keeping the order of repeated names. The trade-off: a middleware that adds a per-call unique header (a request ID, say) must come *after* `cacheMiddleware` in the middleware array; placed before it, every call carries a fresh header and nothing is ever cached. Each `cacheMiddleware()` call creates an isolated store — different endpoints never share entries.
 
 Params are keyed by content, at every depth: plain data as sorted JSON with `undefined` members dropped (so `{ a: undefined }` and `{}` are one key), anything with `toJSON` by what it returns (a `Date` is its ISO string), and `Map`, `Set` and typed arrays by their entries. A call whose params cannot be keyed soundly — a BigInt, an `ArrayBuffer`, `Blob`, `FormData` or `URLSearchParams`, or an object with no enumerable state such as a class instance holding private fields — is never cached and never served from cache. The rule is the same one `share` uses; see [Sharing](#sharing).
 
@@ -874,7 +877,24 @@ Request bodies are automatically serialized based on the input type. The `Conten
 | `URLSearchParams` | as-is              | `application/x-www-form-urlencoded`   |
 | `Blob`            | as-is              | `application/octet-stream`            |
 | `ArrayBuffer`     | as-is              | `application/octet-stream`            |
+| Typed array, `DataView`, `Buffer` | as-is (sent as binary) | `application/octet-stream` |
+| `ReadableStream`  | as-is (streaming upload; `duplex: 'half'` is set for you) | `application/octet-stream` |
 | Plain object      | `JSON.stringify()` | `application/json`                    |
+
+A `ReadableStream` body can be sent once. A retry (`retryMiddleware`, `result.retry()`) returns an error Result telling you to read the stream into a `Blob` or `ArrayBuffer` first. Under `retryMiddleware` that is the Result you end up with: after a 5xx, the final Result is the "cannot resend" `TypeError` (status 0), so the original 503 is not in it.
+
+#### What params can be
+
+| You pass | What happens |
+| -------- | ------------ |
+| Plain object | Decomposed into path tokens, query string and body |
+| `Map` with string keys | Same as the object it spells |
+| Class instance with fields | Same as a plain object (decomposed by those fields even if the class also defines `toJSON()`; `toJSON()` is used only when there are no own fields) |
+| Class instance with only `toJSON()` | Sent as its JSON (body only; refused on a request whose params go in the query string) |
+| Typed array, `DataView`, `Buffer`, `ReadableStream` | Sent as the body, as in the table above (refused on a request whose params go in the query string) |
+| `Set`, a bare `Date`, a `Map` with non-string keys, a class with no fields | Refused: an error Result (`kind: 'network'`) naming the type. Nothing is sent. |
+
+A `Map`, `Set` or class with private state nested inside a JSON body is sent as `{}`, because that is what `JSON.stringify` does. Convert it first.
 
 Header merge precedence (most specific wins):
 
@@ -1332,7 +1352,7 @@ Type safety comes from inference, not annotation. Define `Request<TParams, TResp
 
 ### Runtime-agnostic
 
-No assumptions about Node.js, browsers, or any specific runtime. If your environment has `fetch`, the library works -- browsers, Node.js 20+, Bun, Deno, React Native, Cloudflare Workers, edge runtimes.
+No assumptions about Node.js, browsers, or any specific runtime. If your environment has `fetch`, the library works -- browsers, Node.js 20+, Bun, Deno, React Native (its built-in `fetch`; not tested in CI), Cloudflare Workers, edge runtimes. Where `AbortSignal.timeout` is missing (React Native's Hermes), `timeout` falls back to `AbortController` plus `setTimeout`; the failure is `kind: 'timeout'` where the runtime's `AbortController` carries abort reasons, and possibly `'abort'` where it does not. Not tested on a device.
 
 ### Framework-agnostic
 

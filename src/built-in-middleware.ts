@@ -494,7 +494,44 @@ export function cacheMiddleware(options?: {
     // the response to a different payload never is.
     const paramsStr = stableKey(ctx.request.params)
     if (paramsStr === null) return next()
-    const key = `${ctx.requestName}|${paramsStr}`
+    // Who asked and where, not only what: before 5.0.1 the key was name +
+    // params, so user B could be served user A's /me (different
+    // Authorization), and one Request in two createApi instances shared
+    // entries across base URLs. Middleware cannot tell per-call headers from
+    // configured ones, so every header is part of the key; a middleware
+    // OUTSIDE the cache that adds a per-call unique header (a request ID)
+    // therefore makes every call a miss. The request name stays because
+    // GraphQL operations share one URL. The URL's query string stays in the
+    // key, with its pairs sorted (a stable sort, so repeated keys keep their
+    // order): a baseUrl like `https://x.test?key=A`, or a middleware before
+    // the cache appending `?lang=de`, must not share entries, while GET params
+    // that stableKey already covers order-insensitively must not differ by the
+    // order the URL spells them in. Content-Type is the one exclusion (it is
+    // derived from the params, so {a: undefined} vs {} must not differ by it).
+    // Headers iterate sorted and lower-cased, so the key is stable.
+    const headerPairs: [string, string][] = []
+    ctx.request.headers.forEach((value, name) => {
+      if (name !== 'content-type') headerPairs.push([name, value])
+    })
+    const headerKey = JSON.stringify(headerPairs)
+    // Dependency-free: React Native's URLSearchParams polyfill has no sort().
+    // Raw segments sorted by raw name; Array.prototype.sort is stable, so
+    // repeated names keep their order and different encodings stay distinct.
+    const fullUrl = ctx.request.url
+    const qIndex = fullUrl.indexOf('?')
+    let urlKey = fullUrl
+    if (qIndex !== -1) {
+      const hashIndex = fullUrl.indexOf('#', qIndex)
+      const rawQuery = fullUrl.slice(qIndex + 1, hashIndex === -1 ? undefined : hashIndex)
+      const segments = rawQuery.split('&').filter(seg => seg !== '')
+      const nameOf = (seg: string): string => seg.split('=')[0]
+      segments.sort((x, y) => {
+        const nx = nameOf(x), ny = nameOf(y)
+        return nx < ny ? -1 : nx > ny ? 1 : 0
+      })
+      urlKey = `${fullUrl.slice(0, qIndex)}?${segments.join('&')}`
+    }
+    const key = `${ctx.requestName}|${ctx.request.method}|${urlKey}|${paramsStr}|${headerKey}`
 
     const cached = store.get<Result<unknown>>(key)
     if (cached !== null) {

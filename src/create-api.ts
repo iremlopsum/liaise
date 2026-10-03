@@ -44,11 +44,12 @@ import { DedupeTracker } from './utils/dedupe.js'
 import { ShareTracker, isAbandoned } from './utils/share.js'
 import { mergeHeaders } from './utils/headers.js'
 import { abortKind, propagatesReason } from './utils/abort-kind.js'
-import { anySignal } from './utils/any-signal.js'
+import { anySignal, releaseSignal } from './utils/any-signal.js'
 import { operationBudget, perCallerBudget } from './utils/budget.js'
 import { stableKey } from './utils/stable-key.js'
 import { createBackstop } from './utils/backstop.js'
-import { isSpecialBody } from './utils/special-body.js'
+import { isReadableStream } from './utils/special-body.js'
+import { classifyParams } from './utils/classify-params.js'
 import { runSchema } from './utils/validate.js'
 import type { SchemaOutcome } from './utils/validate.js'
 import type { ApiConfig, CallOptions, ErrorResult, Middleware, MiddlewareContext, Result, ResponseType } from './types.js'
@@ -131,6 +132,14 @@ type Api<TRequests extends Record<string, Request<any, any>>> = {
 // =============================================================================
 
 /**
+ * Every ReadableStream body already handed to fetch. A stream can be read
+ * once: a second attempt (retryMiddleware, result.retry(), a middleware that
+ * calls next() twice) would otherwise send an empty or broken body. A WeakSet
+ * so a finished stream is not kept alive by this record.
+ */
+const sentStreams = new WeakSet<ReadableStream>()
+
+/**
  * Returned by `parseResponse` when a `json` request received an empty body.
  *
  * Distinct from `null` because `JSON.parse("null")` is also `null`: a server
@@ -201,7 +210,7 @@ async function parseResponse(response: Response, responseType: ResponseType = 'j
  * One implementation, two callers: Step 4 inside `execute()`, and
  * `urlForError` below. That is the entire reason it exists as a function.
  * Step 4 is not a `buildUrl` call — it is the `shouldSerializeAsQuery` getter,
- * an `isSpecialBody` check, and a conditional `{}` substitution wrapped around
+ * the `classifyParams` decision, and a conditional `{}` substitution wrapped around
  * one. An error path that hand-reproduced that would be free to drift from the
  * real one, which is why recomputing the URL for diagnostics was rejected
  * before this extraction existed.
@@ -214,24 +223,18 @@ function resolveRequestUrl(
   baseUrl: string,
   request: Request<any, any>,
   params: object
-): { url: string; remaining: Record<string, unknown>; asQuery: boolean; paramsIsSpecialBody: boolean } {
+): { url: string; remaining: Record<string, unknown>; asQuery: boolean; whole: { value: unknown } | null } {
   // Respects the bodyAs config override, then the HTTP method default.
   const asQuery = request.shouldSerializeAsQuery
-
-  // A non-plain-object body (FormData, Blob, ...) cannot be decomposed into
-  // key-value pairs for path substitution or query serialization. The URL still
-  // needs building for baseUrl + path, so buildUrl is handed an empty params
-  // object and the real params go straight to serializeBody.
-  const paramsIsSpecialBody = isSpecialBody(params)
-
+  // Throws a TypeError for params with no honest wire form; see classify-params.ts.
+  const classified = classifyParams(params, asQuery)
   const { url, remaining } = buildUrl(
     baseUrl,
     request.config.path,
-    paramsIsSpecialBody ? {} : (params as Record<string, unknown>),
+    classified.kind === 'fields' ? classified.fields : {},
     asQuery
   )
-
-  return { url, remaining, asQuery, paramsIsSpecialBody }
+  return { url, remaining, asQuery, whole: classified.kind === 'whole' ? { value: classified.value } : null }
 }
 
 /**
@@ -605,6 +608,23 @@ export function createApi<TRequests extends Record<string, Request<any, any>>>(
        * post-execution hook.
        */
       const execute = (sharedSignal?: AbortSignal, onSettled?: () => void): Promise<Result<unknown>> => {
+        // Every merged signal this run creates. Released once the run has a
+        // Result (or its setup failed), so a long-lived caller signal does not
+        // collect one listener per call. Released after settlement, never
+        // when fetch returns: a retrying middleware calls next() again and
+        // must still see a live signal. See releaseSignal in any-signal.ts.
+        //
+        // `own` records a signal only when it is none of its inputs. anySignal
+        // hands back its sole defined input unchanged, and that input may be a
+        // merge some other, still-running call owns: a middleware forwarding
+        // ctx.request.signal into a nested api call makes the nested call's
+        // budget the outer call's own merge. Releasing that would cut the
+        // outer call loose from its caller's signal.
+        const merged: AbortSignal[] = []
+        const own = (signal: AbortSignal | undefined, ...inputs: (AbortSignal | undefined)[]): void => {
+          if (signal && !inputs.includes(signal)) merged.push(signal)
+        }
+        const releaseAll = (): void => { for (const s of merged) releaseSignal(s) }
         try {
           // -----------------------------------------------------------------
           // Step 1: Compose the middleware chain
@@ -684,9 +704,11 @@ export function createApi<TRequests extends Record<string, Request<any, any>>>(
             options.signal,
             sharedSignal !== undefined
           )
+          own(operation, options.signal)
           const callerSignal: AbortSignal | undefined = sharedSignal
             ? anySignal([sharedSignal, operation])
             : operation
+          own(callerSignal, sharedSignal, operation)
           let dedupeController: AbortController | undefined
 
           // -----------------------------------------------------------------
@@ -735,13 +757,17 @@ export function createApi<TRequests extends Record<string, Request<any, any>>>(
               // aborts the real request: the socket stays open with nobody
               // waiting on it.
               if (sharedSignal && ctx.request.signal !== sharedSignal) {
-                ctx.request.signal = anySignal([ctx.request.signal, sharedSignal])
+                const installed = ctx.request.signal
+                ctx.request.signal = anySignal([installed, sharedSignal])
+                own(ctx.request.signal, installed, sharedSignal)
               }
 
               if (request.config.dedupe && !dedupeController) {
-                const tracked = dedupeTracker.track(name, ctx.request.signal ?? callerSignal)
+                const external = ctx.request.signal ?? callerSignal
+                const tracked = dedupeTracker.track(name, external)
                 dedupeController = tracked.controller
                 ctx.request.signal = tracked.signal
+                own(tracked.signal, external)
                 // A supersede is this operation's own cancellation too, so a
                 // call parked in response-side middleware still settles as
                 // 'abort' when a newer call replaces it.
@@ -764,7 +790,19 @@ export function createApi<TRequests extends Record<string, Request<any, any>>>(
               // typically have no body, and setting body to null/undefined
               // on those methods may cause issues with some fetch implementations.
               if (ctx.request.body !== null && ctx.request.body !== undefined) {
-                fetchInit.body = ctx.request.body as BodyInit
+                const body = ctx.request.body
+                if (isReadableStream(body)) {
+                  if (sentStreams.has(body)) {
+                    throw new TypeError(
+                      'A ReadableStream body can only be sent once, so retry() and retryMiddleware cannot resend it. ' +
+                      'If this call may be retried, read the stream into a Blob or ArrayBuffer first.'
+                    )
+                  }
+                  sentStreams.add(body)
+                  // Required by Node's fetch and Chrome for a streaming request body.
+                  ;(fetchInit as RequestInit & { duplex: 'half' }).duplex = 'half'
+                }
+                fetchInit.body = body as BodyInit
               }
 
               const response = await fetch(ctx.request.url, fetchInit)
@@ -1027,7 +1065,7 @@ export function createApi<TRequests extends Record<string, Request<any, any>>>(
           // the error paths call the same function to name `error.request.url`
           // — see its doc for why that matters.
           // -----------------------------------------------------------------
-          const { url, remaining, asQuery, paramsIsSpecialBody } = resolveRequestUrl(baseUrl, request, params)
+          const { url, remaining, asQuery, whole } = resolveRequestUrl(baseUrl, request, params)
 
           // -----------------------------------------------------------------
           // Step 5: Merge headers from all three layers
@@ -1054,11 +1092,11 @@ export function createApi<TRequests extends Record<string, Request<any, any>>>(
           if (!asQuery) {
             // Decide what to serialize: the original params (for special types)
             // or the remaining params after path substitution (for plain objects)
-            const toSerialize = paramsIsSpecialBody ? params : remaining
+            const toSerialize = whole ? whole.value : remaining
 
             // Only serialize if there's something to serialize — avoid sending
             // empty bodies ({}) for endpoints with no body params.
-            if (paramsIsSpecialBody || Object.keys(remaining).length > 0) {
+            if (whole || Object.keys(remaining).length > 0) {
               const serialized = serializeBody(toSerialize)
               body = serialized.body
 
@@ -1144,13 +1182,15 @@ export function createApi<TRequests extends Record<string, Request<any, any>>>(
           }
 
           // -----------------------------------------------------------------
-          // Step 9: Post-execution hooks (dedupe cleanup + onError)
+          // Step 9: Post-execution hooks (dedupe cleanup, release, onError)
           // -----------------------------------------------------------------
           // After the middleware chain completes (with any result) — or the
           // backstop settles on its behalf — we run this exactly once:
           // a. Clear the dedupe tracker for this endpoint (if dedupe is enabled)
           //    so the next call starts fresh without aborting a completed request
-          // b. Fire the onError callback if the final result has an error
+          // b. Release this run's merged signals (releaseAll above) — always,
+          //    whether or not dedupe is on
+          // c. Fire the onError callback if the final result has an error
           //    (only fires on final error — if retry middleware recovered, no fire)
           // -----------------------------------------------------------------
           return backstop.follow(resultPromise, (result, preempted) => {
@@ -1195,6 +1235,11 @@ export function createApi<TRequests extends Record<string, Request<any, any>>>(
               if (preempted) dedupeController.abort()
               dedupeTracker.clear(name, dedupeController)
             }
+
+            // The operation is over on whichever side won, so its merges can
+            // let go of their inputs. Before onError, so a handler that
+            // aborts the caller's signal finds nothing of ours on it.
+            releaseAll()
 
             // Fire the global error handler if the final result has an error.
             // This is the "last chance" error hook — middleware has already had
@@ -1247,13 +1292,14 @@ export function createApi<TRequests extends Record<string, Request<any, any>>>(
             if (result.error && !abandoned) fireOnError(result.error as ApiError)
 
             return result
-          }, (err: unknown) =>
+          }, (err: unknown) => {
             // Only reachable with a signal-shaped value whose `reason` throws —
             // `retry` called with arbitrary arguments, or a fake signal from
             // plain JS — so the backstop could not build its Result. Never
             // throws holds regardless.
-            failedResult(err, undefined, 'abort')
-          )
+            releaseAll()
+            return failedResult(err, undefined, 'abort')
+          })
         } catch (err) {
           // -----------------------------------------------------------------
           // Catch synchronous errors
@@ -1278,6 +1324,9 @@ export function createApi<TRequests extends Record<string, Request<any, any>>>(
           // the caller has ALSO aborted around the same time — silently
           // reclassifying a real setup failure as 'abort' just because a
           // signal happens to be aborted would hide it from onError.
+          // Setup may have merged signals before it threw; nothing will
+          // settle this run later, so release them now.
+          releaseAll()
           return Promise.resolve(failedResult(err, undefined, 'network'))
         }
       }
@@ -1327,6 +1376,9 @@ export function createApi<TRequests extends Record<string, Request<any, any>>>(
       // "every call returns a Result" would otherwise not be enforced by
       // construction.
       // -----------------------------------------------------------------------
+      // Hoisted so the catch below can release it: built before acquire(), it
+      // would otherwise keep its listener if anything after it threw.
+      let builtPerCaller: AbortSignal | undefined
       try {
         // Emptiness, not truthiness: `headers: {}` and `middleware: []` are
         // both truthy, and neither changes what is requested, so neither is a
@@ -1355,6 +1407,7 @@ export function createApi<TRequests extends Record<string, Request<any, any>>>(
         // throw from here cannot strand a shared request that this caller then
         // never releases.
         const perCaller = perCallerBudget(options.timeout, options.signal)
+        builtPerCaller = perCaller
 
         // acquire() either starts the real request (first caller — exec is
         // called with the tracker's own refcounted signal, which becomes the
@@ -1399,6 +1452,12 @@ export function createApi<TRequests extends Record<string, Request<any, any>>>(
             if (done) return
             done = true
             perCaller.removeEventListener('abort', onAbort)
+            // perCaller may be a merge of this caller's signal and its own
+            // timeout; it is this caller's alone, so it goes as soon as this
+            // caller has its answer. Unless it IS the caller's signal (no
+            // per-call timeout): that may be another call's merge — see `own`
+            // in execute().
+            if (perCaller !== options.signal) releaseSignal(perCaller)
             resolve(r)
           }
 
@@ -1470,6 +1529,8 @@ export function createApi<TRequests extends Record<string, Request<any, any>>>(
         // Setup for the share path itself threw (e.g. a BigInt timeout
         // reaching Math.min in perCallerBudget) — before acquire(), so there
         // is no operative signal yet to check provenance against.
+        // Same guard as `finish`: the caller's own signal is not ours to release.
+        if (builtPerCaller !== options.signal) releaseSignal(builtPerCaller)
         return Promise.resolve(failedResult(err, undefined, 'network'))
       }
     }

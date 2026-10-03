@@ -1,4 +1,31 @@
 /**
+ * Cleanup for every merged signal anySignal created, keyed by that signal.
+ *
+ * anySignal only unregisters its listeners when something aborts. A call that
+ * completes normally used to leave one listener on the caller's signal per
+ * call, forever: 25 calls on a component-scoped controller left 25. Callers
+ * release a merged signal once its call has a Result (see releaseSignal).
+ * A WeakMap, so an unreleased signal still does not keep anything alive.
+ */
+const disposers = new WeakMap<AbortSignal, () => void>()
+
+/**
+ * Remove the listeners `anySignal` registered for `signal`. Call it once the
+ * call that owns the signal has settled. A no-op for a signal anySignal did
+ * not create (a caller's own signal, the single-signal fast path, undefined),
+ * and idempotent. It deliberately does NOT release the merge's inputs: an
+ * input may be a signal another, still-running call owns, for example when a
+ * middleware passes ctx.request.signal into a nested api call.
+ */
+export function releaseSignal(signal: AbortSignal | undefined): void {
+  if (!signal) return
+  const dispose = disposers.get(signal)
+  if (!dispose) return
+  disposers.delete(signal)
+  dispose()
+}
+
+/**
  * Composes several abort signals into one that aborts when the first of them
  * aborts, carrying that signal's `reason` through.
  *
@@ -50,5 +77,6 @@ export function anySignal(signals: (AbortSignal | undefined)[]): AbortSignal | u
     signal.addEventListener('abort', listener, { once: true })
   }
 
+  disposers.set(controller.signal, cleanup)
   return controller.signal
 }

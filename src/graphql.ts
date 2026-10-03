@@ -4,6 +4,7 @@ import { DedupeTracker } from './utils/dedupe.js'
 import { mergeHeaders } from './utils/headers.js'
 import { abortKind, propagatesReason } from './utils/abort-kind.js'
 import { resolveBudget } from './utils/budget.js'
+import { releaseSignal } from './utils/any-signal.js'
 import { createBackstop } from './utils/backstop.js'
 import { runSchema } from './utils/validate.js'
 import type { SchemaOutcome } from './utils/validate.js'
@@ -148,6 +149,15 @@ export function createGraphQL(config: any): any {
           return createNetworkErrorResult(error, execute)
         }
 
+        // Every merged signal this run creates, released once it has a
+        // Result. `own` skips a signal that is one of its own inputs, which
+        // may be a merge another call owns — see the same trio in
+        // create-api.ts's execute().
+        const merged: AbortSignal[] = []
+        const own = (signal: AbortSignal | undefined, ...inputs: (AbortSignal | undefined)[]): void => {
+          if (signal && !inputs.includes(signal)) merged.push(signal)
+        }
+        const releaseAll = (): void => { for (const s of merged) releaseSignal(s) }
         try {
           const allMiddleware: Middleware[] = [
             ...globalMiddleware,
@@ -176,6 +186,7 @@ export function createGraphQL(config: any): any {
           // identical and either may be read.
           const budget = resolveBudget(options.timeout, operation.config.timeout, options.signal, false)
           const callerSignal: AbortSignal | undefined = budget.operation
+          own(callerSignal, options.signal)
           let dedupeController: AbortController | undefined
 
           const core = async (ctx: MiddlewareContext): Promise<Result<unknown>> => {
@@ -198,9 +209,11 @@ export function createGraphQL(config: any): any {
               // holds a live signal here — never a previous attempt's already
               // aborted dedupe signal.
               if (operation.config.dedupe && !dedupeController) {
-                const tracked = dedupeTracker.track(name, ctx.request.signal ?? callerSignal)
+                const external = ctx.request.signal ?? callerSignal
+                const tracked = dedupeTracker.track(name, external)
                 dedupeController = tracked.controller
                 ctx.request.signal = tracked.signal
+                own(tracked.signal, external)
                 // A supersede is this operation's own cancellation too — see
                 // the backstop below.
                 backstop.watch(tracked.controller.signal)
@@ -470,15 +483,18 @@ export function createGraphQL(config: any): any {
               if (preempted) dedupeController.abort()
               dedupeTracker.clear(name, dedupeController)
             }
+            releaseAll()
             if (result.error) fireOnError(result.error as ApiError)
             return result
           }, (err: unknown) => {
             // A signal-shaped value whose `reason` throws — see create-api.ts.
+            releaseAll()
             const result = buildFailedResult(err, undefined, 'abort')
             fireOnError(result.error as ApiError)
             return result
           })
         } catch (err) {
+          releaseAll()
           const error = new ApiError({
             status: 0,
             kind: 'network',

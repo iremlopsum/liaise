@@ -606,3 +606,26 @@ describe('REST — share keys params by content (4.4.3)', () => {
     expect(rb.data?.body.since).toBe(d.toISOString())
   })
 })
+
+describe('REST — binary bodies', () => {
+  type Echo = { bytes: number[]; contentType: string | null }
+
+  it('a Uint8Array arrives byte-identical', async () => {
+    const echo = new Request<Uint8Array, Echo>({ method: 'POST', path: '/echo-bytes' })
+    const api = createApi({ baseUrl: server.baseUrl, requests: { echo } })
+    const { data, error } = await api.echo(new Uint8Array([0, 1, 254, 255]))
+    expect(error).toBeNull()
+    expect(data).toEqual({ bytes: [0, 1, 254, 255], contentType: 'application/octet-stream' })
+  })
+
+  it('a ReadableStream arrives byte-identical', async () => {
+    const echo = new Request<ReadableStream, Echo>({ method: 'POST', path: '/echo-bytes' })
+    const api = createApi({ baseUrl: server.baseUrl, requests: { echo } })
+    const stream = new ReadableStream({
+      start(c) { c.enqueue(new Uint8Array([1, 2])); c.enqueue(new Uint8Array([3])); c.close() },
+    })
+    const { data, error } = await api.echo(stream)
+    expect(error).toBeNull()
+    expect(data?.bytes).toEqual([1, 2, 3])
+  })
+})

@@ -1,5 +1,6 @@
 import { describe, it, expect, vi } from 'vitest'
-import { anySignal } from '../src/utils/any-signal.js'
+import { anySignal, releaseSignal } from '../src/utils/any-signal.js'
+import { countingSignal } from './helpers/counting-signal.js'
 
 describe('anySignal', () => {
   it('returns undefined when given nothing', () => {
@@ -109,5 +110,41 @@ describe('anySignal', () => {
     expect(spyA).toHaveBeenCalled()
     expect(spyB).toHaveBeenCalled()
     spyA.mockRestore(); spyB.mockRestore()
+  })
+})
+
+describe('releaseSignal', () => {
+  it('removes the listeners a merge left on its inputs', () => {
+    const caller = countingSignal()
+    const other = new AbortController()
+    const merged = anySignal([caller.signal, other.signal])
+    expect(caller.listeners()).toBe(1)
+    releaseSignal(merged)
+    expect(caller.listeners()).toBe(0)
+  })
+
+  it('stops propagation after release', () => {
+    const a = new AbortController(), b = new AbortController()
+    const merged = anySignal([a.signal, b.signal])!
+    releaseSignal(merged)
+    a.abort()
+    expect(merged.aborted).toBe(false)
+  })
+
+  it('is a no-op for a signal it did not create, and idempotent', () => {
+    const caller = countingSignal()
+    const merged = anySignal([caller.signal, new AbortController().signal])
+    expect(() => { releaseSignal(caller.signal); releaseSignal(undefined) }).not.toThrow()
+    expect(caller.listeners()).toBe(1)
+    releaseSignal(merged); releaseSignal(merged)
+    expect(caller.listeners()).toBe(0)
+  })
+
+  it('does not release the inputs themselves', () => {
+    const caller = countingSignal()
+    const inner = anySignal([caller.signal, new AbortController().signal])
+    const outer = anySignal([inner, new AbortController().signal])
+    releaseSignal(outer)
+    expect(caller.listeners()).toBe(1) // inner still owns its listener
   })
 })

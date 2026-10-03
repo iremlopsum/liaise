@@ -5,6 +5,75 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [5.0.1] — 2026-10-03
+
+A bug-fix release from an audit of 5.0.0. Nothing in the API changes; a few calls
+that used to send the wrong thing, or nothing, now send the right thing or say why
+they cannot. See [MIGRATION.md](./MIGRATION.md#upgrading-to-501).
+
+### Fixed
+
+- **Typed arrays, `DataView`, `Buffer` and `ReadableStream` are sent as real
+  binary bodies.** They fell through to `JSON.stringify`, so a `Uint8Array([1, 2])`
+  arrived as `{"0":1,"1":2}`. They now go to `fetch` as they are, with
+  `Content-Type: application/octet-stream`; a stream is sent with `duplex: 'half'`
+  set for you. A stream can be read once, so a retry (`retryMiddleware`,
+  `result.retry()`) now returns an error Result saying it cannot be resent, where
+  it used to send an empty body.
+- **Params that used to send nothing now send what they hold, or are refused.**
+  A `Map` with string keys is the object it spells; a class with only `toJSON()`
+  is sent as its JSON (body only). A `Set`, a bare `Date`, a `Map` with non-string
+  keys and a class with no fields return an error Result (`kind: 'network'`, a
+  `TypeError` naming the type) instead of leaving with an empty body. A typed
+  array, `DataView`, stream or `toJSON`-only class on a request whose params go in
+  the query string (a GET) is refused for the same reason.
+- **Abort listeners no longer accumulate on a long-lived caller signal.** Each
+  call with `dedupe`, `timeout` or `share` (and each GraphQL call) left a listener
+  on the caller's `AbortSignal`, so a component-scoped controller used for many
+  calls grew without bound. The merged signals are now released when the call
+  settles. One consequence: after a call settles, a later abort of the caller's
+  signal no longer reaches that call's `ctx.request.signal`, so fire-and-forget
+  middleware work still holding it is no longer cancelled by the caller.
+- **`cacheMiddleware` keys on more than name and params.** The key was the request
+  name plus params, so a second user's call could be served the first user's
+  cached `/me`, and one `Request` used with two base URLs shared entries. The key
+  is now request name, method, URL (query string included, its pairs sorted by
+  name), params, and every request header except `Content-Type`. A warm cache is cold once after
+  upgrading, and a middleware placed before the cache that adds a per-call unique
+  header (a request ID) now makes every call a miss; place it after.
+- **A path token can no longer be hit by an unrelated param key.** Substitution
+  built a regular expression from each param key, so a key like `a.b` could fill
+  the token `:aXb`. Tokens are now scanned from the template, using the documented
+  grammar `[a-zA-Z0-9_]`. A template like `/x/:a-b` with a key `a-b` used to
+  resolve by accident; the scan reads the token as `:a` followed by `-b`, finds no
+  `a` key, and the call now returns an error Result (a `TypeError`, "Unresolved
+  path parameter :a…"). Use only `[a-zA-Z0-9_]` in path token names and their keys.
+- **A `Date` in a query string is reported as a `Date`.** The error said a nested
+  object was not allowed; it now names the `Date` and suggests `toISOString()` or
+  `getTime()`. It is still refused.
+- **A header name repeated within one source is joined, not overwritten.** Two
+  entries for one name in an array of header pairs kept only the last; they are now
+  joined as `a, b`, as the platform's `Headers` does. So are case-variant
+  duplicates inside one record (`{ Accept: 'a', accept: 'b' }` sends `a, b`). A
+  later source still replaces an earlier one.
+- **`timeout` works where `AbortSignal.timeout` does not exist** (React Native's
+  Hermes). A fallback built from `AbortController` and `setTimeout` is used. The
+  result is `kind: 'timeout'` where the runtime's `AbortController` carries abort
+  reasons (Node's does; this is what the tests cover), and possibly `'abort'`
+  where it ignores them. Not tested on a device. Nothing global is patched.
+- **A call with no params is no longer keyed the same as a bare `[undefined]`
+  param.** For `share` and `cacheMiddleware` the two collided, so one could be
+  handed the other's response.
+
+### Changed
+
+- **The README's size numbers are measured, and CI enforces them.** The old
+  "2.9 kB / 4.4 kB gzipped" had gone stale and understated the bundle. `npm run size`
+  now bundles each entry with esbuild and reports gzip and brotli: about 5.6 kB
+  gzipped for a REST-only import, 6.7 kB for the core entry and 7.8 kB with all
+  middleware. CI fails if one grows past its budget. `esbuild` is a new
+  devDependency; the package still has no runtime dependencies.
+
 ## [5.0.0] — 2026-10-03
 
 **Renamed from `@iremlopsum/apify` to `liaise`.** Same code, same API, full git
@@ -939,6 +1008,7 @@ Initial release of the rewritten client. Reconstructed from the release commit
   `ArrayBuffer` and strings
 - Response parsing as `json`, `text`, `blob`, `arrayBuffer` or `formData`
 
+[5.0.1]: https://github.com/iremlopsum/liaise/compare/v5.0.0...v5.0.1
 [5.0.0]: https://github.com/iremlopsum/liaise/compare/v4.4.3...v5.0.0
 [4.4.3]: https://github.com/iremlopsum/liaise/compare/v4.4.2...v4.4.3
 [4.4.2]: https://github.com/iremlopsum/liaise/compare/v4.4.1...v4.4.2
