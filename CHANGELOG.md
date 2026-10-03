@@ -920,22 +920,22 @@ Initial release of the rewritten client. Reconstructed from the release commit
   `ArrayBuffer` and strings
 - Response parsing as `json`, `text`, `blob`, `arrayBuffer` or `formData`
 
-[4.4.3]: https://github.com/iremlopsum/apify/compare/v4.4.2...v4.4.3
-[4.4.2]: https://github.com/iremlopsum/apify/compare/v4.4.1...v4.4.2
-[4.4.1]: https://github.com/iremlopsum/apify/compare/v4.4.0...v4.4.1
-[4.4.0]: https://github.com/iremlopsum/apify/compare/v4.3.0...v4.4.0
-[4.3.0]: https://github.com/iremlopsum/apify/compare/v4.2.1...v4.3.0
-[4.2.1]: https://github.com/iremlopsum/apify/compare/v4.2.0...v4.2.1
-[4.2.0]: https://github.com/iremlopsum/apify/compare/v4.1.1...v4.2.0
-[4.1.1]: https://github.com/iremlopsum/apify/compare/v4.1.0...v4.1.1
-[4.1.0]: https://github.com/iremlopsum/apify/compare/v4.0.2...v4.1.0
-[4.0.2]: https://github.com/iremlopsum/apify/compare/v4.0.1...v4.0.2
-[4.0.1]: https://github.com/iremlopsum/apify/compare/v4.0.0...v4.0.1
-[4.0.0]: https://github.com/iremlopsum/apify/compare/v3.1.0...v4.0.0
-[3.1.0]: https://github.com/iremlopsum/apify/compare/v3.0.0...v3.1.0
-[3.0.0]: https://github.com/iremlopsum/apify/compare/v2.2.1...v3.0.0
-[2.2.1]: https://github.com/iremlopsum/apify/compare/v2.2.0...v2.2.1
-[2.2.0]: https://github.com/iremlopsum/apify/compare/v2.1.0...v2.2.0
-[2.1.0]: https://github.com/iremlopsum/apify/compare/v2.0.0...v2.1.0
-[2.0.0]: https://github.com/iremlopsum/apify/compare/v1.0.0...v2.0.0
-[1.0.0]: https://github.com/iremlopsum/apify/releases/tag/v1.0.0
+[4.4.3]: https://github.com/iremlopsum/liaise/compare/v4.4.2...v4.4.3
+[4.4.2]: https://github.com/iremlopsum/liaise/compare/v4.4.1...v4.4.2
+[4.4.1]: https://github.com/iremlopsum/liaise/compare/v4.4.0...v4.4.1
+[4.4.0]: https://github.com/iremlopsum/liaise/compare/v4.3.0...v4.4.0
+[4.3.0]: https://github.com/iremlopsum/liaise/compare/v4.2.1...v4.3.0
+[4.2.1]: https://github.com/iremlopsum/liaise/compare/v4.2.0...v4.2.1
+[4.2.0]: https://github.com/iremlopsum/liaise/compare/v4.1.1...v4.2.0
+[4.1.1]: https://github.com/iremlopsum/liaise/compare/v4.1.0...v4.1.1
+[4.1.0]: https://github.com/iremlopsum/liaise/compare/v4.0.2...v4.1.0
+[4.0.2]: https://github.com/iremlopsum/liaise/compare/v4.0.1...v4.0.2
+[4.0.1]: https://github.com/iremlopsum/liaise/compare/v4.0.0...v4.0.1
+[4.0.0]: https://github.com/iremlopsum/liaise/compare/v3.1.0...v4.0.0
+[3.1.0]: https://github.com/iremlopsum/liaise/compare/v3.0.0...v3.1.0
+[3.0.0]: https://github.com/iremlopsum/liaise/compare/v2.2.1...v3.0.0
+[2.2.1]: https://github.com/iremlopsum/liaise/compare/v2.2.0...v2.2.1
+[2.2.0]: https://github.com/iremlopsum/liaise/compare/v2.1.0...v2.2.0
+[2.1.0]: https://github.com/iremlopsum/liaise/compare/v2.0.0...v2.1.0
+[2.0.0]: https://github.com/iremlopsum/liaise/compare/v1.0.0...v2.0.0
+[1.0.0]: https://github.com/iremlopsum/liaise/releases/tag/v1.0.0

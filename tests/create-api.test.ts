@@ -2,7 +2,7 @@
 // create-api.test.ts — Tests for the createApi constructor
 // =============================================================================
 //
-// createApi is the heart of the apify library — it takes a set of Request
+// createApi is the heart of the liaise library — it takes a set of Request
 // definitions and wires them together with middleware, headers, and fetch into
 // a typed API object where each key becomes a callable method.
 //

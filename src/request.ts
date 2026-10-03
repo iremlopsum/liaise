@@ -1,5 +1,5 @@
 // =============================================================================
-// request.ts — Typed request definition class for the apify library
+// request.ts — Typed request definition class for the liaise library
 // =============================================================================
 //
 // This file defines the `Request` class, which is the primary way to declare

@@ -1,8 +1,8 @@
 // =============================================================================
-// testing.ts — framework-agnostic fetch mock for testing consumers of apify
+// testing.ts — framework-agnostic fetch mock for testing consumers of liaise
 // =============================================================================
 //
-// This is a separate entry point (`@iremlopsum/apify/testing`), not part of
+// This is a separate entry point (`liaise/testing`), not part of
 // the core barrel. It gives consumers a `fetch` stub with route matching so
 // they can exercise their own code against the real library pipeline — URL
 // building, path substitution, header merging, body serialization, response

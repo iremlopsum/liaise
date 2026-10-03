@@ -1,4 +1,8 @@
-# apify
+# liaise
+
+*lee-AYZ* — to act as the link between two parties.
+
+> Formerly published as `@iremlopsum/apify`. Same code, same API, full history — switching takes two steps, see [MIGRATION.md](./MIGRATION.md#upgrading-to-500).
 
 Runtime-agnostic, type-safe HTTP client for REST and GraphQL. Built on standard `fetch`. Zero dependencies.
 
@@ -10,7 +14,7 @@ Runtime-agnostic, type-safe HTTP client for REST and GraphQL. Built on standard 
 - **Tiny** — about **2.9 kB gzipped** for a REST-only import, 4.4 kB for everything including GraphQL and all middleware; tree-shaking drops what you do not import
 
 ```
-npm install @iremlopsum/apify
+npm install liaise
 ```
 
 ## Table of Contents
@@ -45,7 +49,7 @@ npm install @iremlopsum/apify
 Define your endpoints as `Request` instances, wire them into a client with `createApi`, and call them with full type safety.
 
 ```ts
-import { createApi, Request } from '@iremlopsum/apify'
+import { createApi, Request } from 'liaise'
 
 // 1. Define your endpoints
 interface User {
@@ -90,7 +94,7 @@ console.log(data.name)
 Each API endpoint is represented by a `Request` instance. The class is a typed config container -- it stores the recipe for how an endpoint should be called, but does not execute anything on its own.
 
 ```ts
-import { Request } from '@iremlopsum/apify'
+import { Request } from 'liaise'
 
 const listItems = new Request<{ page: number; limit: number }, Item[]>({
   method: 'GET',
@@ -215,7 +219,7 @@ api.getUser({ userId: '42' })  // compiles — then fails at runtime: buildUrl f
 `defineRequest` infers the params from the path literal instead:
 
 ```ts
-import { defineRequest } from '@iremlopsum/apify'
+import { defineRequest } from 'liaise'
 
 const getUser = defineRequest<User>()({ method: 'GET', path: '/users/:id' })
 
@@ -258,7 +262,7 @@ not a literal, or when you do not want the path checked.
 ### Response validation
 
 Pass any [Standard Schema](https://standardschema.dev) validator — Zod, Valibot,
-ArkType — and the response is checked before you see it. apify takes no
+ArkType — and the response is checked before you see it. liaise takes no
 dependency on one; Standard Schema is an interface, not a package.
 
 ```ts
@@ -328,7 +332,7 @@ There the response type stays explicit — only `defineRequest` infers it.
 `paginate` walks a paginated endpoint, yielding one `Result` per page:
 
 ```ts
-import { paginate } from '@iremlopsum/apify'
+import { paginate } from 'liaise'
 
 for await (const page of paginate(api.listItems, { limit: 50 }, {
   next: (p, prev) => p.data.cursor ? { ...prev, cursor: p.data.cursor } : undefined,
@@ -549,7 +553,7 @@ carrying neither `data` nor `errors`. An optional [`schema`](#response-validatio
 You can use `instanceof` to check if a value is an `ApiError`:
 
 ```ts
-import { ApiError } from '@iremlopsum/apify'
+import { ApiError } from 'liaise'
 
 if (error instanceof ApiError) {
   // ...
@@ -584,7 +588,7 @@ Request → [Global MW → [Per-request MW → [Per-call MW → [fetch]]]]
 A middleware function receives a `context` and a `next` function:
 
 ```ts
-import type { Middleware } from '@iremlopsum/apify'
+import type { Middleware } from 'liaise'
 
 const authMiddleware: Middleware = async (ctx, next) => {
   // Before: modify the request
@@ -725,7 +729,7 @@ const sentryMiddleware: Middleware = async (ctx, next) => {
 The library ships three optional middleware functions, importable from a separate entry point:
 
 ```ts
-import { retryMiddleware, logMiddleware, cacheMiddleware } from '@iremlopsum/apify/middleware'
+import { retryMiddleware, logMiddleware, cacheMiddleware } from 'liaise/middleware'
 ```
 
 **`retryMiddleware(options?: number | RetryOptions)`**
@@ -816,11 +820,11 @@ const { error } = await api.getItems()
 Logs request start and completion to the console with timing:
 
 ```
-[apify] → GET getItems /api/items
-[apify] ← getItems OK (142ms)
+[liaise] → GET getItems /api/items
+[liaise] ← getItems OK (142ms)
 
-[apify] → POST createUser /api/users
-[apify] ← createUser ERROR 422 (89ms)
+[liaise] → POST createUser /api/users
+[liaise] ← createUser ERROR 422 (89ms)
 ```
 
 Intended for development. In production, write a custom middleware that sends telemetry to your observability platform.
@@ -1127,7 +1131,7 @@ import type {
   MiddlewareNext,
   RequestConfig,
   ApiConfig
-} from '@iremlopsum/apify'
+} from 'liaise'
 ```
 
 ## GraphQL Client
@@ -1137,7 +1141,7 @@ Use `createGraphQL` when your backend speaks GraphQL. **Everything in the REST A
 Both clients return the same `Result<T>` shape — `result.data`, `result.error`, `result.response`, and `result.retry` work identically.
 
 ```ts
-import { createGraphQL, Operation, gql } from '@iremlopsum/apify'
+import { createGraphQL, Operation, gql } from 'liaise'
 
 interface Category {
   id: string
@@ -1255,10 +1259,10 @@ const graphql = createGraphQL({
 
 ## Testing
 
-`@iremlopsum/apify/testing` is a separate, framework-agnostic entry point for testing consumers of this library — it has no test-runner dependency, so it works the same under Vitest, Jest, or anything else. It gives you a `fetch` stub with route matching, so your tests exercise the real pipeline — URL building, path substitution, header merging, body serialization, response parsing, your own middleware — rather than stubbing an API method to return a canned `Result` and silently drifting out of sync with what the library actually does.
+`liaise/testing` is a separate, framework-agnostic entry point for testing consumers of this library — it has no test-runner dependency, so it works the same under Vitest, Jest, or anything else. It gives you a `fetch` stub with route matching, so your tests exercise the real pipeline — URL building, path substitution, header merging, body serialization, response parsing, your own middleware — rather than stubbing an API method to return a canned `Result` and silently drifting out of sync with what the library actually does.
 
 ```ts
-import { mockFetch, jsonResponse } from '@iremlopsum/apify/testing'
+import { mockFetch, jsonResponse } from 'liaise/testing'
 
 const mock = mockFetch({
   'GET /api/users/:id': ({ params }) => jsonResponse({ id: params.id, name: 'Ada' }),
@@ -1293,7 +1297,7 @@ An empty response array for a route behaves the same way — a descriptive `Erro
 For stubbing at the `Result` level instead of the `fetch` level, `successResult(data)` and `errorResult(status, body)` build a well-formed `Result` directly (shown here with Vitest's `vi.spyOn`, but any runner's equivalent works the same way):
 
 ```ts
-import { successResult, errorResult } from '@iremlopsum/apify/testing'
+import { successResult, errorResult } from 'liaise/testing'
 
 vi.spyOn(api, 'getUser').mockResolvedValue(successResult({ id: '42', name: 'Ada' }))
 vi.spyOn(api, 'getUser').mockResolvedValue(errorResult(404, { message: 'not found' }))
@@ -1329,9 +1333,13 @@ Type safety comes from inference, not annotation. Define `Request<TParams, TResp
 
 No assumptions about Node.js, browsers, or any specific runtime. If your environment has `fetch`, the library works -- browsers, Node.js 20+, Bun, Deno, React Native, Cloudflare Workers, edge runtimes.
 
+### Framework-agnostic
+
+The library has no opinion about your UI framework, or whether you have one. A client is a plain object of functions that return promises, so the same definitions work in React, Vue, Svelte, Solid or Angular, in server loaders and actions, in workers, scripts and CLIs — and keep working when you change frameworks. It also means there are no hooks out of the box: pair it with the state or query library you already use (TanStack Query, SWR, Pinia, a store of your own). Those libraries expect a failed request to throw, so the query function is the place to turn a `Result`'s `error` into a throw — at the edge of your code, not inside this library.
+
 ## API Reference
 
-### Core (`@iremlopsum/apify`)
+### Core (`liaise`)
 
 | Export          | Kind     | Description                                                        |
 | --------------- | -------- | ------------------------------------------------------------------ |
@@ -1361,7 +1369,7 @@ No assumptions about Node.js, browsers, or any specific runtime. If your environ
 | `GraphQLBaseConfig` | type     | Config object for `createGraphQL`                                      |
 | `GraphQLError`      | type     | Shape of a single GraphQL error from `{ errors: [...] }`              |
 
-### Built-in middleware (`@iremlopsum/apify/middleware`)
+### Built-in middleware (`liaise/middleware`)
 
 | Export            | Kind     | Description                                                   |
 | ----------------- | -------- | ------------------------------------------------------------- |
@@ -1372,7 +1380,7 @@ No assumptions about Node.js, browsers, or any specific runtime. If your environ
 | `cacheMiddleware` | function | Factory that returns a per-request in-memory cache with `clear()` |
 | `CacheMiddleware` | type     | Return type of `cacheMiddleware()` -- a `Middleware` with an attached `clear()` |
 
-### Testing (`@iremlopsum/apify/testing`)
+### Testing (`liaise/testing`)
 
 | Export          | Kind     | Description                                                        |
 | --------------- | -------- | ------------------------------------------------------------------ |

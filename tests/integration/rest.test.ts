@@ -269,10 +269,10 @@ describe('logMiddleware', () => {
       await api.hello()
 
       expect(consoleSpy).toHaveBeenCalledTimes(2)
-      // Format: "[apify] → GET hello http://127.0.0.1:PORT/hello"
-      expect(consoleSpy.mock.calls[0][0]).toMatch(/\[apify\] → GET hello http:\/\/127\.0\.0\.1:\d+\/hello/)
-      // Format: "[apify] ← hello OK (Xms)"
-      expect(consoleSpy.mock.calls[1][0]).toMatch(/\[apify\] ← hello OK \(\d+ms\)/)
+      // Format: "[liaise] → GET hello http://127.0.0.1:PORT/hello"
+      expect(consoleSpy.mock.calls[0][0]).toMatch(/\[liaise\] → GET hello http:\/\/127\.0\.0\.1:\d+\/hello/)
+      // Format: "[liaise] ← hello OK (Xms)"
+      expect(consoleSpy.mock.calls[1][0]).toMatch(/\[liaise\] ← hello OK \(\d+ms\)/)
     } finally {
       consoleSpy.mockRestore()
     }

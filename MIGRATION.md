@@ -1,6 +1,6 @@
 # Migration Guide
 
-Upgrade notes for `@iremlopsum/apify`. Only releases that need action appear
+Upgrade notes for `liaise` (published as `@iremlopsum/apify` up to 4.4.x). Only releases that need action appear
 here — if a version isn't listed, upgrading to it requires no changes.
 
 For the full record of what changed in each release, see [CHANGELOG.md](./CHANGELOG.md).

@@ -1,5 +1,5 @@
 // =============================================================================
-// built-in-middleware.ts — Optional, pre-built middleware utilities for apify
+// built-in-middleware.ts — Optional, pre-built middleware utilities for liaise
 // =============================================================================
 //
 // This file ships three ready-to-use middleware functions that cover the most
@@ -330,11 +330,11 @@ export function retryMiddleware(options: number | RetryOptions = 3): Middleware 
  * **Output format examples:**
  *
  * ```
- * [apify] → GET getItems /api/items
- * [apify] ← getItems OK (142ms)
+ * [liaise] → GET getItems /api/items
+ * [liaise] ← getItems OK (142ms)
  *
- * [apify] → POST createUser /api/users
- * [apify] ← createUser ERROR 422 (89ms)
+ * [liaise] → POST createUser /api/users
+ * [liaise] ← createUser ERROR 422 (89ms)
  * ```
  *
  * **Usage note:**
@@ -345,7 +345,7 @@ export function retryMiddleware(options: number | RetryOptions = 3): Middleware 
  *
  * @example
  * ```ts
- * import { logMiddleware } from 'apify/middleware'
+ * import { logMiddleware } from 'liaise/middleware'
  *
  * const api = createApi({
  *   baseUrl: '/api',
@@ -363,7 +363,7 @@ export const logMiddleware: Middleware = async (ctx, next) => {
   // Log the outgoing request. The format includes the HTTP method, the
   // request name (which is the key in the `requests` object passed to
   // createApi), and the fully resolved URL.
-  console.log(`[apify] → ${ctx.request.method} ${ctx.requestName} ${ctx.request.url}`)
+  console.log(`[liaise] → ${ctx.request.method} ${ctx.requestName} ${ctx.request.url}`)
 
   // Execute the downstream middleware chain and the core fetch.
   const result = await next()
@@ -377,11 +377,11 @@ export const logMiddleware: Middleware = async (ctx, next) => {
   if (result.error) {
     // Error path: include the HTTP status code so developers can see
     // whether it's a client error (4xx) or server error (5xx).
-    console.log(`[apify] ← ${ctx.requestName} ERROR ${result.error.status} (${duration}ms)`)
+    console.log(`[liaise] ← ${ctx.requestName} ERROR ${result.error.status} (${duration}ms)`)
   } else {
     // Success path: just "OK" with timing — the status code (200, 201, etc.)
     // is less interesting when things work correctly.
-    console.log(`[apify] ← ${ctx.requestName} OK (${duration}ms)`)
+    console.log(`[liaise] ← ${ctx.requestName} OK (${duration}ms)`)
   }
 
   // Return the result unchanged. This middleware is purely observational —
@@ -442,8 +442,8 @@ export type CacheMiddleware = Middleware & { clear(): void }
  *
  * Set `debug: true` to log cache hits and misses to the console:
  * ```
- * [apify cache] HIT  getUser {"id":"42"}
- * [apify cache] MISS getUser {"id":"42"}
+ * [liaise cache] HIT  getUser {"id":"42"}
+ * [liaise cache] MISS getUser {"id":"42"}
  * ```
  *
  * @param options.ttl - Time-to-live in milliseconds. Defaults to 5 minutes.
@@ -453,7 +453,7 @@ export type CacheMiddleware = Middleware & { clear(): void }
  *
  * @example
  * ```ts
- * import { cacheMiddleware } from '@iremlopsum/apify/middleware'
+ * import { cacheMiddleware } from 'liaise/middleware'
  *
  * const getUserCache = cacheMiddleware({ ttl: 5 * 60_000, maxSize: 100 })
  *
@@ -498,11 +498,11 @@ export function cacheMiddleware(options?: {
 
     const cached = store.get<Result<unknown>>(key)
     if (cached !== null) {
-      if (debug) console.log(`[apify cache] HIT  ${ctx.requestName} ${paramsStr}`)
+      if (debug) console.log(`[liaise cache] HIT  ${ctx.requestName} ${paramsStr}`)
       return cached
     }
 
-    if (debug) console.log(`[apify cache] MISS ${ctx.requestName} ${paramsStr}`)
+    if (debug) console.log(`[liaise cache] MISS ${ctx.requestName} ${paramsStr}`)
 
     const result = await next()
 

@@ -1,5 +1,5 @@
 // =============================================================================
-// middleware.ts — Middleware composition engine for the apify library
+// middleware.ts — Middleware composition engine for the liaise library
 // =============================================================================
 //
 // This module implements the "onion model" middleware pattern, similar to how

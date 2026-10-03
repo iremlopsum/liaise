@@ -1,7 +1,7 @@
 {
-  "name": "@iremlopsum/apify",
+  "name": "liaise",
   "version": "4.4.3",
-  "description": "Runtime-agnostic, type-safe API client built on standard fetch. Zero dependencies.",
+  "description": "Type-safe API client for REST and GraphQL on standard fetch. Never throws. Zero dependencies.",
   "type": "module",
   "sideEffects": false,
   "main": "./dist/index.js",
@@ -40,7 +40,7 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/iremlopsum/apify.git"
+    "url": "git+https://github.com/iremlopsum/liaise.git"
   },
   "author": "Kristjan Vool",
   "license": "MIT",
@@ -48,9 +48,9 @@
     "node": ">=20"
   },
   "bugs": {
-    "url": "https://github.com/iremlopsum/apify/issues"
+    "url": "https://github.com/iremlopsum/liaise/issues"
   },
-  "homepage": "https://github.com/iremlopsum/apify#readme",
+  "homepage": "https://github.com/iremlopsum/liaise#readme",
   "keywords": [
     "fetch",
     "api",
@@ -59,7 +59,13 @@
     "typescript",
     "type-safe",
     "middleware",
-    "rest"
+    "rest",
+    "graphql",
+    "result",
+    "never-throws",
+    "zero-dependency",
+    "api-client",
+    "http-client"
   ],
   "devDependencies": {
     "@types/node": "^22.19.18",
