@@ -17,8 +17,9 @@
  *
  * Keys are built by content, in the order the rules are checked:
  *
- * - `undefined` at the top level → `[undefined]` (a call with no params is
- *   keyable). An `undefined` *object member* is dropped, since both transports
+ * - `undefined` at the top level → `''` (a call with no params is keyable,
+ *   and distinct from a bare `[undefined]` array param). An `undefined`
+ *   *object member* is dropped, since both transports
  *   omit it, so `{ a: undefined }` and `{}` key the same. As an array element,
  *   Map key/value or Set element it keys as the unquoted token `undefined`
  *   (a query string sends `ids=undefined`, not `ids=null`), and so does a
@@ -57,7 +58,10 @@
  * Never throws: a throwing getter or `toJSON` becomes `null`.
  */
 export function stableKey(value: unknown): string | null {
-  if (value === undefined) return '[undefined]'
+  // The empty string: no visited value can produce it (a string keys as its
+  // JSON, at least `""`). Before 5.0.1 this was '[undefined]', which is also
+  // exactly what a bare [undefined] array param keys as.
+  if (value === undefined) return ''
   try {
     const out = visit(value, '', new Set())
     return out === undefined ? null : out
