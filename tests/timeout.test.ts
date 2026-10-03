@@ -220,3 +220,24 @@ describe('timeout', () => {
     expect(call).toBe(2)
   })
 })
+
+describe('without AbortSignal.timeout or DOMException (Hermes)', () => {
+  it('still times out, as kind timeout', async () => {
+    vi.stubGlobal('DOMException', undefined)
+    const original = AbortSignal.timeout
+    ;(AbortSignal as any).timeout = undefined
+    try {
+      vi.stubGlobal('fetch', vi.fn((_u: string, init: RequestInit) => new Promise((_r, reject) => {
+        init.signal?.addEventListener('abort', () => reject(init.signal!.reason), { once: true })
+      })))
+      const slow = new Request<Record<string, never>, unknown>({ method: 'GET', path: '/slow', timeout: 20 })
+      const api = createApi({ baseUrl: 'https://x.test', requests: { slow } })
+      const { error } = await api.slow()
+      expect(error?.kind).toBe('timeout')
+      expect((error?.body as Error).name).toBe('TimeoutError')
+    } finally {
+      ;(AbortSignal as any).timeout = original
+      vi.unstubAllGlobals()
+    }
+  })
+})
