@@ -880,6 +880,19 @@ Request bodies are automatically serialized based on the input type. The `Conten
 
 A `ReadableStream` body can be sent once. A retry (`retryMiddleware`, `result.retry()`) returns an error Result telling you to read the stream into a `Blob` or `ArrayBuffer` first.
 
+#### What params can be
+
+| You pass | What happens |
+| -------- | ------------ |
+| Plain object | Decomposed into path tokens, query string and body |
+| `Map` with string keys | Same as the object it spells |
+| Class instance with fields | Same as a plain object |
+| Class instance with only `toJSON()` | Sent as its JSON (body only; refused on a request whose params go in the query string) |
+| Typed array, `DataView`, `Buffer`, `ReadableStream` | Sent as the body, as in the table above (refused on a request whose params go in the query string) |
+| `Set`, a bare `Date`, a `Map` with non-string keys, a class with no fields | Refused: an error Result (`kind: 'network'`) naming the type. Nothing is sent. |
+
+A `Map`, `Set` or class with private state nested inside a JSON body is sent as `{}`, because that is what `JSON.stringify` does. Convert it first.
+
 Header merge precedence (most specific wins):
 
 1. **Global headers** (from `createApi` config) -- lowest priority

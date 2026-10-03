@@ -97,7 +97,7 @@ describe('binary and stream params reach fetch untouched', () => {
     const { error } = await api.upload(bytes)
 
     expect(error).toBeNull()
-    const init = fetchMock.mock.calls[0][1] as RequestInit
+    const init = (fetchMock.mock.calls[0] as unknown as [string, RequestInit])[1] as RequestInit
     expect(init.body).toBe(bytes)
     expect(new Headers(init.headers).get('content-type')).toBe('application/octet-stream')
   })
@@ -111,7 +111,7 @@ describe('binary and stream params reach fetch untouched', () => {
 
     await api.upload(stream)
 
-    const init = fetchMock.mock.calls[0][1] as RequestInit & { duplex?: string }
+    const init = (fetchMock.mock.calls[0] as unknown as [string, RequestInit])[1] as RequestInit & { duplex?: string }
     expect(init.body).toBe(stream)
     expect(init.duplex).toBe('half')
   })
@@ -132,5 +132,64 @@ describe('binary and stream params reach fetch untouched', () => {
     expect(fetchMock).toHaveBeenCalledTimes(1)
     expect(error?.kind).toBe('network')
     expect((error?.body as Error).message).toMatch(/can only be sent once/)
+  })
+})
+
+class WithFields { constructor(public name = 'x') {} }
+class OnlyToJSON { #n = 3; toJSON() { return { n: this.#n } } }
+class OnlyGetters { #n = 3; get n() { return this.#n } }
+
+async function send(method: 'GET' | 'POST', path: string, params: unknown) {
+  const fetchMock = vi.fn(async () => okResponse())
+  vi.stubGlobal('fetch', fetchMock)
+  const call = new Request<any, unknown>({ method, path })
+  const api = createApi({ baseUrl: 'https://x.test', requests: { call } })
+  const result = await api.call(params)
+  const [url, init] = (fetchMock.mock.calls[0] ?? []) as [string?, RequestInit?]
+  return { result, url, init, fetchMock }
+}
+
+describe('params that used to send nothing', () => {
+  it('a string-keyed Map is the object it spells, as body', async () => {
+    const { init } = await send('POST', '/items', new Map([['name', 'x']]))
+    expect(init?.body).toBe('{"name":"x"}')
+  })
+
+  it('a string-keyed Map fills path tokens and the query string on GET', async () => {
+    const { url } = await send('GET', '/users/:id', new Map([['id', '7'], ['q', 'x']]))
+    expect(url).toBe('https://x.test/users/7?q=x')
+  })
+
+  it('a class with only toJSON is sent as its JSON', async () => {
+    const { init } = await send('POST', '/items', new OnlyToJSON())
+    expect(init?.body).toBe('{"n":3}')
+    expect(new Headers(init?.headers).get('content-type')).toBe('application/json')
+  })
+
+  it('a class with public fields keeps decomposing like an object', async () => {
+    const { init } = await send('POST', '/items', new WithFields())
+    expect(init?.body).toBe('{"name":"x"}')
+  })
+
+  it.each([
+    ['a Set', new Set([1]), /Set/],
+    ['a Date', new Date(0), /Date/],
+    ['a Map with non-string keys', new Map([[1, 'a']]), /non-string keys/],
+    ['a class with only getters', new OnlyGetters(), /OnlyGetters/],
+  ])('refuses %s with an error Result naming the type, and sends nothing', async (_n, params, message) => {
+    const { result, fetchMock } = await send('POST', '/items', params)
+    expect(fetchMock).not.toHaveBeenCalled()
+    expect(result.error?.kind).toBe('network')
+    expect((result.error?.body as Error).message).toMatch(message)
+  })
+
+  it.each([
+    ['a Uint8Array', new Uint8Array([1])],
+    ['a ReadableStream', new ReadableStream()],
+    ['a class with only toJSON', new OnlyToJSON()],
+  ])('refuses %s on a GET instead of dropping it', async (_n, params) => {
+    const { result, fetchMock } = await send('GET', '/items', params)
+    expect(fetchMock).not.toHaveBeenCalled()
+    expect((result.error?.body as Error).message).toMatch(/query string/)
   })
 })

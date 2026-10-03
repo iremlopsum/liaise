@@ -48,7 +48,8 @@ import { anySignal } from './utils/any-signal.js'
 import { operationBudget, perCallerBudget } from './utils/budget.js'
 import { stableKey } from './utils/stable-key.js'
 import { createBackstop } from './utils/backstop.js'
-import { isSpecialBody, isReadableStream } from './utils/special-body.js'
+import { isReadableStream } from './utils/special-body.js'
+import { classifyParams } from './utils/classify-params.js'
 import { runSchema } from './utils/validate.js'
 import type { SchemaOutcome } from './utils/validate.js'
 import type { ApiConfig, CallOptions, ErrorResult, Middleware, MiddlewareContext, Result, ResponseType } from './types.js'
@@ -131,6 +132,14 @@ type Api<TRequests extends Record<string, Request<any, any>>> = {
 // =============================================================================
 
 /**
+ * Every ReadableStream body already handed to fetch. A stream can be read
+ * once: a second attempt (retryMiddleware, result.retry(), a middleware that
+ * calls next() twice) would otherwise send an empty or broken body. A WeakSet
+ * so a finished stream is not kept alive by this record.
+ */
+const sentStreams = new WeakSet<ReadableStream>()
+
+/**
  * Returned by `parseResponse` when a `json` request received an empty body.
  *
  * Distinct from `null` because `JSON.parse("null")` is also `null`: a server
@@ -141,14 +150,6 @@ type Api<TRequests extends Record<string, Request<any, any>>> = {
  * normalizes it to `null` for `error.body` instead: a failure is already
  * being reported there, and the empty body is only diagnostic.
  */
-/**
- * Every ReadableStream body already handed to fetch. A stream can be read
- * once: a second attempt (retryMiddleware, result.retry(), a middleware that
- * calls next() twice) would otherwise send an empty or broken body. A WeakSet
- * so a finished stream is not kept alive by this record.
- */
-const sentStreams = new WeakSet<ReadableStream>()
-
 const EMPTY_JSON_BODY: unique symbol = Symbol('liaise.emptyJsonBody')
 
 /**
@@ -209,7 +210,7 @@ async function parseResponse(response: Response, responseType: ResponseType = 'j
  * One implementation, two callers: Step 4 inside `execute()`, and
  * `urlForError` below. That is the entire reason it exists as a function.
  * Step 4 is not a `buildUrl` call — it is the `shouldSerializeAsQuery` getter,
- * an `isSpecialBody` check, and a conditional `{}` substitution wrapped around
+ * the `classifyParams` decision, and a conditional `{}` substitution wrapped around
  * one. An error path that hand-reproduced that would be free to drift from the
  * real one, which is why recomputing the URL for diagnostics was rejected
  * before this extraction existed.
@@ -222,24 +223,18 @@ function resolveRequestUrl(
   baseUrl: string,
   request: Request<any, any>,
   params: object
-): { url: string; remaining: Record<string, unknown>; asQuery: boolean; paramsIsSpecialBody: boolean } {
+): { url: string; remaining: Record<string, unknown>; asQuery: boolean; whole: { value: unknown } | null } {
   // Respects the bodyAs config override, then the HTTP method default.
   const asQuery = request.shouldSerializeAsQuery
-
-  // A non-plain-object body (FormData, Blob, ...) cannot be decomposed into
-  // key-value pairs for path substitution or query serialization. The URL still
-  // needs building for baseUrl + path, so buildUrl is handed an empty params
-  // object and the real params go straight to serializeBody.
-  const paramsIsSpecialBody = isSpecialBody(params)
-
+  // Throws a TypeError for params with no honest wire form; see classify-params.ts.
+  const classified = classifyParams(params, asQuery)
   const { url, remaining } = buildUrl(
     baseUrl,
     request.config.path,
-    paramsIsSpecialBody ? {} : (params as Record<string, unknown>),
+    classified.kind === 'fields' ? classified.fields : {},
     asQuery
   )
-
-  return { url, remaining, asQuery, paramsIsSpecialBody }
+  return { url, remaining, asQuery, whole: classified.kind === 'whole' ? { value: classified.value } : null }
 }
 
 /**
@@ -1047,7 +1042,7 @@ export function createApi<TRequests extends Record<string, Request<any, any>>>(
           // the error paths call the same function to name `error.request.url`
           // — see its doc for why that matters.
           // -----------------------------------------------------------------
-          const { url, remaining, asQuery, paramsIsSpecialBody } = resolveRequestUrl(baseUrl, request, params)
+          const { url, remaining, asQuery, whole } = resolveRequestUrl(baseUrl, request, params)
 
           // -----------------------------------------------------------------
           // Step 5: Merge headers from all three layers
@@ -1074,11 +1069,11 @@ export function createApi<TRequests extends Record<string, Request<any, any>>>(
           if (!asQuery) {
             // Decide what to serialize: the original params (for special types)
             // or the remaining params after path substitution (for plain objects)
-            const toSerialize = paramsIsSpecialBody ? params : remaining
+            const toSerialize = whole ? whole.value : remaining
 
             // Only serialize if there's something to serialize — avoid sending
             // empty bodies ({}) for endpoints with no body params.
-            if (paramsIsSpecialBody || Object.keys(remaining).length > 0) {
+            if (whole || Object.keys(remaining).length > 0) {
               const serialized = serializeBody(toSerialize)
               body = serialized.body
 
