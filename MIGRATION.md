@@ -9,7 +9,7 @@ For the full record of what changed in each release, see [CHANGELOG.md](./CHANGE
 
 ## Upgrading to 5.0.1
 
-No code changes for most callers. Five things you may observe.
+No code changes for most callers. Six things you may observe.
 
 **Binary bodies arrive as binary.** A `Uint8Array`, other typed array, `DataView`
 or `Buffer` used to be sent as a JSON index map (`{"0":1,"1":2}`); it is now the
@@ -37,11 +37,16 @@ unique header (a request ID) makes every call a miss; put it after
 with two entries for one name now sends `a, b`, where the last used to win. A
 later source (per-call over request over config) still replaces an earlier one.
 
-**Two edge behaviours.** After a call settles, aborting the caller's signal no
-longer reaches that call's `ctx.request.signal`, so fire-and-forget middleware
-work holding it is not cancelled by the caller; keep your own controller if you
-need that. And a param key with non-word characters (`a-b`) no longer fills a
-`:a-b` path token; path tokens are `[a-zA-Z0-9_]`, so rename the token and key.
+**After a call settles, a later abort no longer reaches it.** Aborting the
+caller's signal no longer reaches that call's `ctx.request.signal`, so
+fire-and-forget middleware work still holding it is not cancelled by the caller;
+keep your own controller if you need that.
+
+**A path token with non-word characters now fails.** Path tokens are
+`[a-zA-Z0-9_]`. A template like `/x/:a-b` with a key `a-b` used to resolve by
+accident; it is now read as the token `:a` followed by `-b`, and the call returns
+an error Result (a `TypeError`, "Unresolved path parameter :a…"). Use only
+`[a-zA-Z0-9_]` in path token names and their keys.
 
 ---
 

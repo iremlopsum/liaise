@@ -44,8 +44,10 @@ they cannot. See [MIGRATION.md](./MIGRATION.md#upgrading-to-501).
 - **A path token can no longer be hit by an unrelated param key.** Substitution
   built a regular expression from each param key, so a key like `a.b` could fill
   the token `:aXb`. Tokens are now scanned from the template, using the documented
-  grammar `[a-zA-Z0-9_]`. A param key with other characters, such as `a-b`, no
-  longer fills a `:a-b` path token, which the old pattern did by accident.
+  grammar `[a-zA-Z0-9_]`. A template like `/x/:a-b` with a key `a-b` used to
+  resolve by accident; the scan reads the token as `:a` followed by `-b`, finds no
+  `a` key, and the call now returns an error Result (a `TypeError`, "Unresolved
+  path parameter :a…"). Use only `[a-zA-Z0-9_]` in path token names and their keys.
 - **A `Date` in a query string is reported as a `Date`.** The error said a nested
   object was not allowed; it now names the `Date` and suggests `toISOString()` or
   `getTime()`. It is still refused.
