@@ -15,6 +15,15 @@ function readBody(req: http.IncomingMessage): Promise<string> {
   })
 }
 
+function readRaw(req: http.IncomingMessage): Promise<Buffer> {
+  return new Promise((resolve, reject) => {
+    const chunks: Buffer[] = []
+    req.on('data', (chunk: Buffer) => chunks.push(chunk))
+    req.on('end', () => resolve(Buffer.concat(chunks)))
+    req.on('error', reject)
+  })
+}
+
 function sendJson(res: http.ServerResponse, status: number, data: unknown): void {
   const payload = JSON.stringify(data)
   res.writeHead(status, {
@@ -75,6 +84,10 @@ export function startServer(): Promise<TestServer> {
             }
           }
           sendJson(res, 200, { body, contentType: req.headers['content-type'] ?? null })
+
+        } else if (method === 'POST' && pathname === '/echo-bytes') {
+          const raw = await readRaw(req)
+          sendJson(res, 200, { bytes: [...raw], contentType: req.headers['content-type'] ?? null })
 
         } else if (method === 'GET' && pathname === '/headers') {
           sendJson(res, 200, { headers: req.headers })
