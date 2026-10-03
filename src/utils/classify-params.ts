@@ -23,6 +23,12 @@ function typeName(value: object): string {
   return typeof name === 'string' && name !== '' ? name : 'object'
 }
 
+/** `a Map`, `an Int16Array`: the article follows the first letter. */
+function withArticle(value: object): string {
+  const name = typeName(value)
+  return `${/^[aeiou]/i.test(name) ? 'an' : 'a'} ${name}`
+}
+
 /**
  * @param params - The call's params, as passed.
  * @param asQuery - Whether this request's params go in the query string.
@@ -36,7 +42,7 @@ export function classifyParams(params: unknown, asQuery: boolean): ClassifiedPar
     // Blob, ArrayBuffer and URLSearchParams keep their pre-5.0.1 GET behaviour.
     if (asQuery && (ArrayBuffer.isView(params) || isReadableStream(params))) {
       throw new TypeError(
-        `Cannot send a ${typeName(params as object)} as params for a request whose params go in the query string. ` +
+        `Cannot send ${withArticle(params as object)} as params for a request whose params go in the query string. ` +
         'Send it with POST, PUT or PATCH.'
       )
     }
@@ -66,7 +72,12 @@ export function classifyParams(params: unknown, asQuery: boolean): ClassifiedPar
   }
 
   const proto = Object.getPrototypeOf(params) as unknown
-  if (proto === Object.prototype || proto === null || Object.keys(params).length > 0) {
+  // `proto`'s own prototype being null is another realm's Object.prototype
+  // (vm context, iframe): a plain object whose `Object.prototype` is not ours.
+  const plain =
+    proto === Object.prototype || proto === null ||
+    Object.getPrototypeOf(proto as object) === null
+  if (plain || Object.keys(params).length > 0) {
     return { kind: 'fields', fields: params as Record<string, unknown> }
   }
 
@@ -75,13 +86,13 @@ export function classifyParams(params: unknown, asQuery: boolean): ClassifiedPar
   if (typeof (params as { toJSON?: unknown }).toJSON === 'function') {
     if (asQuery) {
       throw new TypeError(
-        `Cannot send a ${typeName(params)} in a query string. Send it with POST, PUT or PATCH, or pass its fields as a plain object.`
+        `Cannot send ${withArticle(params)} in a query string. Send it with POST, PUT or PATCH, or pass its fields as a plain object.`
       )
     }
     return { kind: 'whole', value: params }
   }
 
   throw new TypeError(
-    `Cannot send a ${typeName(params)} as request params: it has no fields to send. Pass a plain object, or give the class a toJSON() method.`
+    `Cannot send ${withArticle(params)} as request params: it has no fields to send. Pass a plain object, or give the class a toJSON() method.`
   )
 }

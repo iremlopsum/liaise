@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, afterEach } from 'vitest'
+import { runInNewContext } from 'node:vm'
 import { serializeBody } from '../src/utils/serialize.js'
 import { createApi } from '../src/create-api.js'
 import { Request } from '../src/request.js'
@@ -186,10 +187,38 @@ describe('params that used to send nothing', () => {
   it.each([
     ['a Uint8Array', new Uint8Array([1])],
     ['a ReadableStream', new ReadableStream()],
+    ['a DataView', new DataView(new ArrayBuffer(2))],
+    ['a Buffer', Buffer.from([1, 2])],
     ['a class with only toJSON', new OnlyToJSON()],
   ])('refuses %s on a GET instead of dropping it', async (_n, params) => {
     const { result, fetchMock } = await send('GET', '/items', params)
     expect(fetchMock).not.toHaveBeenCalled()
     expect((result.error?.body as Error).message).toMatch(/query string/)
+  })
+
+  it('refuses a Map with non-string keys on a GET', async () => {
+    const { result, fetchMock } = await send('GET', '/items', new Map([[1, 'a']]))
+    expect(fetchMock).not.toHaveBeenCalled()
+    expect((result.error?.body as Error).message).toMatch(/non-string keys/)
+  })
+
+  it('treats a plain object from another realm as fields, not as a class', async () => {
+    const foreign = runInNewContext('({ a: 1 })') as Record<string, unknown>
+    const { init } = await send('POST', '/items', foreign)
+    expect(init?.body).toBe('{"a":1}')
+    const empty = await send('POST', '/items', runInNewContext('({})'))
+    expect(empty.result.error).toBeNull()
+  })
+
+  it('uses "an" before a vowel and "a" before a consonant in refusal messages', async () => {
+    const view = await send('GET', '/items', new Int16Array([1]))
+    expect((view.result.error?.body as Error).message).toMatch(/Cannot send an Int16Array/)
+    const set = await send('POST', '/items', new Set([1]))
+    expect((set.result.error?.body as Error).message).toMatch(/Cannot send a Set/)
+    class Money { #c = 1; get c() { return this.#c } }
+    const m = await send('POST', '/items', new Money())
+    expect((m.result.error?.body as Error).message).toMatch(/a Money/)
+    const o = await send('POST', '/items', Object.create({ inherited: 1 }, {}) as object)
+    expect((o.result.error?.body as Error).message).toMatch(/an Object/)
   })
 })
