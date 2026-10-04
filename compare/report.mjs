@@ -56,7 +56,13 @@ function notesSection() {
 
 const { meta } = results
 const versions = names.map(n => `${n} ${meta.versions[n]}`).join(', ')
+const months = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December']
+const readableDate = iso => { const [y, m, d] = iso.split('-').map(Number); return `${d} ${months[m - 1]} ${y}` }
+// The owner's disclaimer: the comparison is a dated snapshot of other people's libraries.
+const disclaimer = `Measured on ${readableDate(meta.date)} against axios ${meta.versions.axios}, ky ${meta.versions.ky} and ofetch ${meta.versions.ofetch}. Other libraries change. Rerun \`npm run compare\` in \`compare/\` for current results.`
 const full = `# Comparison results
+
+${disclaimer}
 
 Run on ${meta.date}, Node ${meta.node}, ${meta.platform}. Versions: ${versions}.
 
@@ -100,6 +106,8 @@ if (process.argv[2] === '--splice') {
   const a = readme.indexOf(START), b = readme.indexOf(END)
   if (a === -1 || b === -1 || b < a) { console.error(`${file}: missing ${START} / ${END} markers`); process.exit(1) }
   const block = `${START}
+
+${disclaimer}
 
 ${outcomes('configured')}
 

@@ -43,6 +43,10 @@ Formerly published as `@iremlopsum/apify`; switching takes two steps, see [MIGRA
   - [Give each attempt its own timeout](#give-each-attempt-its-own-timeout)
   - [Report errors to Sentry](#report-errors-to-sentry)
   - [Upload and download files](#upload-and-download-files)
+- [Choosing liaise](#choosing-liaise)
+  - [When it fits, and when it doesn't](#when-it-fits-and-when-it-doesnt)
+  - [How it compares](#how-it-compares)
+  - [Where it runs](#where-it-runs)
 - [Philosophy](#philosophy)
 - [API Reference](#api-reference)
 - [Contributing](#contributing)
@@ -1415,7 +1419,7 @@ With `timeout: 3000`, the caller gets an answer within three seconds however man
 
 ### Give each attempt its own timeout
 
-liaise's `timeout` is one deadline for the whole call. If you want axios-style limits per attempt instead, put a middleware *inside* the retry. `getUser` is the endpoint from [Quick start](#quick-start).
+liaise's `timeout` is one deadline for the whole call. If you want a limit per attempt instead, put a middleware *inside* the retry. `getUser` is the endpoint from [Quick start](#quick-start).
 
 <!-- tested: per-attempt-timeout -->
 ```ts
@@ -1492,6 +1496,84 @@ const api = createApi({ baseUrl: '/api', requests: { uploadAvatar, downloadFile 
 
 Call it with `api.uploadAvatar(form)` and `api.downloadFile({ id })`. Other body types (a `Blob`, a `ReadableStream`) are listed under [Sending data](#sending-data).
 
+## Choosing liaise
+
+This section helps you decide whether liaise fits your project. It covers when to pick something else, how liaise compares with other fetch clients, and where it runs.
+
+### When it fits, and when it doesn't
+
+Need a normalized cache (update one user, and every screen showing that user updates), optimistic updates or subscriptions? Use Apollo or urql. Apollo's [caching overview](https://www.apollographql.com/docs/react/caching/overview) and urql's [Graphcache docs](https://nearform.com/open-source/urql/docs/graphcache/) explain how each one caches. [Why another API client?](#why-another-api-client) covers the trade-off.
+
+For UI caching and refetching, use TanStack Query *with* liaise; see the [recipe](#use-with-tanstack-query).
+
+For two or three calls, plain fetch is fine.
+
+liaise is a good fit when you have:
+
+- **Many endpoints with one auth setup.** Each endpoint is one [`defineRequest`](#defining-endpoints), and one [auth middleware](#add-an-auth-header-and-refresh-the-token-on-a-401) covers them all.
+- **Failure handling that matters**, such as a checkout or a form. Every failure comes back as a value with a [kind you can switch on](#handling-errors).
+- **One API layer shared across frameworks, servers and scripts.** See [Where it runs](#where-it-runs).
+
+### How it compares
+
+[`compare/`](compare/) runs fetch, axios, ky, ofetch and liaise through ten failure scenarios against a local server, and records what the calling code gets back. [compare/README.md](compare/README.md) explains the fairness rules and how to rerun it.
+
+<!-- compare:start -->
+
+Measured on 4 October 2026 against axios 1.20.0, ky 2.1.0 and ofetch 1.5.1. Other libraries change. Rerun `npm run compare` in `compare/` for current results.
+
+| Scenario | fetch | axios | ky | ofetch | liaise |
+| --- | :-- | :-- | :-- | :-- | :-- |
+| Server answers 500 | throws Error* | throws AxiosError | throws HTTPError | throws FetchError | error result (http) |
+| Server unreachable | throws TypeError* | throws AxiosError (name: Error) | throws NetworkError | throws FetchError | error result (network) |
+| Server never answers | throws TimeoutError, 3002 ms* | throws AxiosError, 3005 ms | throws TimeoutError, 3005 ms | throws FetchError, 3003 ms | error result (timeout), 3003 ms |
+| 200 with broken JSON | throws SyntaxError* | throws AxiosError (name: SyntaxError) | throws SyntaxError | throws SyntaxError | error result (parse) |
+| 204 with no body, on a JSON call | resolves with undefined* | resolves with "" | resolves with undefined | resolves with undefined | resolves with undefined |
+| Search as you type: which results stay on screen | shows "rea"* | shows "rea"* | shows "rea"* | shows "rea"* | shows "rea" |
+| Five requests get a 401 at once | 1 refresh call, 5/5 succeed* | 1 refresh call, 5/5 succeed* | 1 refresh call, 5/5 succeed* | 1 refresh call, 5/5 succeed* | 1 refresh call, 5/5 succeed* |
+| Slow 503s, 3 s deadline, 3 retries: when does the caller hear back | after 3.0s: throws TimeoutError, 3 attempts* | after 3.0s: throws CanceledError, 3 attempts* | after 3.0s: throws TimeoutError, 3 attempts | after 3.0s: throws FetchError, 3 attempts* | after 3.0s: error result (timeout), 3 attempts |
+| Path param is undefined | requests /s/users/undefined | requests /s/users/undefined | requests /s/users/undefined | requests /s/users/undefined | refused before sending: error result (network) |
+| Response is missing a field the type promises | — | — | throws SchemaValidationError | — | error result (parse) |
+
+\* needed hand-written code, described in the [notes](compare/results.md#notes). — means the library has no built-in option.
+
+Out of the box, liaise has no timeout (only ky has one by default) and treats a 204 on a JSON call as a parse error. See Table B in [compare/results.md](compare/results.md).
+
+| Library | gzip (kB) | brotli (kB) |
+| --- | :-- | :-- |
+| fetch | 0.1 | 0.1 |
+| axios | 19.1 | 17.3 |
+| ky | 9.6 | 8.5 |
+| ofetch | 4.0 | 3.6 |
+| liaise | 5.8 | 5.2 |
+| liaise + retryMiddleware | 6.3 | 5.7 |
+
+fetch is built into the runtime; its row is the call site only, the floor rather than a library.
+
+Request overhead on localhost, sequential (median requests per second): fetch 16,797, axios 13,691, ky 13,742, ofetch 16,230, liaise 16,414.
+
+Out-of-the-box results, request overhead in full and the notes: [compare/results.md](compare/results.md).
+
+<!-- compare:end -->
+
+With enough of your own code, every library gets the right result in almost every row. The difference is how much you write. Counting the cells marked `*`, fetch needs 8, axios 3, ofetch 3, ky 2 and liaise 1. liaise gets there with options, and returns each failure as a value instead of throwing. It is the only one that refuses an undefined path param before sending the request.
+
+ky is the closest alternative. It matches liaise on the deadline, token refresh and schema rows. For the missing default timeout, a `timeout` option on `createApi` is planned. In size, liaise is larger than ofetch and smaller than ky and axios.
+
+In request overhead, liaise ties fetch and ofetch. axios and ky handle about 17% fewer requests per second. Overhead is measured in microseconds; on a real network each request takes milliseconds.
+
+### Where it runs
+
+| Runtime | Status |
+| ------- | ------ |
+| Node 20, 22, 24 | Tested in CI |
+| Browsers, Bun, Deno, Cloudflare Workers | Should work (standard `fetch`), not tested in CI |
+| React Native | Uses its built-in `fetch`, not tested in CI |
+
+On React Native, where `AbortSignal.timeout` is missing, `timeout` falls back to a timer. If the runtime drops abort reasons, a timeout may report as `'abort'` instead of `'timeout'`.
+
+No hooks, no framework code: a client is a plain object of functions returning promises. It works in React, Vue, Svelte, Solid, Angular, server loaders, workers and scripts. The [recipes](#recipes) show it with TanStack Query, React and a store.
+
 ## Philosophy
 
 ### Never throws
@@ -1512,7 +1594,7 @@ Type safety comes from inference, not annotation. Define `Request<TParams, TResp
 
 ### Runtime-agnostic
 
-No assumptions about Node.js, browsers, or any specific runtime. If your environment has `fetch`, the library works -- browsers, Node.js 20+, Bun, Deno, React Native (its built-in `fetch`; not tested in CI), Cloudflare Workers, edge runtimes. Where `AbortSignal.timeout` is missing (React Native's Hermes), `timeout` falls back to `AbortController` plus `setTimeout`; the failure is `kind: 'timeout'` where the runtime's `AbortController` carries abort reasons, and possibly `'abort'` where it does not. Not tested on a device.
+No assumptions about Node.js, browsers, or any specific runtime. If your environment has `fetch`, the library works. [Where it runs](#where-it-runs) lists what is tested.
 
 ### Framework-agnostic
 
