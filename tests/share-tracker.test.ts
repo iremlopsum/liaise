@@ -1,4 +1,5 @@
 import { describe, it, expect, vi } from 'vitest'
+import { getEventListeners } from 'node:events'
 import { ShareTracker, isAbandoned, requestKey, TRACING_HEADERS, tagShared, markJoined, wasJoined, ABANDONED } from '../src/utils/share.js'
 import type { Exchange } from '../src/utils/exchange.js'
 
@@ -62,6 +63,10 @@ describe('requestKey', () => {
     expect(requestKey('me', 'GET', '/me', h({ authorization: 'Bearer bob' }), null)).not.toBe(base)
     expect(requestKey('me', 'GET', '/me', h({ authorization: 'Bearer alice' }), '{}')).not.toBe(base)
   })
+  it('normalises case only for the methods Fetch normalises', () => {
+    expect(requestKey('x', 'get', '/x', h({}), null)).toBe(requestKey('x', 'GET', '/x', h({}), null))
+    expect(requestKey('x', 'patch', '/x', h({}), null)).not.toBe(requestKey('x', 'PATCH', '/x', h({}), null))
+  })
   it('ignores exactly the tracing headers', () => {
     expect([...TRACING_HEADERS].sort()).toEqual(['baggage', 'sentry-trace', 'traceparent', 'tracestate', 'x-correlation-id', 'x-request-id'])
     const a = requestKey('me', 'GET', '/me', h({ 'x-request-id': 'one', traceparent: 't1' }), null)
@@ -71,7 +76,7 @@ describe('requestKey', () => {
   it('keys string and URLSearchParams bodies, and refuses every other body', () => {
     expect(requestKey('x', 'POST', '/x', h({}), new URLSearchParams('a=1'))).toBe(requestKey('x', 'POST', '/x', h({}), new URLSearchParams('a=1')))
     expect(requestKey('x', 'POST', '/x', h({}), 'a=1')).not.toBe(requestKey('x', 'POST', '/x', h({}), new URLSearchParams('a=1')))
-    for (const body of [new FormData(), new Blob(['a']), new ArrayBuffer(1), new Uint8Array(1), new ReadableStream()]) {
+    for (const body of [new FormData(), new Blob(['a']), new ArrayBuffer(1), new Uint8Array(1), new DataView(new ArrayBuffer(1)), new ReadableStream()]) {
       expect(requestKey('x', 'POST', '/x', h({}), body)).toBeNull()
     }
   })
@@ -101,21 +106,72 @@ describe('ShareTracker.run (5.1.0)', () => {
     expect(send).toHaveBeenCalledTimes(2)
   })
 
-  it('does not join an entry that has settled but is not yet cleaned up', async () => {
+  it('a call after settlement is a fresh request, not a join', async () => {
     const t = new ShareTracker()
-    // Probe the window deterministically: the entry is removed from the map by a
-    // cleanup step that runs after its outcome is set, so hook that removal and
-    // start a call right before it, while the entry is still in the map.
-    const runs = (t as unknown as { runs: Map<string, unknown> }).runs
-    let late: Promise<{ joined: boolean }> | undefined
-    const del = runs.delete.bind(runs)
-    runs.delete = (k: string) => {
-      late ??= t.run('k', () => undefined, undefined, async () => ex('fresh'))
-      return del(k)
-    }
-    const send = vi.fn(async () => ex('old'))
-    await t.run('k', () => undefined, undefined, send)
-    expect((await late)!.joined).toBe(false)
+    const first = await t.run('k', () => undefined, undefined, async () => ex('old'))
+    const second = await t.run('k', () => undefined, undefined, async () => ex('fresh'))
+    expect(first.joined).toBe(false)
+    expect(second.joined).toBe(false)
+    expect(second.outcome.ok && second.outcome.exchange.body).toBe('fresh')
+  })
+
+  it('rejects an already-aborted caller without sending, and leaves nothing to join', async () => {
+    const t = new ShareTracker()
+    const ac = new AbortController()
+    ac.abort(new Error('early'))
+    const send = vi.fn(async () => ex())
+    const deadline = vi.fn(() => undefined)
+    await expect(t.run('k', deadline, ac.signal, send)).rejects.toThrow('early')
+    expect(send).not.toHaveBeenCalled()
+    expect(deadline).not.toHaveBeenCalled()
+    const next = await t.run('k', () => undefined, undefined, send)
+    expect(next.joined).toBe(false)
+    expect(send).toHaveBeenCalledTimes(1)
+  })
+
+  it('does not join an entry whose shared deadline has fired', async () => {
+    const t = new ShareTracker()
+    const limit = new AbortController()
+    const send = vi.fn(() => new Promise<Exchange>(() => {}))
+    void t.run('k', () => limit.signal, undefined, send)
+    limit.abort(new Error('deadline'))
+    const second = t.run('k', () => undefined, undefined, send)
+    void second
+    expect(send).toHaveBeenCalledTimes(2)
+  })
+
+  it('does not join a request whose callers have all given up, even if send ignores its signal', async () => {
+    const t = new ShareTracker()
+    const ac = new AbortController()
+    const send = vi.fn(() => new Promise<Exchange>(() => {}))
+    const a = t.run('k', () => undefined, ac.signal, send).catch(() => {})
+    ac.abort()
+    await a
+    const fresh = vi.fn(async () => ex())
+    const r = await t.run('k', () => undefined, undefined, fresh)
+    expect(r.joined).toBe(false)
+    expect(fresh).toHaveBeenCalledTimes(1)
+  })
+
+  it('drops an abandoned entry from the map even if send ignores its signal', async () => {
+    const t = new ShareTracker()
+    const ac = new AbortController()
+    const a = t.run('k', () => undefined, ac.signal, () => new Promise<Exchange>(() => {})).catch(() => {})
+    ac.abort()
+    await a
+    // The map is private; a lingering entry would also keep the key (body text) alive.
+    expect((t as unknown as { runs: Map<string, unknown> }).runs.size).toBe(0)
+  })
+
+  it('leaves no abort listener on a long-lived caller signal or on the deadline signal', async () => {
+    const t = new ShareTracker()
+    const ac = new AbortController()
+    for (let i = 0; i < 5; i++) await t.run('k', () => undefined, ac.signal, async () => ex())
+    expect(getEventListeners(ac.signal, 'abort')).toHaveLength(0)
+    const limit = new AbortController()
+    await t.run('k', () => limit.signal, ac.signal, async () => ex())
+    expect(getEventListeners(limit.signal, 'abort')).toHaveLength(0)
+    expect(getEventListeners(ac.signal, 'abort')).toHaveLength(0)
   })
 
   it('a caller that gives up rejects with its own reason, and the request continues for the others', async () => {
@@ -146,14 +202,17 @@ describe('ShareTracker.run (5.1.0)', () => {
     expect(sentSignal.reason).toBe(ABANDONED)
   })
 
-  it('applies the deadline only from the leader, measured from send', async () => {
+  it('applies the deadline once, from the leader, and aborts the shared send with a TimeoutError', async () => {
     const t = new ShareTracker()
     const deadline = vi.fn(() => AbortSignal.timeout(20))
     let sentSignal!: AbortSignal
     const send = (s: AbortSignal) => { sentSignal = s; return new Promise<Exchange>((_, rej) => s.addEventListener('abort', () => rej(s.reason))) }
     const a = t.run('k', deadline, undefined, send)
     const b = t.run('k', deadline, undefined, send)
-    const [ra, rb] = await Promise.all([a, b])
+    const guard = new Promise<'hung'>(r => setTimeout(() => r('hung'), 500))
+    const res = await Promise.race([Promise.all([a, b]), guard])
+    expect(res).not.toBe('hung')
+    const [ra, rb] = res as Awaited<typeof a>[]
     expect(deadline).toHaveBeenCalledTimes(1)
     expect(ra.outcome.ok || rb.outcome.ok).toBe(false)
     expect((sentSignal.reason as Error).name).toBe('TimeoutError')

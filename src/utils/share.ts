@@ -67,7 +67,15 @@ export function requestKey(name: string, method: string, url: string, headers: H
     if (!TRACING_HEADERS.has(key)) pairs.push([key, value])
   })
   pairs.sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0))
-  return JSON.stringify([name, method.toUpperCase(), url, pairs, bodyKey])
+  return JSON.stringify([name, normalizeMethod(method), url, pairs, bodyKey])
+}
+
+/**
+ * Mirrors Fetch: only these methods are case-normalised, so `patch` and
+ * `PATCH` (which Fetch sends differently) never share a key.
+ */
+function normalizeMethod(method: string): string {
+  return /^(?:delete|get|head|options|post|put)$/i.test(method) ? method.toUpperCase() : method
 }
 
 /** What one shared round trip produced. Never a rejection: a failed send is `ok: false`. */
@@ -83,10 +91,17 @@ export interface Shared {
 }
 
 interface RunEntry {
+  /** The round trip's outcome. Never rejects: both arms are mapped. */
   promise: Promise<SharedOutcome>
+  /** Aborted with ABANDONED when the last caller gives up. */
   controller: AbortController
+  /** What `send` was given: the controller's signal merged with the leader's deadline. */
+  signal: AbortSignal
+  /** Callers still waiting. */
   refs: number
+  /** Whether the outcome is known. Entries leave the map the moment it is, so this is defence. */
   settled: boolean
+  /** Identity of the round trip, shared by every caller's result. */
   token: object
 }
 
@@ -145,8 +160,12 @@ export class ShareTracker {
     callerSignal: AbortSignal | undefined,
     send: (signal: AbortSignal) => Promise<Exchange>
   ): Promise<Shared> {
+    // A caller that has already given up must not start (or join) anything.
+    if (callerSignal?.aborted === true) return Promise.reject(callerSignal.reason)
     let entry = this.runs.get(key)
-    if (entry && (entry.settled || entry.refs <= 0 || entry.controller.signal.aborted)) entry = undefined
+    // entry.signal covers the controller (abandonment), the leader's deadline,
+    // and a deadline() that came back already aborted.
+    if (entry && (entry.settled || entry.refs <= 0 || entry.signal.aborted)) entry = undefined
     const joined = entry !== undefined
 
     if (!entry) {
@@ -156,20 +175,23 @@ export class ShareTracker {
       // anySignal returns it unchanged; otherwise a merged signal that carries
       // the aborting input's reason (so a TimeoutError stays a TimeoutError).
       const signal = anySignal([controller.signal, limit]) as AbortSignal
-      const created: RunEntry = { controller, refs: 0, settled: false, token: {}, promise: undefined as unknown as Promise<SharedOutcome> }
+      const created: RunEntry = { controller, signal, refs: 0, settled: false, token: {}, promise: undefined as unknown as Promise<SharedOutcome> }
       // `send` may throw synchronously; the async wrapper turns that into a
       // rejection so it lands in the same ok:false arm. That is what keeps
       // `created.promise` from ever rejecting, so nothing downstream can
       // produce an unhandled rejection.
-      created.promise = (async () => send(signal))()
-        .then(
-          (exchange): SharedOutcome => { created.settled = true; return { ok: true, exchange } },
-          (error: unknown): SharedOutcome => { created.settled = true; return { ok: false, error } }
-        )
-        .finally(() => {
-          if (this.runs.get(key) === created) this.runs.delete(key)
-          releaseSignal(signal)
-        })
+      // Settling, leaving the map and releasing the signal all happen in the
+      // same step, so no observer can ever see a settled entry in the map.
+      const settle = (outcome: SharedOutcome): SharedOutcome => {
+        created.settled = true
+        if (this.runs.get(key) === created) this.runs.delete(key)
+        releaseSignal(signal)
+        return outcome
+      }
+      created.promise = (async () => send(signal))().then(
+        (exchange): SharedOutcome => settle({ ok: true, exchange }),
+        (error: unknown): SharedOutcome => settle({ ok: false, error })
+      )
       this.runs.set(key, created)
       entry = created
     }
@@ -183,7 +205,12 @@ export class ShareTracker {
         if (done) return
         done = true
         held.refs--
-        if (held.refs <= 0 && !held.settled && !held.controller.signal.aborted) held.controller.abort(ABANDONED)
+        if (held.refs <= 0 && !held.settled) {
+          // Drop the entry now: a `send` that ignores its signal would
+          // otherwise leave it (and its key, which holds body text) in the map.
+          if (this.runs.get(key) === held) this.runs.delete(key)
+          if (!held.controller.signal.aborted) held.controller.abort(ABANDONED)
+        }
         reject(callerSignal!.reason)
       }
       if (callerSignal?.aborted === true) {
