@@ -682,15 +682,60 @@ describe('a signal-shaped value whose reason throws still yields a Result', () =
   })
 })
 
-describe('the backstop adds no microtask hop to a chain that settles normally', () => {
+describe('the microtask count from an answer to onError', () => {
+  // Counts microtask turns from a point in the pipeline to the onError call.
+  // A turn added anywhere on that path (an extra await, a trailing .then)
+  // changes the number. If it changes, decide whether the extra hop is
+  // wanted — this path runs on every call — and update the number with why.
+  const counter = () => {
+    let ticks = 0
+    let running = false
+    const tick = (): void => { if (!running) return; ticks++; queueMicrotask(tick) }
+    return { start: () => { running = true; queueMicrotask(tick) }, stop: () => { running = false; return ticks } }
+  }
+
+  it('is 2 from a middleware returning its Result: the backstop adds no hop', async () => {
+    // The backstop runs the post-execution hook inside its own settlement,
+    // not in a .then behind it (utils/backstop.ts, `follow`).
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('{}', { status: 500 })))
+    const c = counter()
+    let seen = -1
+    const mark: Middleware = async (_ctx, next) => { const r = await next(); c.start(); return r }
+    const api = createApi({
+      baseUrl: '', middleware: [mark], onError: () => { seen = c.stop() },
+      requests: { x: new Request<Record<string, never>, unknown>({ method: 'GET', path: '/x' }) },
+    })
+    await api.x()
+    await flush()
+    expect(seen).toBe(2)
+  })
+
+  it('is 6 from reading the body of an unshared call: share costs unshared calls nothing', async () => {
+    // Measured on 5.0.3 (before share moved into core) and kept: only a
+    // share: true endpoint wraps core in the stamp that tags shared errors.
+    const c = counter()
+    let seen = -1
+    const answer = { ok: false, status: 500, statusText: '', headers: new Headers(), text: () => { c.start(); return Promise.resolve('{}') } }
+    vi.stubGlobal('fetch', vi.fn(async () => answer))
+    const api = createApi({
+      baseUrl: '', onError: () => { seen = c.stop() },
+      requests: { x: new Request<Record<string, never>, unknown>({ method: 'GET', path: '/x' }) },
+    })
+    await api.x()
+    await flush()
+    expect(seen).toBe(6)
+  })
+})
+
+describe("a sharer's give-up landing after its chain answered keeps the single report", () => {
   // Measured on 4.4.1 as microtask boundaries: a sharer's give-up landing k
   // microtasks after its chain returns must not turn the shared failure's
   // single report into two, and a give-up that lands after the chain has
   // answered must not replace that answer. Since 5.1.0 the report count is
   // held by the shared round trip's token (each caller's 'http' error carries
   // it, stamped in core before any middleware sees the Result) rather than by
-  // ordering, so these now pin that the count is the same either side of the
-  // old boundaries.
+  // ordering, so these pin that the count is the same either side of the old
+  // boundaries.
   const run = async (k: number) => {
     vi.stubGlobal('fetch', vi.fn(async () => new Response('{}', { status: 500 })))
     const kinds: string[] = []

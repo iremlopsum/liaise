@@ -28,5 +28,31 @@ export function operationBudget(
   clientTimeout: number | undefined,
   callerSignal: AbortSignal | undefined
 ): AbortSignal | undefined {
-  return anySignal([callerSignal, timeoutSignalFor(callTimeout, requestTimeout, clientTimeout)])
+  return callBudget(callTimeout, requestTimeout, clientTimeout, callerSignal).signal
+}
+
+/**
+ * `operationBudget`, plus the deadline inside it when that deadline is the
+ * endpoint's or the client's rather than the call's own.
+ *
+ * That deadline is the same one a shared request carries, so a caller that
+ * gives up to it while waiting on a shared request has not failed on its own
+ * account: under a hung server every caller's copy of it fires at about the
+ * same moment as the shared request's, and they are all one failure. The
+ * share step recognises it by its abort reason — `anySignal` hands that reason
+ * through unchanged, so `signal.reason === endpointDeadline.reason` holds
+ * exactly when this deadline is what aborted the call. A per-call timeout is
+ * the caller's own patience, so with one set this is `undefined`.
+ */
+export function callBudget(
+  callTimeout: number | undefined,
+  requestTimeout: number | undefined,
+  clientTimeout: number | undefined,
+  callerSignal: AbortSignal | undefined
+): { signal: AbortSignal | undefined; endpointDeadline: AbortSignal | undefined } {
+  const deadline = timeoutSignalFor(callTimeout, requestTimeout, clientTimeout)
+  return {
+    signal: anySignal([callerSignal, deadline]),
+    endpointDeadline: callTimeout === undefined ? deadline : undefined,
+  }
 }

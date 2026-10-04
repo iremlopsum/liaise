@@ -210,6 +210,31 @@ describe('ShareTracker.run (5.1.0)', () => {
     expect(t.shouldReport(plain)).toBe(true)
   })
 
+  it('tells each caller its round trip on entry, before it can give up', async () => {
+    const t = new ShareTracker()
+    const seen: { token: object; deadlineToken: object; joined: boolean }[] = []
+    const ac = new AbortController()
+    const send = () => new Promise<Exchange>(() => {})
+    const a = t.run('k', () => undefined, ac.signal, send, e => seen.push(e))
+    const b = t.run('k', () => undefined, undefined, send, e => seen.push(e))
+    // Synchronous: both are known before anything settles.
+    expect(seen).toHaveLength(2)
+    expect(seen.map(e => e.joined)).toEqual([false, true])
+    expect(seen[1].token).toBe(seen[0].token)
+    expect(seen[1].deadlineToken).toBe(seen[0].deadlineToken)
+    expect(seen[0].deadlineToken).not.toBe(seen[0].token)
+    ac.abort(new Error('left'))
+    await expect(a).rejects.toThrow('left')
+    void b
+  })
+
+  it('does not call onEnter for a caller that had already given up', async () => {
+    const t = new ShareTracker()
+    const onEnter = vi.fn()
+    await expect(t.run('k', () => undefined, AbortSignal.abort(new Error('gone')), async () => ex(), onEnter)).rejects.toThrow('gone')
+    expect(onEnter).not.toHaveBeenCalled()
+  })
+
   it('marks joined results', () => {
     const r = {}
     expect(wasJoined(r)).toBe(false)

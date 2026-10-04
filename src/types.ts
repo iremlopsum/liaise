@@ -267,18 +267,23 @@ export interface RequestConfig {
    * middleware in both directions, its own `data` (decoded from the one
    * response for each caller; a `Blob`, `ArrayBuffer` or `FormData` is handed
    * over as-is), and its own `result.retry()`, which re-runs that caller's
-   * own pipeline with that caller's own options. `onError` fires once per
-   * failed shared request, not once per caller; a caller's own give-up, or an
-   * error its own middleware produces, reports as it would without `share`.
+   * own pipeline with that caller's own options.
+   *
+   * `onError` fires once per failed shared request, not once per caller —
+   * a hung one included: every caller that times out to the endpoint's (or
+   * client's) deadline while waiting on it is that one failure. A caller's
+   * own cancel or per-call timeout, or an error its own middleware produces,
+   * reports as it would without `share`.
    *
    * A caller that gives up — its `signal`, its own deadline, or a signal a
-   * middleware installed — stops waiting alone; the request is cancelled only
-   * once every caller has given up. A per-call {@link CallOptions.timeout}
-   * bounds only its caller. The endpoint's {@link RequestConfig.timeout},
-   * else the client's {@link ApiConfig.timeout}, bounds the shared request
-   * itself, measured from when it is sent, so a late joiner cannot extend it.
-   * A call arriving after the shared request has settled sends a new one;
-   * nothing is cached.
+   * middleware installed — releases only itself: it stops waiting, and the
+   * request goes on for the others. The request is cancelled once every
+   * caller has given up. A per-call {@link CallOptions.timeout} bounds only
+   * its caller. The endpoint's {@link RequestConfig.timeout}, else the
+   * client's {@link ApiConfig.timeout}, bounds the shared request itself,
+   * measured from when it is sent, so a late joiner cannot extend it. A call
+   * arriving after the shared request has settled sends a new one; nothing
+   * is cached.
    *
    * Sibling of {@link RequestConfig.dedupe}, not a replacement: dedupe
    * **cancels** the older request, share **joins** the existing one. Setting
@@ -537,7 +542,8 @@ export interface MiddlewareContext {
     /** Serialized request body, or null when there is none. */
     body: unknown | null
     /**
-     * The AbortSignal that will be handed to `fetch`.
+     * The AbortSignal that governs this call's request — the one handed to
+     * `fetch`, except under `share: true` (below).
      *
      * Middleware may read this, or replace it to impose its own cancellation
      * policy — a timeout, a deadline, or a cancel-on-condition rule. The core
@@ -545,10 +551,15 @@ export interface MiddlewareContext {
      * middleware takes effect. Under `dedupe: true` the replacement is merged
      * into the dedupe signal rather than discarded: the fetch is then
      * cancelled by whichever fires first, the middleware's signal or a newer
-     * call superseding this one. Under `share: true` this field, as it is
-     * when `next()` reaches the core fetch, is this caller's patience: when it
-     * fires, this caller alone stops waiting. The shared request is sent with
-     * a signal of its own and is cancelled once every caller has given up.
+     * call superseding this one.
+     *
+     * Under `share: true` the request may be shared with other callers, so it
+     * is sent with a signal of its own and is cancelled only once every
+     * caller has given up. For this caller, the field as it is when `next()`
+     * reaches the core fetch is merged with the caller's own `signal` and
+     * deadline: whichever fires first, this caller alone stops waiting. A
+     * replacement that never fires therefore cannot keep a caller waiting
+     * past its own cancel.
      *
      * While middleware runs — before `next()` reaches the core fetch — this
      * holds the caller's `CallOptions.signal` merged with the timeout signal

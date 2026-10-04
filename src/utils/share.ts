@@ -73,6 +73,26 @@ function normalizeMethod(method: string): string {
 /** What one shared round trip produced. Never a rejection: a failed send is `ok: false`. */
 export type SharedOutcome = { ok: true; exchange: Exchange } | { ok: false; error: unknown }
 
+/**
+ * What a caller learns the moment it enters a round trip, before it can give
+ * up — so even a caller that leaves early knows which round trip it was
+ * waiting on.
+ */
+export interface Entered {
+  /** Identity of the round trip: tags an error derived from its outcome. */
+  token: object
+  /**
+   * A second identity for the same round trip, for its deadline: tags every
+   * caller's timeout to the endpoint's (or client's) deadline, the shared
+   * request's own or a caller's copy of it. Kept apart from `token` so that a
+   * caller's early timeout cannot use up the report for a real failure (a
+   * 500, a network error) that a caller still waiting receives later.
+   */
+  deadlineToken: object
+  /** True when this caller joined a request someone else sent. */
+  joined: boolean
+}
+
 /** One caller's view of a shared round trip. */
 export interface Shared {
   outcome: SharedOutcome
@@ -95,6 +115,8 @@ interface RunEntry {
   settled: boolean
   /** Identity of the round trip, shared by every caller's result. */
   token: object
+  /** Identity of the round trip's deadline (see `Entered.deadlineToken`). */
+  deadlineToken: object
 }
 
 const sharedTokens = new WeakMap<object, object>()
@@ -143,12 +165,18 @@ export class ShareTracker {
    * promise rejects with that signal's reason; everyone else keeps waiting.
    * A settled entry is never joined: a call arriving after the answer starts
    * a fresh request (no caching).
+   *
+   * `onEnter`, when given, is called synchronously as this caller takes its
+   * reference — before the returned promise can settle either way — with the
+   * round trip's tokens. A caller rejected because its signal was already
+   * aborted never enters, and `onEnter` is not called.
    */
   run(
     key: string,
     deadline: () => AbortSignal | undefined,
     callerSignal: AbortSignal | undefined,
-    send: (signal: AbortSignal) => Promise<Exchange>
+    send: (signal: AbortSignal) => Promise<Exchange>,
+    onEnter?: (entered: Entered) => void
   ): Promise<Shared> {
     // A caller that has already given up must not start (or join) anything.
     if (callerSignal?.aborted === true) return Promise.reject(callerSignal.reason)
@@ -165,7 +193,10 @@ export class ShareTracker {
       // anySignal returns it unchanged; otherwise a merged signal that carries
       // the aborting input's reason (so a TimeoutError stays a TimeoutError).
       const signal = anySignal([controller.signal, limit]) as AbortSignal
-      const created: RunEntry = { controller, signal, refs: 0, settled: false, token: {}, promise: undefined as unknown as Promise<SharedOutcome> }
+      const created: RunEntry = {
+        controller, signal, refs: 0, settled: false, token: {}, deadlineToken: {},
+        promise: undefined as unknown as Promise<SharedOutcome>,
+      }
       // `send` may throw synchronously; the async wrapper turns that into a
       // rejection so it lands in the same ok:false arm. That is what keeps
       // `created.promise` from ever rejecting, so nothing downstream can
@@ -188,6 +219,7 @@ export class ShareTracker {
 
     const held = entry
     held.refs++
+    onEnter?.({ token: held.token, deadlineToken: held.deadlineToken, joined })
 
     return new Promise<Shared>((resolve, reject) => {
       let done = false

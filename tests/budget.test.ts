@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { operationBudget } from '../src/utils/budget.js'
+import { operationBudget, callBudget } from '../src/utils/budget.js'
 import { timeoutSignalFor } from '../src/utils/timeout.js'
 
 describe('operationBudget', () => {
@@ -34,6 +34,25 @@ describe('operationBudget', () => {
     expect(await fires(operationBudget(undefined, undefined, 10, undefined))).toBe(true)
     expect(operationBudget(undefined, 0, 10, undefined)).toBeUndefined()
     expect(operationBudget(0, 10, 10, undefined)).toBeUndefined()
+  })
+})
+
+describe('callBudget', () => {
+  it("exposes the endpoint's or client's deadline, and aborts with that very reason", async () => {
+    const c = new AbortController()
+    const b = callBudget(undefined, 10, 60_000, c.signal)
+    expect(b.endpointDeadline).toBeInstanceOf(AbortSignal)
+    await new Promise(r => setTimeout(r, 30))
+    expect(b.signal!.aborted).toBe(true)
+    expect(b.signal!.reason).toBe(b.endpointDeadline!.reason)
+    expect(callBudget(undefined, undefined, 10, undefined).endpointDeadline).toBeInstanceOf(AbortSignal)
+  })
+
+  it('has no endpoint deadline when the call sets its own timeout, or nothing applies', () => {
+    expect(callBudget(50, 10, 10, undefined).endpointDeadline).toBeUndefined()
+    expect(callBudget(0, 10, 10, undefined).endpointDeadline).toBeUndefined()
+    expect(callBudget(undefined, 0, 10, undefined).endpointDeadline).toBeUndefined()
+    expect(callBudget(undefined, undefined, undefined, undefined)).toEqual({ signal: undefined, endpointDeadline: undefined })
   })
 })
 

@@ -27,6 +27,7 @@ const flush = () => new Promise<void>(resolve => setTimeout(resolve, 0))
 function controllable() {
   const calls: {
     resolve: () => void
+    respond: (status: number, body?: string) => void
     reject: (err: unknown) => void
     aborted: () => boolean
     reason: () => unknown
@@ -36,6 +37,7 @@ function controllable() {
     s?.addEventListener('abort', () => rej(s.reason))
     calls.push({
       resolve: () => res(new Response('{"ok":1}', { status: 200 })),
+      respond: (status, body = '{}') => res(new Response(body, { status })),
       reject: rej,
       aborted: () => !!s?.aborted,
       reason: () => s?.reason,
@@ -767,6 +769,7 @@ describe('duplicate onError under share (Fix 1, 2.2.1)', () => {
     const a = api.get({ id: '1' }, { signal: a1.signal })
     const b = api.get({ id: '1' }, { signal: a2.signal })
     await flush()
+    expect(f.fn).toHaveBeenCalledTimes(1)
 
     a1.abort()
     expect((await a).error?.kind).toBe('abort')
@@ -792,6 +795,7 @@ describe('duplicate onError under share (Fix 1, 2.2.1)', () => {
 
     expect((await a).error?.kind).toBe('timeout')
     expect((await b).error?.kind).toBe('timeout')
+    expect(f.fn).toHaveBeenCalledTimes(1)
 
     await flush()
     expect(kinds).toEqual(['timeout', 'timeout']) // one report per caller, not three
@@ -1121,6 +1125,37 @@ describe('share decides on what is sent (5.1.0)', () => {
     f.calls[1].resolve(); await again
   })
 
+  it("retry() on a joined caller uses that caller's own signal", async () => {
+    // Both retries share one round trip again; cancelling B's own signal ends
+    // B's retry alone, and A's retry still gets its answer.
+    const f = controllable(); vi.stubGlobal('fetch', f.fn)
+    const api = shared()
+    const bc = new AbortController()
+    const all = Promise.all([api.get({ id: '1' }), api.get({ id: '1' }, { signal: bc.signal })])
+    await flush(); expect(f.fn).toHaveBeenCalledTimes(1); f.calls[0].resolve()
+    const [a, b] = await all
+    expect(wasJoined(b)).toBe(true)
+    const retries = Promise.all([a.retry(), b.retry()])
+    await flush()
+    expect(f.fn).toHaveBeenCalledTimes(2)
+    bc.abort()
+    await flush()
+    expect(f.calls[1].aborted()).toBe(false)
+    f.calls[1].resolve()
+    const [ra, rb] = await retries
+    expect(rb.error?.kind).toBe('abort')
+    expect(ra.error).toBeNull()
+  })
+
+  it('does not share the same query in a different order: the URL is compared as sent', async () => {
+    const f = controllable(); vi.stubGlobal('fetch', f.fn)
+    const api = createApi({ baseUrl: '', requests: { find: new Request<{ a: number; b: number }, { ok: number }>({ method: 'GET', path: '/q', share: true }) } })
+    const all = Promise.all([api.find({ a: 1, b: 2 }), api.find({ b: 2, a: 1 })])
+    await flush()
+    expect(f.fn.mock.calls.map(c => c[0])).toEqual(['/q?a=1&b=2', '/q?b=2&a=1'])
+    f.calls[0].resolve(); f.calls[1].resolve(); await all
+  })
+
   it('does not share JSON bodies with the same content in a different key order', async () => {
     const f = controllable(); vi.stubGlobal('fetch', f.fn)
     const api = createApi({ baseUrl: '', requests: { save: new Request<{ a: number; b: number }, { ok: number }>({ method: 'POST', path: '/save', share: true }) } })
@@ -1401,5 +1436,135 @@ describe('share decides on what is sent (5.1.0)', () => {
     ])
     expect(apart.every(r => r.error === null)).toBe(true)
     expect(fetchMock).toHaveBeenCalledTimes(5) // one 503, then a retry each
+  })
+})
+
+// ---------------------------------------------------------------------------
+// One report per hung shared request. Every caller's own budget includes the
+// endpoint's (or client's) deadline — it has to, so a hung middleware is still
+// bounded — and each caller's copy starts no later than the shared request's.
+// Under a hung server they all fire at about the same moment, and they are
+// one failure: a give-up to that deadline while waiting on a shared request
+// carries the round trip's DEADLINE token, as does the shared deadline itself.
+// It is a token of its own so that an early timeout can't swallow the report
+// of a real failure a caller still waiting receives later.
+// ---------------------------------------------------------------------------
+describe('one report per hung shared request', () => {
+  afterEach(() => vi.restoreAllMocks())
+
+  const timed = (timeout: number, middleware: Middleware[] = []) => {
+    const kinds: string[] = []
+    const api = createApi({
+      baseUrl: '',
+      middleware,
+      onError: e => { kinds.push(e.kind) },
+      requests: { get: new Request<{ id: string }, { ok: number }>({ method: 'GET', path: '/x/:id', share: true, timeout }) },
+    })
+    return { api, kinds }
+  }
+
+  it('reports a hung shared request once when the callers arrive together', async () => {
+    const f = controllable(); vi.stubGlobal('fetch', f.fn)
+    const { api, kinds } = timed(30)
+    const [a, b] = await Promise.all([api.get({ id: '1' }), api.get({ id: '1' })])
+    expect(f.fn).toHaveBeenCalledTimes(1)
+    expect(a.error?.kind).toBe('timeout')
+    expect(b.error?.kind).toBe('timeout')
+    await flush()
+    expect(kinds).toEqual(['timeout'])
+  })
+
+  it('reports a hung shared request once behind an async global middleware', async () => {
+    // The middleware delays every caller's send, so every caller's own copy
+    // of the deadline starts before the shared request's and fires first.
+    const f = controllable(); vi.stubGlobal('fetch', f.fn)
+    const auth: Middleware = async (_ctx, next) => { await Promise.resolve(); return next() }
+    const { api, kinds } = timed(30, [auth])
+    const [a, b] = await Promise.all([api.get({ id: '1' }), api.get({ id: '1' })])
+    expect(f.fn).toHaveBeenCalledTimes(1)
+    expect(a.error?.kind).toBe('timeout')
+    expect(b.error?.kind).toBe('timeout')
+    await flush()
+    expect(kinds).toEqual(['timeout'])
+  })
+
+  it('still reports a real failure that arrives after a caller timed out', async () => {
+    // A starts its deadline 40ms before it sends (its own middleware waits),
+    // so it times out at 60ms while the shared request's deadline is not due
+    // until about 100ms. The server then answers B with a 500: a different
+    // failure, and it reports too.
+    const f = controllable(); vi.stubGlobal('fetch', f.fn)
+    const { api, kinds } = timed(60)
+    const slowStart: Middleware = async (_ctx, next) => { await new Promise(r => setTimeout(r, 40)); return next() }
+    const a = api.get({ id: '1' }, { middleware: [slowStart] })
+    await new Promise(r => setTimeout(r, 45))
+    const b = api.get({ id: '1' })
+    await flush()
+    expect(f.fn).toHaveBeenCalledTimes(1)
+    expect((await a).error?.kind).toBe('timeout')
+    f.calls[0].respond(500)
+    expect((await b).error?.kind).toBe('http')
+    await flush()
+    expect(kinds).toEqual(['timeout', 'http'])
+  })
+
+  it('reports once when the client timeout is the only deadline and every caller keeps it', async () => {
+    // The companion to "bounds a shared request with no endpoint timeout by
+    // the client timeout": no per-call override, so each caller's own budget
+    // carries the client's 20ms too, and still one report.
+    const f = controllable(); vi.stubGlobal('fetch', f.fn)
+    const kinds: string[] = []
+    const api = createApi({
+      baseUrl: '',
+      timeout: 20,
+      onError: e => { kinds.push(e.kind) },
+      requests: { get: new Request<{ id: string }, { ok: number }>({ method: 'GET', path: '/x/:id', share: true }) },
+    })
+    const [a, b] = await Promise.all([api.get({ id: '1' }), api.get({ id: '1' })])
+    expect(f.fn).toHaveBeenCalledTimes(1)
+    expect(a.error?.kind).toBe('timeout')
+    expect(b.error?.kind).toBe('timeout')
+    await flush()
+    expect(kinds).toEqual(['timeout'])
+  })
+})
+
+// ---------------------------------------------------------------------------
+// A middleware that replaces ctx.request.signal with one that never fires
+// must not stop the caller's own cancel from letting go of the round trip:
+// the caller waits on its own budget AND the installed signal, and is
+// released by whichever fires. Its give-up is classified by that signal, so a
+// custom reason stays 'abort' — not 'network', and not reported.
+// ---------------------------------------------------------------------------
+describe('a replaced signal does not hold the shared request', () => {
+  afterEach(() => vi.restoreAllMocks())
+
+  it("releases a caller on its own cancel, and the last one abandons the request", async () => {
+    const f = controllable(); vi.stubGlobal('fetch', f.fn)
+    const neverFires: Middleware = (ctx, next) => { ctx.request.signal = new AbortController().signal; return next() }
+    const onError = vi.fn()
+    const api = createApi({
+      baseUrl: '',
+      onError,
+      requests: { get: new Request<{ id: string }, { ok: number }>({ method: 'GET', path: '/x/:id', share: true, middleware: [neverFires] }) },
+    })
+    const ac1 = new AbortController(), ac2 = new AbortController()
+    const a = api.get({ id: '1' }, { signal: ac1.signal })
+    const b = api.get({ id: '1' }, { signal: ac2.signal })
+    await flush()
+    expect(f.fn).toHaveBeenCalledTimes(1)
+
+    ac1.abort(new Error('unmount'))
+    const ra = await within(a)
+    expect(ra).not.toBe('hung')
+    expect((ra as Awaited<typeof a>).error?.kind).toBe('abort')
+    expect(f.calls[0].aborted()).toBe(false)
+
+    ac2.abort(new Error('unmount'))
+    const rb = await within(b)
+    expect((rb as Awaited<typeof b>).error?.kind).toBe('abort')
+    expect(f.calls[0].reason()).toBe(ABANDONED)
+    await flush()
+    expect(onError).not.toHaveBeenCalled()
   })
 })

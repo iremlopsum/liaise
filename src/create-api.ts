@@ -47,8 +47,8 @@ import { DedupeTracker } from './utils/dedupe.js'
 import { ShareTracker, requestKey, tagShared, markJoined } from './utils/share.js'
 import { mergeHeaders } from './utils/headers.js'
 import { abortKind, propagatesReason } from './utils/abort-kind.js'
-import { releaseSignal } from './utils/any-signal.js'
-import { operationBudget } from './utils/budget.js'
+import { anySignal, releaseSignal } from './utils/any-signal.js'
+import { callBudget } from './utils/budget.js'
 import { timeoutSignalFor } from './utils/timeout.js'
 import { createBackstop } from './utils/backstop.js'
 import { isReadableStream } from './utils/special-body.js'
@@ -156,6 +156,20 @@ const sentStreams = new WeakSet<ReadableStream>()
  * being reported there, and the empty body is only diagnostic.
  */
 const EMPTY_JSON_BODY: unique symbol = Symbol('liaise.emptyJsonBody')
+
+/**
+ * One attempt's part in a shared round trip, filled in by core's share step
+ * and read by the stamp around it. `token` and `deadlineToken` are the round
+ * trip's two identities (see `Entered` in utils/share.ts), set the moment the
+ * attempt enters it; `tag` is the one this attempt's error, if any, carries —
+ * decided by how that error came about.
+ */
+interface SharedRound {
+  token?: object
+  deadlineToken?: object
+  joined: boolean
+  tag?: object
+}
 
 /**
  * This caller's own copy of the body, decoded from the one shared read.
@@ -621,7 +635,13 @@ export function createApi<TRequests extends Record<string, Request<any, any>>>(
           // measured from when it was sent — which the share step in core()
           // hands to the tracker. A per-call timeout therefore bounds only its
           // caller, and a late joiner cannot extend the shared request.
-          const operation = operationBudget(
+          //
+          // `endpointDeadline` is the deadline inside that budget when it is
+          // the endpoint's or the client's — the one a shared request also
+          // has — and undefined when a per-call timeout set this caller's own.
+          // The share step uses it to tell a give-up to that deadline (one
+          // failure, however many callers hit it) from the caller's own.
+          const { signal: operation, endpointDeadline } = callBudget(
             options.timeout,
             request.config.timeout,
             clientTimeout,
@@ -652,14 +672,14 @@ export function createApi<TRequests extends Record<string, Request<any, any>>>(
           // aborted, are caught and returned as network error Results
           // (status 0, no response).
           //
-          // `attempt` is that body; `core` wraps it so every Result it
-          // returns passes through one stamp, below. `round` records whether
-          // this attempt took part in a shared round trip, and how.
+          // `attempt` is that body. Under share, `core` wraps it so every
+          // Result it returns passes through one stamp, below; `round` records
+          // whether this attempt took part in a shared round trip, and how.
           // -----------------------------------------------------------------
-          const attempt = async (
-            ctx: MiddlewareContext,
-            round: { token: object | undefined; joined: boolean }
-          ): Promise<Result<unknown>> => {
+          const attempt = async (ctx: MiddlewareContext, round: SharedRound): Promise<Result<unknown>> => {
+            // Under share, the signal this caller waits on (set in the share
+            // step); the catch classifies this caller's give-up by it.
+            let waitSignal: AbortSignal | undefined
             try {
               // Register with the dedupe tracker on the first attempt that
               // reaches core() — we are committed to sending a request. Any
@@ -698,10 +718,14 @@ export function createApi<TRequests extends Record<string, Request<any, any>>>(
               // may have modified any of them) rather than closing over a signal
               // computed during setup — that's what lets a middleware replace
               // the signal (e.g. to implement a timeout) and have it actually
-              // take effect.
+              // take effect. The share key below is built from these same
+              // values, so it is what fetch receives by construction.
+              const sendMethod = ctx.request.method
+              const sendUrl = ctx.request.url
+              const sendHeaders = ctx.request.headers
               const fetchInit: RequestInit = {
-                method: ctx.request.method,
-                headers: ctx.request.headers,
+                method: sendMethod,
+                headers: sendHeaders,
                 signal: ctx.request.signal
               }
 
@@ -741,33 +765,39 @@ export function createApi<TRequests extends Record<string, Request<any, any>>>(
               // and safely (an upload) has no key and is sent as usual.
               const responseType = request.config.responseType ?? 'json'
               const shareKey = request.config.share === true
-                ? requestKey(name, ctx.request.method, ctx.request.url, ctx.request.headers, fetchInit.body ?? null)
+                ? requestKey(name, sendMethod, sendUrl, sendHeaders, fetchInit.body ?? null)
                 : null
               let exchange: Exchange
               if (shareKey === null) {
-                exchange = await sendExchange(ctx.request.url, fetchInit, responseType)
+                exchange = await sendExchange(sendUrl, fetchInit, responseType)
               } else {
-                const url = ctx.request.url
+                // This caller's patience: its own budget, plus the signal its
+                // pipeline left in ctx.request.signal when a middleware
+                // replaced it. Either one firing releases this caller alone —
+                // its own cancel still lets go of the round trip even when a
+                // middleware installed a signal that never fires — and the
+                // request is cancelled only once every caller has gone.
+                // (dedupe never combines with share, so no supersede here.)
+                const installed = ctx.request.signal
+                waitSignal = installed === callerSignal ? installed : anySignal([callerSignal, installed])
+                own(waitSignal, callerSignal, installed)
                 const shared = await shareTracker.run(
                   shareKey,
                   // The shared request's own deadline: the endpoint's, else
                   // the client's, measured from when it is sent — so a stream
                   // of late joiners can't hold it open. A per-call timeout
-                  // bounds only its own caller, through ctx.request.signal.
+                  // bounds only its own caller, through waitSignal.
                   // Called synchronously, inside this try: timeoutSignalFor
                   // clamps any number, and whatever it throws for a non-number
                   // (a BigInt from untyped config) becomes this caller's Result.
                   () => timeoutSignalFor(undefined, request.config.timeout, clientTimeout),
-                  // This caller's patience, as its pipeline left it — a signal a
-                  // middleware installed included. When it aborts, this caller
-                  // alone is released (run() rejects with its reason, classified
-                  // below as this caller's own abort or timeout); the request is
-                  // cancelled only once every caller has gone.
-                  ctx.request.signal,
+                  // When it aborts, run() rejects with its reason, classified
+                  // in the catch as this caller's own abort or timeout.
+                  waitSignal,
                   // Sent with the first caller's init, headers included (so its
                   // tracing headers), and the shared signal: the refcount plus
                   // the deadline above, never any one caller's.
-                  signal => sendExchange(url, { ...fetchInit, signal }, responseType).catch((err: unknown) => {
+                  signal => sendExchange(sendUrl, { ...fetchInit, signal }, responseType).catch((err: unknown) => {
                     // The provenance rule the unshared path applies to the
                     // signal it hands fetch, applied to the one this request
                     // was sent with: if that aborted (the shared deadline —
@@ -777,10 +807,19 @@ export function createApi<TRequests extends Record<string, Request<any, any>>>(
                     // must still read as 'timeout' to every waiting caller.
                     if (signal.aborted && !(err instanceof AbortedRead)) throw new AbortedRead(err, signal.reason)
                     throw err
-                  })
+                  }),
+                  // Learnt on entry, before this caller can give up, so even
+                  // an early give-up knows which round trip it left.
+                  entered => {
+                    round.token = entered.token
+                    round.deadlineToken = entered.deadlineToken
+                    round.joined = entered.joined
+                  }
                 )
-                round.token = shared.token
-                round.joined = shared.joined
+                // From here on an error is derived from the round trip's
+                // outcome; the catch narrows that for its deadline and for
+                // this caller's own give-up.
+                round.tag = round.token
                 if (!shared.outcome.ok) throw shared.outcome.error
                 exchange = shared.outcome.exchange
               }
@@ -997,25 +1036,38 @@ export function createApi<TRequests extends Record<string, Request<any, any>>>(
               // not this caller's, so the share step reports ITS aborts (at
               // fetch time too) the same way.
               //
-              // Under share, this caller giving up arrives here as its own
-              // signal's reason (ShareTracker.run rejects with it), and the
-              // `signal?.aborted` arm classifies it exactly as it classifies
-              // an unshared caller's cancel.
+              // Under share, this caller giving up arrives here as the reason
+              // of the signal it waited on (ShareTracker.run rejects with it),
+              // and the `ownGiveUp` arm classifies it by THAT signal — the one
+              // that aborted, which may be the caller's own while a middleware
+              // left a different one in ctx.request.signal — exactly as it
+              // classifies an unshared caller's cancel.
               // ---------------------------------------------------------------
               const aborted = err instanceof AbortedRead
-              const signal = ctx.request.signal
+              const signal = waitSignal ?? ctx.request.signal
               const ownGiveUp = !aborted && signal?.aborted === true
               const kind = aborted
                 ? (abortKind(err.reason) ?? 'abort')
                 : ownGiveUp
                   ? (abortKind(signal.reason) ?? 'abort')
                   : (abortKind(err) ?? 'network')
-              // Classified as this caller's own give-up, so it is this
-              // caller's failure, not the shared round trip's — even when the
-              // round trip had already answered (the give-up landed in the
-              // same tick): it must not carry the round trip's token (core's
-              // stamp, below).
-              if (ownGiveUp) round.token = undefined
+              // Which of the round trip's identities this error carries, if
+              // any (core's stamp, below; nothing is set for an unshared call).
+              // An abort of the shared request's own signal reaches a caller
+              // only as its deadline (abandonment reaches nobody): the
+              // deadline token. This caller's own give-up is its own failure
+              // — even when the round trip had already answered in the same
+              // tick — unless it gave up to the endpoint's or client's
+              // deadline, the same one the shared request carries: then it is
+              // that one failure, and carries the deadline token too. Matched
+              // by identity, since anySignal hands the reason through
+              // unchanged. A per-call timeout or a cancel stays untagged.
+              if (aborted) round.tag = round.deadlineToken
+              else if (ownGiveUp) {
+                round.tag = endpointDeadline !== undefined && signal.reason === endpointDeadline.reason
+                  ? round.deadlineToken
+                  : undefined
+              }
               const error = new ApiError({
                 status: 0,
                 kind,
@@ -1029,27 +1081,30 @@ export function createApi<TRequests extends Record<string, Request<any, any>>>(
             }
           }
 
-          const core = async (ctx: MiddlewareContext): Promise<Result<unknown>> => {
-            const round: { token: object | undefined; joined: boolean } = { token: undefined, joined: false }
-            const result = await attempt(ctx, round)
-            // An error derived from the shared round trip — its HTTP error,
-            // parse or schema failure, network failure or deadline — carries
-            // the round trip's token, so onError hears about one failed shared
-            // request once, whichever of its callers reaches the hook first
-            // (spec §4.3). This caller's OWN give-up is its own failure and
-            // stays untagged: ShareTracker.run rejecting leaves no token, and
-            // attempt's catch drops it when it classifies a failure by this
-            // caller's signal. Deciding by how the error was classified, not
-            // by whether the signal is aborted by now, matters when the
-            // caller's abort lands in the same tick as a shared failure: the
-            // caller then holds the shared 'http' or 'parse', which must not
-            // report a second time. Anything a middleware makes of the Result
-            // afterwards is a different error object, and untagged too.
-            if (round.token !== undefined && result.error) tagShared(result.error, round.token)
-            // For the logger's `, shared` suffix: this caller sent nothing.
-            if (round.joined) markJoined(result)
-            return result
-          }
+          // Only a share: true endpoint pays for the stamp's extra await; every
+          // other call's core is `attempt` itself, with the same microtask
+          // count it always had (tests/hung-middleware.test.ts, "the
+          // microtask count from an answer to onError", pins it).
+          const core: (ctx: MiddlewareContext) => Promise<Result<unknown>> = request.config.share === true
+            ? async ctx => {
+              const round: SharedRound = { joined: false }
+              const result = await attempt(ctx, round)
+              // An error derived from the shared round trip carries one of its
+              // tokens, so onError hears about one failed shared request once,
+              // whichever of its callers reaches the hook first (spec §4.3):
+              // the main token for its outcome (HTTP error, parse or schema
+              // failure, network failure), the deadline token for its deadline
+              // and for each caller's give-up to the same deadline. Two tokens,
+              // so an early timeout can't swallow the report of a real failure
+              // a caller still waiting receives later. Anything else — a
+              // caller's own cancel or per-call timeout, an error a middleware
+              // makes of the Result afterwards — is untagged and reports alone.
+              if (round.tag !== undefined && result.error) tagShared(result.error, round.tag)
+              // For the logger's `, shared` suffix: this caller sent nothing.
+              if (round.joined) markJoined(result)
+              return result
+            }
+            : ctx => attempt(ctx, { joined: false })
 
           // -----------------------------------------------------------------
           // Step 4: Build the URL

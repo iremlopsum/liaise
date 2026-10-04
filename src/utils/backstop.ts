@@ -52,8 +52,8 @@ export interface Backstop<T> {
    * `hook` runs synchronously inside the settlement rather than in a `.then`
    * on the returned promise, so it fires at the same microtask a plain
    * `chain.then(hook)` would: the backstop adds no hop between a chain
-   * answering and its Result being reported (tests/hung-middleware.test.ts
-   * pins this).
+   * answering and its Result being reported (tests/hung-middleware.test.ts,
+   * "the microtask count from an answer to onError", pins the count).
    *
    * `onFailure` turns the three things that could otherwise reject it — the
    * chain rejecting (callers convert rejections before following, so this is
