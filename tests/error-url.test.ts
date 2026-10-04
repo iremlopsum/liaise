@@ -301,7 +301,7 @@ describe('error.request.url when setup threw before the URL was built', () => {
 
   // A BigInt timeout is the cheapest reachable setup failure: TypeScript
   // forbids it, JavaScript callers and `as any` config loaders do not, and it
-  // reaches Math.min inside timeoutSignalFor. operationBudget runs at Step 2,
+  // reaches Math.min inside timeoutSignalFor. callBudget runs at Step 2,
   // BEFORE the URL is ever built, for every call — a share: true endpoint
   // included, since sharing happens later, inside core. The request never
   // resolved a URL for itself; it can still name the one it was for, which is

@@ -73,6 +73,27 @@ describe('a long-lived caller signal ends with no listeners', () => {
     const client = createGraphQL({ endpoint: 'https://x.test/graphql', operations: { me } })
     expect(await runMany(signal => client.me({}, { signal }))).toBe(0)
   })
+
+  // GraphQL's share step, the same as REST's rows above: with no timeout the
+  // caller's signal is the budget itself, and a shared operation's wait on
+  // its round trip listens to it directly.
+  it.each([
+    ['', 5000],
+    [', no timeout', undefined],
+  ])('on the GraphQL client with share%s', async (_name, timeout) => {
+    vi.stubGlobal('fetch', vi.fn(async () => json({ data: { me: { id: '1' } } })))
+    const me = new Operation<Record<string, never>, unknown>({ operation: gql`query { me { id } }`, share: true, timeout })
+    const client = createGraphQL({ endpoint: 'https://x.test/graphql', operations: { me } })
+    expect(await runMany(signal => client.me({}, { signal }))).toBe(0)
+  })
+
+  it('on the GraphQL client with share, a middleware-installed signal and no timeout', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => json({ data: { me: { id: '1' } } })))
+    const installs: Middleware = (ctx, next) => { ctx.request.signal = new AbortController().signal; return next() }
+    const me = new Operation<Record<string, never>, unknown>({ operation: gql`query { me { id } }`, share: true })
+    const client = createGraphQL({ endpoint: 'https://x.test/graphql', middleware: [installs], operations: { me } })
+    expect(await runMany(signal => client.me({}, { signal }))).toBe(0)
+  })
 })
 
 describe('releasing does not cut a live call loose', () => {

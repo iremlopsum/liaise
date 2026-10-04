@@ -725,6 +725,23 @@ describe('the microtask count from an answer to onError', () => {
     await flush()
     expect(seen).toBe(6)
   })
+
+  it('is 6 from reading the body of an unshared GraphQL call: share costs unshared operations nothing', async () => {
+    // GraphQL's own pipeline, same rule: only a share: true operation wraps
+    // core in the stamp that tags shared errors. Measured before GraphQL had
+    // share (5.1.0, at 54f531e) and kept.
+    const c = counter()
+    let seen = -1
+    const answer = { ok: false, status: 500, statusText: '', headers: new Headers(), text: () => { c.start(); return Promise.resolve('{}') } }
+    vi.stubGlobal('fetch', vi.fn(async () => answer))
+    const client = createGraphQL({
+      endpoint: '/graphql', onError: () => { seen = c.stop() },
+      operations: { x: new Operation<Record<string, never>, unknown>({ operation: gql`query { x }` }) },
+    })
+    await client.x()
+    await flush()
+    expect(seen).toBe(6)
+  })
 })
 
 describe("a sharer's give-up landing after its chain answered keeps the single report", () => {

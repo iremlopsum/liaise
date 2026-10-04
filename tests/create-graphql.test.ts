@@ -1,6 +1,7 @@
 import { describe, it, expect, afterEach, vi } from 'vitest'
 import { Operation, gql, createGraphQL } from '../src/graphql.js'
 import type { Middleware } from '../src/types.js'
+import { ABANDONED, wasJoined } from '../src/utils/share.js'
 
 afterEach(() => {
   vi.restoreAllMocks()
@@ -1063,5 +1064,382 @@ describe('createGraphQL — client-level timeout (5.1.0)', () => {
     vi.stubGlobal('fetch', hangingGqlFetch())
     const client = createGraphQL({ endpoint: ep, timeout: 5_000, operations: { slow: slowOp({ timeout: 5_000 }) } })
     expect((await client.slow({}, { timeout: 20 })).error?.kind).toBe('timeout')
+  })
+})
+
+// ---------------------------------------------------------------------------
+// share (5.1.0). The REST client's design (tests/share.test.ts), in GraphQL's
+// own pipeline: every caller runs its own pipeline, and core joins an
+// identical operation already in flight instead of sending its own —
+// identical meaning what is about to be sent: the operation name, the
+// endpoint, the final headers (minus the tracing list) and the body, query
+// and variables exactly as serialised. Only the round trip is shared; each
+// caller parses its own copy of the one response.
+// ---------------------------------------------------------------------------
+describe('share (5.1.0)', () => {
+  afterEach(() => vi.restoreAllMocks())
+  const reply = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } })
+  const slow = (body: unknown, status = 200) => vi.fn(() => new Promise<Response>(r => setTimeout(() => r(reply(body, status)), 10)))
+  const opX = () => new Operation<{ id?: string }, { x: number | null }>({ operation: gql`query X($id: String) { x(id: $id) }`, share: true })
+  const endpoint = 'https://x.test/graphql'
+
+  it('shares identical concurrent operations: one fetch, own Results, own data', async () => {
+    const fetchMock = slow({ data: { x: 1 } }); vi.stubGlobal('fetch', fetchMock)
+    const g = createGraphQL({ endpoint, operations: { getX: opX() } })
+    const [a, b] = await Promise.all([g.getX({ id: '1' }), g.getX({ id: '1' })])
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    expect(a).not.toBe(b)
+    expect(a.data).not.toBe(b.data)
+    expect(a.data).toEqual(b.data)
+  })
+
+  it('does not share when variables differ', async () => {
+    const fetchMock = slow({ data: { x: 1 } }); vi.stubGlobal('fetch', fetchMock)
+    const g = createGraphQL({ endpoint, operations: { getX: opX() } })
+    await Promise.all([g.getX({ id: '1' }), g.getX({ id: '2' })])
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+  })
+
+  it('does not share across users: headers a global middleware adds are part of the key', async () => {
+    let user = 'alice'
+    const auth: Middleware = (ctx, next) => { ctx.request.headers.set('authorization', `Bearer ${user}`); return next() }
+    const fetchMock = slow({ data: { x: 1 } }); vi.stubGlobal('fetch', fetchMock)
+    const g = createGraphQL({ endpoint, middleware: [auth], operations: { getX: opX() } })
+    const a = g.getX({ id: '1' })
+    user = 'bob'
+    const b = g.getX({ id: '1' })
+    await Promise.all([a, b])
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+  })
+
+  it('throws at createGraphQL when an operation sets both share and dedupe', () => {
+    expect(() => createGraphQL({ endpoint, operations: {
+      x: new Operation({ operation: gql`query { x }`, share: true, dedupe: true }),
+    } })).toThrow(/share and dedupe/)
+  })
+
+  it('gives each caller its own partialData on a GraphQL errors response', async () => {
+    const fetchMock = slow({ data: { x: null }, errors: [{ message: 'boom' }] }); vi.stubGlobal('fetch', fetchMock)
+    const g = createGraphQL({ endpoint, operations: { getX: opX() } })
+    const [a, b] = await Promise.all([g.getX({ id: '1' }), g.getX({ id: '1' })])
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    expect(a.error?.kind).toBe('http')
+    expect(a.error?.partialData).toEqual({ x: null })
+    expect(a.error?.partialData).not.toBe(b.error?.partialData)
+  })
+
+  it('reports one failed shared operation to onError once', async () => {
+    const fetchMock = slow({ errors: [{ message: 'down' }] }, 500); vi.stubGlobal('fetch', fetchMock)
+    const onError = vi.fn()
+    const g = createGraphQL({ endpoint, onError, operations: { getX: opX() } })
+    await Promise.all([g.getX({ id: '1' }), g.getX({ id: '1' }), g.getX({ id: '1' })])
+    await new Promise(r => setTimeout(r, 0))
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    expect(onError).toHaveBeenCalledTimes(1)
+  })
+
+  it('works for the queries/mutations split client', async () => {
+    const fetchMock = slow({ data: { x: 1 } }); vi.stubGlobal('fetch', fetchMock)
+    const g = createGraphQL({ endpoint, queries: { getX: opX() } })
+    await Promise.all([g.query.getX({ id: '1' }), g.query.getX({ id: '1' })])
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// The REST guarantees, on GraphQL's pipeline. Each test names the REST row in
+// tests/share.test.ts it mirrors where there is one.
+// ---------------------------------------------------------------------------
+
+/** Drains every pending microtask, then one macrotask. */
+const flushShare = () => new Promise<void>(resolve => setTimeout(resolve, 0))
+
+/** A fetch whose every call waits for the test to answer it, and rejects with its signal's reason. */
+function controllableGql() {
+  const calls: {
+    respond: (status: number, body: unknown) => void
+    reject: (err: unknown) => void
+    aborted: () => boolean
+    reason: () => unknown
+  }[] = []
+  const fn = vi.fn((_u: string, init: RequestInit) => new Promise<Response>((res, rej) => {
+    const s = init.signal as AbortSignal | undefined
+    s?.addEventListener('abort', () => rej(s.reason))
+    calls.push({
+      respond: (status, body) => res(new Response(JSON.stringify(body), { status })),
+      reject: rej,
+      aborted: () => !!s?.aborted,
+      reason: () => s?.reason,
+    })
+  }))
+  return { fn, calls }
+}
+
+/** The call's Result, or 'hung' if it has not settled within `ms` — a hang fails as an assertion. */
+async function withinShare<T>(p: Promise<T>, ms = 500): Promise<T | 'hung'> {
+  let timer!: ReturnType<typeof setTimeout>
+  const hung = new Promise<'hung'>(r => { timer = setTimeout(() => r('hung'), ms) })
+  try { return await Promise.race([p, hung]) } finally { clearTimeout(timer) }
+}
+
+const shareEndpoint = 'https://x.test/graphql'
+const sharedOp = (extra: { timeout?: number; middleware?: Middleware[] } = {}) =>
+  new Operation<{ id?: string }, { x: number | null }>({ operation: gql`query X($id: String) { x(id: $id) }`, share: true, ...extra })
+
+describe('share (5.1.0) — each caller its own pipeline', () => {
+  afterEach(() => vi.restoreAllMocks())
+
+  // REST: "runs every caller's middleware"
+  it("runs every caller's middleware, and sends once", async () => {
+    const f = controllableGql(); vi.stubGlobal('fetch', f.fn)
+    const seen = vi.fn()
+    const mw: Middleware = (_ctx, next) => { seen(); return next() }
+    const g = createGraphQL({ endpoint: shareEndpoint, middleware: [mw], operations: { getX: sharedOp() } })
+    const all = Promise.all([g.getX({ id: '1' }), g.getX({ id: '1' }), g.getX({ id: '1' })])
+    await flushShare()
+    expect(f.fn).toHaveBeenCalledTimes(1)
+    expect(seen).toHaveBeenCalledTimes(3)
+    f.calls[0].respond(200, { data: { x: 1 } })
+    const rs = await all
+    expect(rs.map(r => r.data)).toEqual([{ x: 1 }, { x: 1 }, { x: 1 }])
+  })
+
+  // REST: "does not share JSON bodies with the same content in a different key order"
+  it('does not share the same variables in a different key order: the body is compared as sent', async () => {
+    const f = controllableGql(); vi.stubGlobal('fetch', f.fn)
+    const op = new Operation<{ a?: number; b?: number }, { x: number }>({ operation: gql`query X($a: Int, $b: Int) { x(a: $a, b: $b) }`, share: true })
+    const g = createGraphQL({ endpoint: shareEndpoint, operations: { getX: op } })
+    const all = Promise.all([g.getX({ a: 1, b: 2 }), g.getX({ b: 2, a: 1 })])
+    await flushShare()
+    expect(f.fn).toHaveBeenCalledTimes(2)
+    f.calls[0].respond(200, { data: { x: 1 } }); f.calls[1].respond(200, { data: { x: 1 } })
+    await all
+  })
+
+  // REST: "marks exactly one of two shared Results as joined"
+  it('marks exactly one of two shared Results as joined', async () => {
+    const f = controllableGql(); vi.stubGlobal('fetch', f.fn)
+    const g = createGraphQL({ endpoint: shareEndpoint, operations: { getX: sharedOp() } })
+    const all = Promise.all([g.getX({ id: '1' }), g.getX({ id: '1' })])
+    await flushShare()
+    expect(f.fn).toHaveBeenCalledTimes(1)
+    f.calls[0].respond(200, { data: { x: 1 } })
+    const rs = await all
+    expect(rs.filter(r => wasJoined(r))).toHaveLength(1)
+  })
+
+  // REST: "lets one sharer abort without harming the others"
+  it('lets one caller abort without harming the others', async () => {
+    const f = controllableGql(); vi.stubGlobal('fetch', f.fn)
+    const g = createGraphQL({ endpoint: shareEndpoint, operations: { getX: sharedOp() } })
+    const ac = new AbortController()
+    const a = g.getX({ id: '1' }, { signal: ac.signal })
+    const b = g.getX({ id: '1' })
+    await flushShare()
+    expect(f.fn).toHaveBeenCalledTimes(1)
+    ac.abort()
+    expect((await a).error?.kind).toBe('abort')
+    expect(f.calls[0].aborted()).toBe(false)
+    f.calls[0].respond(200, { data: { x: 1 } })
+    expect((await b).data).toEqual({ x: 1 })
+  })
+
+  // REST: "hands every caller a real Result when the shared fetch rejects, and reports it once"
+  it('hands every caller its own network error when the shared fetch rejects, and reports it once', async () => {
+    const f = controllableGql(); vi.stubGlobal('fetch', f.fn)
+    const kinds: string[] = []
+    const g = createGraphQL({ endpoint: shareEndpoint, onError: e => { kinds.push(e.kind) }, operations: { getX: sharedOp() } })
+    const all = Promise.all([g.getX({ id: '1' }), g.getX({ id: '1' })])
+    await flushShare()
+    expect(f.fn).toHaveBeenCalledTimes(1)
+    f.calls[0].reject(new TypeError('Failed to fetch'))
+    const [a, b] = await all
+    expect(a.error?.kind).toBe('network')
+    expect(b.error?.kind).toBe('network')
+    expect(a.error).not.toBe(b.error)
+    await flushShare()
+    expect(kinds).toEqual(['network'])
+  })
+
+  // REST: "own give-up racing a shared failure, at any offset: …". Whatever
+  // the interleaving, the shared failure reports exactly once, and a caller's
+  // own give-up reports only when that is what the caller ended with.
+  it('own give-up racing a shared failure, at any offset: the failure reports once, the give-up only as itself', async () => {
+    for (const failure of ['http', 'network'] as const) {
+      for (let k = 0; k < 24; k++) {
+        let answer!: () => void
+        vi.stubGlobal('fetch', vi.fn(() => new Promise<Response>((res, rej) => {
+          answer = failure === 'http'
+            ? () => res(new Response('{}', { status: 500 }))
+            : () => rej(new TypeError('Failed to fetch'))
+        })))
+        const kinds: string[] = []
+        const g = createGraphQL({ endpoint: shareEndpoint, onError: e => { kinds.push(e.kind) }, operations: { getX: sharedOp() } })
+        const ac = new AbortController()
+        const a = g.getX({ id: '1' }, { signal: ac.signal })
+        const b = g.getX({ id: '1' })
+        await flushShare()
+        answer()
+        let p: Promise<unknown> = Promise.resolve()
+        for (let i = 0; i < k; i++) p = p.then(() => {})
+        void p.then(() => ac.abort(new DOMException('gave up', 'TimeoutError')))
+        const [ra, rb] = await Promise.all([a, b])
+        await flushShare()
+        const at = `${failure}, k=${k}: ${kinds.join(',')}`
+        expect(rb.error?.kind, at).toBe(failure)
+        expect(kinds.filter(x => x === failure), at).toHaveLength(1)
+        expect(kinds.filter(x => x === 'timeout'), at).toHaveLength(ra.error?.kind === 'timeout' ? 1 : 0)
+      }
+    }
+  })
+})
+
+// REST: describe "one report per hung shared request", plus the per-call and
+// client-timeout rows. A give-up to the operation's (or client's) deadline
+// while waiting on a shared operation is that one failure, and carries the
+// round trip's deadline token; a per-call timeout is the caller's own.
+describe('share (5.1.0) — one report per hung shared operation', () => {
+  afterEach(() => vi.restoreAllMocks())
+
+  const timed = (timeout: number, middleware: Middleware[] = []) => {
+    const kinds: string[] = []
+    const g = createGraphQL({
+      endpoint: shareEndpoint,
+      middleware,
+      onError: e => { kinds.push(e.kind) },
+      operations: { getX: sharedOp({ timeout }) },
+    })
+    return { g, kinds }
+  }
+
+  it('reports a hung shared operation once when the callers arrive together', async () => {
+    const f = controllableGql(); vi.stubGlobal('fetch', f.fn)
+    const { g, kinds } = timed(30)
+    const [a, b] = await Promise.all([g.getX({ id: '1' }), g.getX({ id: '1' })])
+    expect(f.fn).toHaveBeenCalledTimes(1)
+    expect(a.error?.kind).toBe('timeout')
+    expect(b.error?.kind).toBe('timeout')
+    await flushShare()
+    expect(kinds).toEqual(['timeout'])
+  })
+
+  it('reports a hung shared operation once behind an async global middleware', async () => {
+    // The middleware delays every caller's send, so every caller's own copy
+    // of the deadline starts before the shared request's and fires first.
+    const f = controllableGql(); vi.stubGlobal('fetch', f.fn)
+    const auth: Middleware = async (_ctx, next) => { await Promise.resolve(); return next() }
+    const { g, kinds } = timed(30, [auth])
+    const [a, b] = await Promise.all([g.getX({ id: '1' }), g.getX({ id: '1' })])
+    expect(f.fn).toHaveBeenCalledTimes(1)
+    expect(a.error?.kind).toBe('timeout')
+    expect(b.error?.kind).toBe('timeout')
+    await flushShare()
+    expect(kinds).toEqual(['timeout'])
+  })
+
+  it('still reports a real failure that arrives after a caller timed out', async () => {
+    // A starts its deadline 40ms before it sends (its own middleware waits),
+    // so it times out at 60ms while the shared request's deadline is not due
+    // until about 100ms. The server then answers B with a 500: a different
+    // failure, and it reports too.
+    const f = controllableGql(); vi.stubGlobal('fetch', f.fn)
+    const { g, kinds } = timed(60)
+    const slowStart: Middleware = async (_ctx, next) => { await new Promise(r => setTimeout(r, 40)); return next() }
+    const a = g.getX({ id: '1' }, { middleware: [slowStart] })
+    await new Promise(r => setTimeout(r, 45))
+    const b = g.getX({ id: '1' })
+    await flushShare()
+    expect(f.fn).toHaveBeenCalledTimes(1)
+    expect((await a).error?.kind).toBe('timeout')
+    f.calls[0].respond(500, { errors: [{ message: 'down' }] })
+    expect((await b).error?.kind).toBe('http')
+    await flushShare()
+    expect(kinds).toEqual(['timeout', 'http'])
+  })
+
+  // REST: row 2b
+  it("reports once per caller when each caller's own per-call timeout ends it", async () => {
+    const f = controllableGql(); vi.stubGlobal('fetch', f.fn)
+    const kinds: string[] = []
+    const g = createGraphQL({ endpoint: shareEndpoint, onError: e => { kinds.push(e.kind) }, operations: { getX: sharedOp() } })
+    const a = g.getX({ id: '1' }, { timeout: 10 })
+    const b = g.getX({ id: '1' }, { timeout: 10 })
+    expect((await a).error?.kind).toBe('timeout')
+    expect((await b).error?.kind).toBe('timeout')
+    expect(f.fn).toHaveBeenCalledTimes(1)
+    await flushShare()
+    expect(kinds).toEqual(['timeout', 'timeout'])
+  })
+
+  // REST: "bounds a shared request with no endpoint timeout by the client
+  // timeout". `timeout: 0` takes both callers' own budgets out of the race,
+  // so only the shared request's deadline can end the hung round trip.
+  it('bounds a shared operation with no operation timeout by the client timeout', async () => {
+    const f = controllableGql(); vi.stubGlobal('fetch', f.fn)
+    const kinds: string[] = []
+    const g = createGraphQL({ endpoint: shareEndpoint, timeout: 20, onError: e => { kinds.push(e.kind) }, operations: { getX: sharedOp() } })
+    const settled = await withinShare(Promise.all([g.getX({ id: '1' }, { timeout: 0 }), g.getX({ id: '1' }, { timeout: 0 })]))
+    expect(settled).not.toBe('hung')
+    const [a, b] = settled as Awaited<ReturnType<typeof g.getX>>[]
+    expect(a.error?.kind).toBe('timeout')
+    expect(b.error?.kind).toBe('timeout')
+    expect(f.fn).toHaveBeenCalledTimes(1)
+    expect((f.calls[0].reason() as Error).name).toBe('TimeoutError')
+    await flushShare()
+    expect(kinds).toEqual(['timeout'])
+  })
+
+  // REST: "classifies the shared deadline as 'timeout' even when fetch rejects
+  // with its own AbortError" (whatwg-fetch, React Native).
+  it("classifies the shared deadline as 'timeout' even when fetch rejects with its own AbortError", async () => {
+    vi.stubGlobal('fetch', vi.fn((_u: string, init: RequestInit) => new Promise<Response>((_res, rej) => {
+      init.signal?.addEventListener('abort', () => rej(new DOMException('Aborted', 'AbortError')), { once: true })
+    })))
+    const { g, kinds } = timed(20)
+    // `timeout: 0` takes the callers' own budgets out of the race, so the
+    // shared deadline is what ends the request.
+    const settled = await withinShare(Promise.all([g.getX({ id: '1' }, { timeout: 0 }), g.getX({ id: '1' }, { timeout: 0 })]))
+    expect(settled).not.toBe('hung')
+    const [a, b] = settled as Awaited<ReturnType<typeof g.getX>>[]
+    expect(globalThis.fetch).toHaveBeenCalledTimes(1)
+    expect(a.error?.kind).toBe('timeout')
+    expect(b.error?.kind).toBe('timeout')
+    expect((a.error?.body as DOMException).name).toBe('AbortError') // what fetch threw, as unshared
+    await flushShare()
+    expect(kinds).toEqual(['timeout'])
+  })
+})
+
+// REST: describe "a replaced signal does not hold the shared request". A
+// middleware that replaces ctx.request.signal with one that never fires must
+// not stop a caller's own cancel from letting go of the round trip; the
+// give-up is classified by the signal the caller waited on, so a custom
+// reason stays 'abort' — not 'network', and not reported.
+describe('share (5.1.0) — a replaced signal does not hold the shared operation', () => {
+  afterEach(() => vi.restoreAllMocks())
+
+  it('releases a caller on its own cancel, and the last one abandons the request', async () => {
+    const f = controllableGql(); vi.stubGlobal('fetch', f.fn)
+    const neverFires: Middleware = (ctx, next) => { ctx.request.signal = new AbortController().signal; return next() }
+    const onError = vi.fn()
+    const g = createGraphQL({ endpoint: shareEndpoint, onError, operations: { getX: sharedOp({ middleware: [neverFires] }) } })
+    const ac1 = new AbortController(), ac2 = new AbortController()
+    const a = g.getX({ id: '1' }, { signal: ac1.signal })
+    const b = g.getX({ id: '1' }, { signal: ac2.signal })
+    await flushShare()
+    expect(f.fn).toHaveBeenCalledTimes(1)
+
+    ac1.abort(new Error('unmount'))
+    const ra = await withinShare(a)
+    expect(ra).not.toBe('hung')
+    expect((ra as Awaited<typeof a>).error?.kind).toBe('abort')
+    expect(f.calls[0].aborted()).toBe(false)
+
+    ac2.abort(new Error('unmount'))
+    const rb = await withinShare(b)
+    expect((rb as Awaited<typeof b>).error?.kind).toBe('abort')
+    expect(f.calls[0].reason()).toBe(ABANDONED)
+    await flushShare()
+    expect(onError).not.toHaveBeenCalled()
   })
 })

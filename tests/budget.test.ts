@@ -1,20 +1,23 @@
 import { describe, it, expect } from 'vitest'
-import { operationBudget, callBudget } from '../src/utils/budget.js'
+import { callBudget } from '../src/utils/budget.js'
 import { timeoutSignalFor } from '../src/utils/timeout.js'
 
-describe('operationBudget', () => {
+// A call's own budget: its signal merged with the resolved deadline.
+const ownSignal = (...args: Parameters<typeof callBudget>) => callBudget(...args).signal
+
+describe('callBudget().signal', () => {
   it('returns undefined when there is neither a signal nor a timeout', () => {
-    expect(operationBudget(undefined, undefined, undefined, undefined)).toBeUndefined()
+    expect(ownSignal(undefined, undefined, undefined, undefined)).toBeUndefined()
   })
 
   it("returns the caller's own signal unchanged when no timeout applies", () => {
     const c = new AbortController()
-    expect(operationBudget(undefined, undefined, undefined, c.signal)).toBe(c.signal)
+    expect(ownSignal(undefined, undefined, undefined, c.signal)).toBe(c.signal)
   })
 
   it('merges the caller signal with the resolved timeout', () => {
     const c = new AbortController()
-    const s = operationBudget(undefined, 5000, undefined, c.signal)
+    const s = ownSignal(undefined, 5000, undefined, c.signal)
     expect(s).toBeInstanceOf(AbortSignal)
     expect(s).not.toBe(c.signal)
     c.abort(new Error('mine'))
@@ -29,11 +32,11 @@ describe('operationBudget', () => {
       await new Promise(r => setTimeout(r, 30))
       return s.aborted
     }
-    expect(await fires(operationBudget(10, 60_000, 60_000, undefined))).toBe(true)
-    expect(await fires(operationBudget(undefined, 10, 60_000, undefined))).toBe(true)
-    expect(await fires(operationBudget(undefined, undefined, 10, undefined))).toBe(true)
-    expect(operationBudget(undefined, 0, 10, undefined)).toBeUndefined()
-    expect(operationBudget(0, 10, 10, undefined)).toBeUndefined()
+    expect(await fires(ownSignal(10, 60_000, 60_000, undefined))).toBe(true)
+    expect(await fires(ownSignal(undefined, 10, 60_000, undefined))).toBe(true)
+    expect(await fires(ownSignal(undefined, undefined, 10, undefined))).toBe(true)
+    expect(ownSignal(undefined, 0, 10, undefined)).toBeUndefined()
+    expect(ownSignal(0, 10, 10, undefined)).toBeUndefined()
   })
 })
 

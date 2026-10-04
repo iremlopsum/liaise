@@ -44,7 +44,8 @@ import { composeMiddleware } from './middleware.js'
 import { buildUrl, joinUrl, FragmentError } from './utils/path-params.js'
 import { serializeBody } from './utils/serialize.js'
 import { DedupeTracker } from './utils/dedupe.js'
-import { ShareTracker, requestKey, tagShared, markJoined } from './utils/share.js'
+import { ShareTracker, requestKey, narrowTag, stampShared } from './utils/share.js'
+import type { SharedRound } from './utils/share.js'
 import { mergeHeaders } from './utils/headers.js'
 import { abortKind, propagatesReason } from './utils/abort-kind.js'
 import { anySignal, releaseSignal } from './utils/any-signal.js'
@@ -55,7 +56,7 @@ import { isReadableStream } from './utils/special-body.js'
 import { classifyParams } from './utils/classify-params.js'
 import { runSchema } from './utils/validate.js'
 import type { SchemaOutcome } from './utils/validate.js'
-import { sendExchange, AbortedRead } from './utils/exchange.js'
+import { sendExchange, sendSharedExchange, AbortedRead } from './utils/exchange.js'
 import type { Exchange } from './utils/exchange.js'
 import type { ApiConfig, CallOptions, ErrorResult, Middleware, MiddlewareContext, Result, ResponseType } from './types.js'
 
@@ -156,20 +157,6 @@ const sentStreams = new WeakSet<ReadableStream>()
  * being reported there, and the empty body is only diagnostic.
  */
 const EMPTY_JSON_BODY: unique symbol = Symbol('liaise.emptyJsonBody')
-
-/**
- * One attempt's part in a shared round trip, filled in by core's share step
- * and read by the stamp around it. `token` and `deadlineToken` are the round
- * trip's two identities (see `Entered` in utils/share.ts), set the moment the
- * attempt enters it; `tag` is the one this attempt's error, if any, carries —
- * decided by how that error came about.
- */
-interface SharedRound {
-  token?: object
-  deadlineToken?: object
-  joined: boolean
-  tag?: object
-}
 
 /**
  * This caller's own copy of the body, decoded from the one shared read.
@@ -796,18 +783,10 @@ export function createApi<TRequests extends Record<string, Request<any, any>>>(
                   waitSignal,
                   // Sent with the first caller's init, headers included (so its
                   // tracing headers), and the shared signal: the refcount plus
-                  // the deadline above, never any one caller's.
-                  signal => sendExchange(sendUrl, { ...fetchInit, signal }, responseType).catch((err: unknown) => {
-                    // The provenance rule the unshared path applies to the
-                    // signal it hands fetch, applied to the one this request
-                    // was sent with: if that aborted (the shared deadline —
-                    // abandonment reaches nobody), the failure is that abort,
-                    // whatever shape fetch rejected with. A fetch that rejects
-                    // with its own AbortError (whatwg-fetch, React Native)
-                    // must still read as 'timeout' to every waiting caller.
-                    if (signal.aborted && !(err instanceof AbortedRead)) throw new AbortedRead(err, signal.reason)
-                    throw err
-                  }),
+                  // the deadline above, never any one caller's. If that signal
+                  // aborted, the failure is that abort, whatever fetch
+                  // rejected with (sendSharedExchange, utils/exchange.ts).
+                  signal => sendSharedExchange(sendUrl, { ...fetchInit, signal }, responseType),
                   // Learnt on entry, before this caller can give up, so even
                   // an early give-up knows which round trip it left.
                   entered => {
@@ -1052,22 +1031,12 @@ export function createApi<TRequests extends Record<string, Request<any, any>>>(
                   ? (abortKind(signal.reason) ?? 'abort')
                   : (abortKind(err) ?? 'network')
               // Which of the round trip's identities this error carries, if
-              // any (core's stamp, below; nothing is set for an unshared call).
-              // An abort of the shared request's own signal reaches a caller
-              // only as its deadline (abandonment reaches nobody): the
-              // deadline token. This caller's own give-up is its own failure
-              // — even when the round trip had already answered in the same
-              // tick — unless it gave up to the endpoint's or client's
-              // deadline, the same one the shared request carries: then it is
-              // that one failure, and carries the deadline token too. Matched
-              // by identity, since anySignal hands the reason through
-              // unchanged. A per-call timeout or a cancel stays untagged.
-              if (aborted) round.tag = round.deadlineToken
-              else if (ownGiveUp) {
-                round.tag = endpointDeadline !== undefined && signal.reason === endpointDeadline.reason
-                  ? round.deadlineToken
-                  : undefined
-              }
+              // any (core's stamp, below; nothing is set for an unshared
+              // call): the shared request's own abort is its deadline, and
+              // this caller's own give-up is its own failure unless it gave
+              // up to that same deadline. The rule, for both clients, is
+              // narrowTag's (utils/share.ts).
+              narrowTag(round, aborted, ownGiveUp ? signal : undefined, endpointDeadline)
               const error = new ApiError({
                 status: 0,
                 kind,
@@ -1088,21 +1057,11 @@ export function createApi<TRequests extends Record<string, Request<any, any>>>(
           const core: (ctx: MiddlewareContext) => Promise<Result<unknown>> = request.config.share === true
             ? async ctx => {
               const round: SharedRound = { joined: false }
-              const result = await attempt(ctx, round)
               // An error derived from the shared round trip carries one of its
-              // tokens, so onError hears about one failed shared request once,
-              // whichever of its callers reaches the hook first (spec §4.3):
-              // the main token for its outcome (HTTP error, parse or schema
-              // failure, network failure), the deadline token for its deadline
-              // and for each caller's give-up to the same deadline. Two tokens,
-              // so an early timeout can't swallow the report of a real failure
-              // a caller still waiting receives later. Anything else — a
-              // caller's own cancel or per-call timeout, an error a middleware
-              // makes of the Result afterwards — is untagged and reports alone.
-              if (round.tag !== undefined && result.error) tagShared(result.error, round.tag)
-              // For the logger's `, shared` suffix: this caller sent nothing.
-              if (round.joined) markJoined(result)
-              return result
+              // tokens, so onError hears about one failed shared request once;
+              // a Result that joined is marked for the logger (stampShared,
+              // utils/share.ts, holds the rule for both clients).
+              return stampShared(await attempt(ctx, round), round)
             }
             : ctx => attempt(ctx, { joined: false })
 

@@ -497,9 +497,10 @@ export interface CallOptions {
    * deadline semantics — see there for details. Non-positive means no timeout.
    *
    * Under `share: true` this bounds only *this* caller. The shared request
-   * has a deadline of its own — `RequestConfig.timeout`, else the client's,
-   * from when it was sent — so a per-call `timeout: 0` cannot lift it and a
-   * longer per-call timeout cannot outlast it.
+   * has a deadline of its own — `RequestConfig.timeout` (or
+   * `OperationConfig.timeout`), else the client's, from when it was sent — so
+   * a per-call `timeout: 0` cannot lift it and a longer per-call timeout
+   * cannot outlast it.
    *
    * A fractional or out-of-range value is normalised rather than rejected:
    * rounded down to whole milliseconds with a 1 ms minimum, clamped to the
@@ -813,6 +814,43 @@ export interface OperationConfig {
   dedupe?: boolean
 
   /**
+   * Join an identical operation already in flight instead of sending your own.
+   *
+   * "Identical" means what would be sent: the operation name, the endpoint,
+   * the headers (after every middleware has run, so a header an auth
+   * middleware adds — the current user's token — is part of the comparison;
+   * the tracing headers `traceparent`, `tracestate`, `baggage`,
+   * `sentry-trace`, `x-request-id` and `x-correlation-id` are left out, and
+   * the shared request goes out with the first caller's values) and the body:
+   * the query and variables as serialised, so variables in a different key
+   * order do not share. Anything that differs never shares.
+   *
+   * Each caller still runs its own middleware and gets its own `Result`, with
+   * its own `data` (or `partialData`) parsed from the one response, and its
+   * own `result.retry()`. `onError` fires once per failed shared operation,
+   * not once per caller, a hung one included: every caller timing out to this
+   * operation's (or the client's) deadline while waiting is that one failure.
+   * A caller's own cancel or per-call timeout, or an error its own middleware
+   * produces, reports as it would without `share`.
+   *
+   * A caller that gives up — its `signal`, its own deadline, or a signal a
+   * middleware installed — releases only itself; the request is cancelled
+   * once every caller has given up. A per-call {@link CallOptions.timeout}
+   * bounds only its caller. {@link OperationConfig.timeout}, else the
+   * client's {@link GraphQLBaseConfig.timeout}, bounds the shared request
+   * itself, measured from when it is sent. A call arriving after the shared
+   * operation has settled sends a new one; nothing is cached.
+   *
+   * Allowed on mutations, where it merges identical concurrent calls into one
+   * — usually wanted for reads and refresh-style calls, rarely for writes.
+   * Cannot be combined with `dedupe`: setting both throws at `createGraphQL`
+   * time.
+   *
+   * @default false
+   */
+  share?: boolean
+
+  /**
    * Optional runtime validation of the GraphQL response's `data`.
    *
    * Same contract as `RequestConfig.schema`: any Standard Schema validator, no
@@ -836,6 +874,10 @@ export interface OperationConfig {
    * `status: 0`. `result.retry()` starts a fresh budget. Non-positive means no
    * timeout, and stops the fallback to the client's `GraphQLBaseConfig.timeout`;
    * omitted falls back to it (and to none if that is unset too).
+   *
+   * Under {@link OperationConfig.share} it also bounds the shared request
+   * itself, measured from when that request was sent rather than from when
+   * each caller joined, so no individual caller can extend or disable it.
    */
   timeout?: number
 }
@@ -870,6 +912,8 @@ export interface GraphQLBaseConfig {
    * or a negative value at any level means "no deadline" and stops the
    * fallback, so `timeout: 0` on an endpoint opts it out of this default.
    * Like every liaise timeout it covers the whole operation, retries included.
+   * Under `share`, it is also the shared request's deadline when the
+   * operation sets none, measured from when that request is sent.
    */
   timeout?: number
 

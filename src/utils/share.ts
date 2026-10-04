@@ -1,19 +1,24 @@
 // =============================================================================
 // share.ts — `share: true`: one network round trip for identical requests
 // =============================================================================
-// Sharing is decided at the last moment, inside core() (create-api.ts), on what
-// is about to be sent (`requestKey`): name, method, final URL, final headers
-// minus the tracing list, and body. Every caller has run its own pipeline to
-// get there — setup, middleware, deadlines — and goes on to decode its own
-// copy of the one read and build its own Result. Only the round trip is
-// shared (`ShareTracker.run`).
+// Sharing is decided at the last moment, inside core() — create-api.ts's and,
+// for operations, graphql.ts's — on what is about to be sent (`requestKey`):
+// name, method, final URL, final headers minus the tracing list, and body.
+// Every caller has run its own pipeline to get there — setup, middleware,
+// deadlines — and goes on to decode its own copy of the one read and build its
+// own Result. Only the round trip is shared (`ShareTracker.run`).
 //
 // Two identical requests are byte-for-byte the same to the server, so sharing
 // them is safe; anything that differs never shares.
 //
 // The rest supports the callers' own pipelines: a token that lets onError
 // hear about one failed shared request once (`tagShared`/`shouldReport`), and
-// a marker for a Result that joined instead of sending (`markJoined`).
+// a marker for a Result that joined instead of sending (`markJoined`). Both
+// clients' cores record their part in a round trip as a `SharedRound`, and
+// apply the same two rules to it: which token an error carries (`narrowTag`),
+// and the stamp on the Result (`stampShared`). Those rules live here, once,
+// so the two pipelines — parallel on purpose, see architecture.md — cannot
+// drift apart on them.
 // =============================================================================
 
 import type { Exchange } from './exchange.js'
@@ -135,6 +140,75 @@ export function markJoined(result: object): void {
 /** Whether `markJoined` was called on this Result. */
 export function wasJoined(result: object): boolean {
   return joinedResults.has(result)
+}
+
+/**
+ * One attempt's part in a shared round trip, filled in by core's share step
+ * and read by the stamp around it (`stampShared`). `token` and
+ * `deadlineToken` are the round trip's two identities (see `Entered`), set the
+ * moment the attempt enters it; `tag` is the one this attempt's error, if any,
+ * carries — the main token once the round trip has answered, narrowed by
+ * `narrowTag` for how the error came about.
+ */
+export interface SharedRound {
+  token?: object
+  deadlineToken?: object
+  joined: boolean
+  tag?: object
+}
+
+/**
+ * Narrows an attempt's `tag` once core's catch has classified its failure as
+ * an abort. Every other failure keeps the tag it has: an error derived from
+ * the round trip's outcome (an HTTP error, a network failure, a body that
+ * would not parse) carries the main token.
+ *
+ * - `requestAborted`: the request's own signal aborted it. Under share that
+ *   signal is the shared request's, and abandonment reaches nobody, so this
+ *   is always its deadline: the deadline token.
+ * - `gaveUpOn`: the signal this caller gave up on, when it did. That is its
+ *   own failure — even when the round trip had already answered in the same
+ *   tick — and is untagged, unless it gave up to the endpoint's or client's
+ *   deadline (`endpointDeadline`, from `callBudget`), the same one the shared
+ *   request carries: then it is that one failure, and carries the deadline
+ *   token too. Matched by identity of the reason, which `anySignal` hands
+ *   through every merge unchanged. A per-call timeout or a cancel stays
+ *   untagged.
+ *
+ * For an attempt that took no part in a round trip both tokens are
+ * undefined, so this leaves it untagged.
+ */
+export function narrowTag(
+  round: SharedRound,
+  requestAborted: boolean,
+  gaveUpOn: AbortSignal | undefined,
+  endpointDeadline: AbortSignal | undefined
+): void {
+  if (requestAborted) round.tag = round.deadlineToken
+  else if (gaveUpOn) {
+    round.tag = endpointDeadline !== undefined && gaveUpOn.reason === endpointDeadline.reason
+      ? round.deadlineToken
+      : undefined
+  }
+}
+
+/**
+ * The stamp every Result of a `share: true` attempt passes through, in
+ * either client's core. An error derived from the shared round trip carries
+ * one of its tokens, so onError hears about one failed shared request once,
+ * whichever of its callers reaches the hook first (spec §4.3): the main token
+ * for its outcome, the deadline token for its deadline and for each caller's
+ * give-up to the same deadline. Two tokens, so an early timeout can't swallow
+ * the report of a real failure a caller still waiting receives later.
+ * Anything else — a caller's own cancel or per-call timeout, an error a
+ * middleware makes of the Result afterwards — is untagged and reports alone.
+ * A Result that joined is marked for the logger's `, shared` suffix: this
+ * caller sent nothing.
+ */
+export function stampShared<R extends { error: object | null }>(result: R, round: SharedRound): R {
+  if (round.tag !== undefined && result.error) tagShared(result.error, round.tag)
+  if (round.joined) markJoined(result)
+  return result
 }
 
 /**

@@ -1094,6 +1094,7 @@ Most of what the guide says about `createApi` holds for `createGraphQL`.
 - **`onError`** goes on `createGraphQL` and works as in [Reporting errors with onError](#reporting-errors-with-onerror).
 - **`retry()`** is on every `Result`.
 - **`dedupe`** goes on the `Operation`, as in [Drop stale calls with dedupe](#drop-stale-calls-with-dedupe).
+- **`share`** goes on the `Operation`, as in [Sharing identical requests](#sharing-identical-requests). Variables must match exactly, key order included.
 - **`timeout`** goes on the `Operation` or the call. It is one deadline for the whole call, retries included.
 - **`schema`** goes on the `Operation` and validates the response's `data`. The response type stays explicit ([Validating responses](#validating-responses)).
 - **`signal` and `skipMiddleware`** go on the call.
@@ -1103,7 +1104,6 @@ Most of what the guide says about `createApi` holds for `createGraphQL`.
 - **`endpoint`** is the full URL of the GraphQL endpoint. It takes the place of `baseUrl`.
 - **Variables always go in the JSON body.** There are no path params, no query strings and no `bodyAs`.
 - **Every operation is a `POST`**, with `Content-Type: application/json` unless you set your own.
-- **There is no `share`.** An `Operation` can't join identical calls.
 - **There is no `responseType`.** The response is always read as JSON.
 
 ### Testing your code
@@ -1622,6 +1622,7 @@ Every option, type and export, read from the source. The guide explains when to 
 | `middleware` | `Middleware[]` | — | Runs on every call to this operation, after client middleware. |
 | `headers` | `HeadersInit` | — | Sent with every call to this operation. Replaces the client's value for the same header. |
 | `dedupe` | `boolean` | `false` | A new call cancels the one still running. |
+| `share` | `boolean` | `false` | Identical calls join one request ([details](#sharing-identical-requests)). Variables must match exactly, key order included. Can't be combined with `dedupe`. |
 | `schema` | `StandardSchemaV1` | — | Checks the response's `data`. The response type stays explicit ([Validating responses](#validating-responses)). |
 | `timeout` | `number` (ms) | no deadline | One deadline for the whole call, retries included. |
 

@@ -235,11 +235,12 @@ describe("abortKind's .name read never rejects or hangs the caller", () => {
   })
 })
 
-// GraphQL never coalesces (createGraphQL has no `share` concept), so there
-// is no shared-path variant here, only the two create-api.ts also has: an
-// async throw and a synchronous throw. `graphql.ts` has its own local `buildFailedResult`
-// equivalent and its own composed(context) call site, so this is a separate
-// discriminating pin, not a duplicate of the REST suite above.
+// The REST suite's rows, on GraphQL's own pipeline: an async throw, a
+// synchronous throw, and — since 5.1.0, when operations gained `share` — the
+// two shared-path rows. `graphql.ts` has its own local `buildFailedResult`
+// equivalent, its own composed(context) call site and its own share step in
+// core, so this is a separate discriminating pin, not a duplicate of the REST
+// suite above.
 describe('a throwing middleware never rejects a GraphQL caller', () => {
   beforeEach(() => { vi.stubGlobal('fetch', vi.fn(async () => new Response('{"data":{}}', { status: 200 }))) })
   afterEach(() => { vi.restoreAllMocks() })
@@ -264,6 +265,32 @@ describe('a throwing middleware never rejects a GraphQL caller', () => {
       operations: { g: new Operation<Record<string, never>, unknown>({ operation: 'query { g }' }) },
     })
     expect((await api.g()).error!.kind).toBe('middleware')
+  })
+
+  it('a shared operation returns a Result', async () => {
+    const api = createGraphQL({
+      endpoint: '/graphql',
+      middleware: [boom],
+      operations: { g: new Operation<{ id: string }, unknown>({ operation: 'query G($id: String) { g(id: $id) }', share: true }) },
+    })
+    expect((await api.g({ id: '1' })).error!.kind).toBe('middleware')
+  })
+
+  // REST's "shared path returns a Result when the share step itself throws",
+  // on GraphQL's share step: building the key, the shared request's deadline
+  // and joining or sending all run inside core's try. A BigInt operation
+  // timeout behind a per-call timeout reaches nothing in setup, and the first
+  // thing to reach Math.min with it is the shared request's deadline.
+  it('a shared operation returns a Result when the share step itself throws', async () => {
+    const api = createGraphQL({
+      endpoint: '/graphql',
+      operations: { g: new Operation<{ id: string }, unknown>({ operation: 'query G($id: String) { g(id: $id) }', share: true, timeout: 10n as unknown as number }) },
+    })
+    const r = await api.g({ id: '1' }, { timeout: 1000 })
+    expect(r.error).not.toBeNull()
+    expect(r.error!.kind).toBe('network')
+    expect(r.error!.body).toBeInstanceOf(TypeError)
+    expect(globalThis.fetch).not.toHaveBeenCalled()
   })
 
   it('reports the middleware failure to onError exactly once', async () => {
@@ -301,8 +328,7 @@ describe('a throwing middleware never rejects a GraphQL caller', () => {
 
   // Twin of the REST suite's "abortKind's .name read" tests above —
   // graphql.ts's own `buildFailedResult` call site feeds `abortKind` too.
-  // GraphQL has no `share` concept, so only the unshared-rethrow shape
-  // applies here.
+  // This is the unshared-rethrow shape; the two `share: true` shapes follow.
   it("a middleware rethrowing signal.reason with a hostile .name getter never rejects", async () => {
     const hostileReason: { name: string } = {} as { name: string }
     Object.defineProperty(hostileReason, 'name', { get() { throw new TypeError('hostile name getter') } })
@@ -320,6 +346,57 @@ describe('a throwing middleware never rejects a GraphQL caller', () => {
     const p = api.g(undefined, { signal: ac.signal })
     ac.abort(hostileReason)
     const r = await p
+    expect(r.error).not.toBeNull()
+    expect(r.error!.kind).toBe('abort')
+  })
+
+  // The REST suite's two `share: true` rows, on GraphQL's share step: a caller
+  // that gives up while waiting on a shared operation is released by
+  // ShareTracker.run, which rejects with the reason, and core's catch
+  // classifies it through abortKind's guarded `.name` read.
+  const hostile = (): { name: string } => {
+    const obj = {}
+    Object.defineProperty(obj, 'name', { get() { throw new TypeError('hostile name getter') } })
+    return obj as { name: string }
+  }
+  const sharedG = () => createGraphQL({
+    endpoint: '/graphql',
+    operations: { g: new Operation<{ id: string }, unknown>({ operation: 'query G($id: String) { g(id: $id) }', share: true }) },
+  })
+  const hangs = () => vi.fn((_u: string, init: RequestInit) => new Promise<Response>((_res, rej) => {
+    const s = init.signal as AbortSignal | undefined
+    if (s?.aborted) { rej(s.reason); return }
+    s?.addEventListener('abort', () => rej(s.reason))
+  }))
+
+  it('share: true, aborted in flight — the promise actually SETTLES (not merely: does not reject)', async () => {
+    vi.stubGlobal('fetch', hangs())
+    const api = sharedG()
+    // A second, patient caller keeps the shared request alive, so this
+    // caller's give-up is not the last one: its own release is the only way
+    // it gets a Result before the backstop's grace.
+    const ac = new AbortController()
+    const p = api.g({ id: '1' }, { signal: ac.signal })
+    const patient = api.g({ id: '1' })
+    await Promise.resolve()
+    ac.abort(hostile())
+    const outcome = await Promise.race([
+      p.then(r => ({ settled: true as const, r })),
+      new Promise<{ settled: false }>(resolve => setTimeout(() => resolve({ settled: false }), 200)),
+    ])
+    expect(outcome.settled).toBe(true)
+    if (outcome.settled) {
+      expect(outcome.r.error).not.toBeNull()
+      expect(outcome.r.error!.kind).toBe('abort')
+    }
+    patient.catch(() => {})
+  })
+
+  it('share: true, already aborted at call time, never rejects', async () => {
+    vi.stubGlobal('fetch', hangs())
+    const ac = new AbortController()
+    ac.abort(hostile())
+    const r = await sharedG().g({ id: '1' }, { signal: ac.signal })
     expect(r.error).not.toBeNull()
     expect(r.error!.kind).toBe('abort')
   })

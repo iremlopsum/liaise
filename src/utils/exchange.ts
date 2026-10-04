@@ -39,9 +39,9 @@ export interface Exchange {
  * body's. `cause` is what the read threw (it becomes `error.body`, as it
  * always has); `reason` is the signal's reason (it decides `kind`).
  *
- * create-api.ts's share step also throws one for a shared request whose
- * `fetch` rejected because the shared request's own signal aborted: that
- * signal is no caller's, so this is how the provenance reaches each caller's
+ * `sendSharedExchange` also throws one for a shared request whose `fetch`
+ * rejected because the shared request's own signal aborted: that signal is no
+ * caller's, so this is how the provenance reaches each caller's
  * classification. `cause` is then what `fetch` threw.
  */
 export class AbortedRead {
@@ -93,4 +93,23 @@ export async function sendExchange(url: string, init: RequestInit, read: ReadAs)
     if (init.signal?.aborted === true) throw new AbortedRead(readError, init.signal.reason)
     return { response, body: undefined, readFailed: true, readError }
   }
+}
+
+/**
+ * `sendExchange` for a shared request (both clients' share step), with the
+ * provenance rule an unshared call applies to the signal it hands `fetch`,
+ * applied to the one this request is sent with. An unshared call classifies
+ * by its own signal in core's catch; a shared request's signal is no caller's
+ * — the refcount plus the shared deadline — so if it aborted (the deadline:
+ * abandonment reaches nobody), the failure is that abort, whatever shape
+ * `fetch` rejected with. A `fetch` that rejects with its own `AbortError`
+ * (whatwg-fetch, React Native) must still read as 'timeout' to every waiting
+ * caller.
+ */
+export function sendSharedExchange(url: string, init: RequestInit & { signal: AbortSignal }, read: ReadAs): Promise<Exchange> {
+  const signal = init.signal
+  return sendExchange(url, init, read).catch((err: unknown) => {
+    if (signal.aborted && !(err instanceof AbortedRead)) throw new AbortedRead(err, signal.reason)
+    throw err
+  })
 }
