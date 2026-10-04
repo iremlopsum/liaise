@@ -8,6 +8,7 @@ import type { ApiError } from '../src/types.js'
 import type { StandardSchemaV1 } from '../src/types.js'
 import type { PathParams } from '../src/define-request.js'
 import { defineRequest } from '../src/define-request.js'
+import { logMiddleware } from '../src/built-in-middleware.js'
 
 interface User { id: string; name: string }
 
@@ -469,5 +470,16 @@ describe('client-level timeout (5.1.0)', () => {
   it('is an optional number on both client configs', () => {
     expectTypeOf<ApiConfig<{}>['timeout']>().toEqualTypeOf<number | undefined>()
     expectTypeOf<GraphQLBaseConfig['timeout']>().toEqualTypeOf<number | undefined>()
+  })
+})
+
+describe('log option (5.1.0)', () => {
+  it('accepts true or options, rejects anything else; logMiddleware takes options', () => {
+    createApi({ baseUrl: '/api', requests: {}, log: true })
+    createApi({ baseUrl: '/api', requests: {}, log: { enabled: true, data: true } })
+    // @ts-expect-error  log is a boolean or LogOptions
+    createApi({ baseUrl: '/api', requests: {}, log: 'yes' })
+    logMiddleware({ data: true })
+    logMiddleware({ enabled: false })
   })
 })

@@ -39,6 +39,7 @@ export { ApiError } from './result.js'
 export type {
   RequestConfig,
   ApiConfig,
+  LogOptions,
   CallOptions,
   Result,
   SuccessResult,

@@ -44,6 +44,7 @@ import { composeMiddleware } from './middleware.js'
 import { buildUrl, joinUrl, FragmentError } from './utils/path-params.js'
 import { serializeBody } from './utils/serialize.js'
 import { DedupeTracker } from './utils/dedupe.js'
+import { loggerFor } from './utils/log.js'
 import { ShareTracker, requestKey, narrowTag, stampShared } from './utils/share.js'
 import type { SharedRound } from './utils/share.js'
 import { mergeHeaders } from './utils/headers.js'
@@ -412,6 +413,8 @@ export function createApi<TRequests extends Record<string, Request<any, any>>>(
   // Destructure the config for convenience. Default globalMiddleware to an
   // empty array so we don't need null checks throughout the function.
   const { baseUrl, requests, middleware: globalMiddleware = [], headers: globalHeaders, onError, timeout: clientTimeout } = config
+  // Outermost, so each call logs once with its final outcome. Null when off.
+  const logger = loggerFor(config.log)
 
   /**
    * Calls the consumer's `onError`, swallowing anything it throws.
@@ -586,6 +589,7 @@ export function createApi<TRequests extends Record<string, Request<any, any>>>(
           // Per-call middleware (one-off customizations) is innermost.
           // -----------------------------------------------------------------
           const allMiddleware: Middleware[] = [
+            ...(logger ? [logger] : []),
             ...globalMiddleware,
             ...(request.config.middleware ?? []),
             ...(options.middleware ?? [])

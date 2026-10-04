@@ -636,6 +636,20 @@ export type Middleware = (context: MiddlewareContext, next: MiddlewareNext<unkno
 // API Config
 // ---------------------------------------------------------------------------
 
+/** Options for the `log` setting on `createApi`/`createGraphQL`, and for `logMiddleware(…)`. */
+export interface LogOptions {
+  /** Turn logging on or off. Defaults to `true` when an options object is given. */
+  enabled?: boolean
+  /**
+   * Also print each call's data — an object or array with `console.table`,
+   * anything else with `console.log` — or, on failure, `error.body`. Off by
+   * default: responses often hold personal data and tokens, and a large list
+   * makes the console noisy and slow.
+   * @default false
+   */
+  data?: boolean
+}
+
 /**
  * Configuration for the `createApi` constructor.
  *
@@ -684,6 +698,15 @@ export interface ApiConfig<TRequests extends Record<string, unknown>> {
    * sets none, measured from when that request is sent.
    */
   timeout?: number
+
+  /**
+   * Log every call to the console: `true`, or `{ enabled, data }`. Off by
+   * default. Pass an environment flag to switch it per environment, e.g.
+   * `log: import.meta.env.DEV`. The logger runs outside all other middleware,
+   * so each call logs once with its final outcome; a call that joined a shared
+   * request is tagged `, shared`.
+   */
+  log?: boolean | LogOptions
 
   /**
    * Global middleware applied to every request.
@@ -916,6 +939,15 @@ export interface GraphQLBaseConfig {
    * operation sets none, measured from when that request is sent.
    */
   timeout?: number
+
+  /**
+   * Log every call to the console: `true`, or `{ enabled, data }`. Off by
+   * default. Pass an environment flag to switch it per environment, e.g.
+   * `log: import.meta.env.DEV`. The logger runs outside all other middleware,
+   * so each call logs once with its final outcome; a call that joined a shared
+   * request is tagged `, shared`.
+   */
+  log?: boolean | LogOptions
 
   /**
    * Global middleware applied to every operation.

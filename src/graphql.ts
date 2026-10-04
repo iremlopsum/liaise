@@ -1,6 +1,7 @@
 import { ApiError, createSuccessResult, createErrorResult, createNetworkErrorResult } from './result.js'
 import { composeMiddleware } from './middleware.js'
 import { DedupeTracker } from './utils/dedupe.js'
+import { loggerFor } from './utils/log.js'
 import { ShareTracker, requestKey, narrowTag, stampShared } from './utils/share.js'
 import type { SharedRound } from './utils/share.js'
 import { mergeHeaders } from './utils/headers.js'
@@ -87,6 +88,8 @@ export function createGraphQL(config: any): any {
     onError,
     timeout: clientTimeout,
   } = config
+  // Outermost, so each call logs once with its final outcome. Null when off.
+  const logger = loggerFor(config.log)
 
   const dedupeTracker = new DedupeTracker()
 
@@ -173,6 +176,7 @@ export function createGraphQL(config: any): any {
         const releaseAll = (): void => { for (const s of merged) releaseSignal(s) }
         try {
           const allMiddleware: Middleware[] = [
+            ...(logger ? [logger] : []),
             ...globalMiddleware,
             ...(operation.config.middleware ?? []),
             ...(options.middleware ?? []),
