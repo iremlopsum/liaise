@@ -629,3 +629,16 @@ describe('REST — binary bodies', () => {
     expect(data?.bytes).toEqual([1, 2, 3])
   })
 })
+
+describe('REST — path params with no usable value (5.0.2)', () => {
+  it('never sends /users/undefined to the server', async () => {
+    const getUser = new Request<{ id: string }, unknown>({ method: 'GET', path: '/users/:id' })
+    const api = createApi({ baseUrl: server.baseUrl, requests: { getUser } })
+
+    const { error } = await api.getUser({ id: undefined as unknown as string })
+
+    expect(error?.kind).toBe('network')
+    expect((error?.body as Error).message).toMatch(/"id" is undefined/)
+    expect([...server.callCounts.keys()].some(k => k.startsWith('GET /users/'))).toBe(false)
+  })
+})

@@ -379,3 +379,20 @@ describe('createApi middleware integration', () => {
     expect(data).toEqual([])
   })
 })
+
+describe('5.0.2: a path param with no usable value', () => {
+  it('returns an error Result and never calls fetch', async () => {
+    const fetchMock = vi.fn(async () => new Response('{}', { headers: { 'Content-Type': 'application/json' } }))
+    vi.stubGlobal('fetch', fetchMock)
+    const getUser = new Request<{ id: string }, unknown>({ method: 'GET', path: '/users/:id' })
+    const api = createApi({ baseUrl: 'https://x.test', requests: { getUser } })
+
+    const { data, error } = await api.getUser({ id: undefined as unknown as string })
+
+    expect(fetchMock).not.toHaveBeenCalled()
+    expect(data).toBeNull()
+    expect(error?.kind).toBe('network')
+    expect((error?.body as Error).message).toMatch(/"id" is undefined/)
+    vi.unstubAllGlobals()
+  })
+})

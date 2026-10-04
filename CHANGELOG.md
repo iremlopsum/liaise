@@ -5,6 +5,29 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [5.0.2] — 2026-10-04
+
+### Fixed
+
+- **A path parameter with no usable value is refused instead of sent.** A token
+  was filled with `String(value)` unchecked, so `getUser({ id: undefined })` on
+  `/users/:id` fetched `/users/undefined`, and `null`, `''`, an object or an array
+  built `/users/null`, `/users/`, `/users/%5Bobject%20Object%5D` or `/users/1%2C2`.
+  The usual cause is a component rendering before the id has loaded. Such a call
+  now returns an error Result (`kind: 'network'`, a `TypeError` naming each bad
+  param, e.g. `Path parameter "id" is undefined in path "/users/:id", so the call
+  was not sent.`) and nothing reaches the server. Accepted values are non-empty
+  strings, finite numbers, bigints and booleans; a `Date` is refused with a hint
+  to convert it first (`toISOString()` or `getTime()`), as in a query string.
+  `NaN` and `Infinity` are refused too. See
+  [MIGRATION.md](./MIGRATION.md#upgrading-to-502).
+
+### Changed
+
+- The README's size figures are re-measured with `npm run size`: about 5.8 kB
+  gzipped for a REST-only import, 6.9 kB for the core entry, 8.0 kB with all
+  middleware (the new check and its error messages add about 0.2 kB).
+
 ## [5.0.1] — 2026-10-03
 
 A bug-fix release from an audit of 5.0.0. Nothing in the API changes; a few calls
@@ -1008,6 +1031,7 @@ Initial release of the rewritten client. Reconstructed from the release commit
   `ArrayBuffer` and strings
 - Response parsing as `json`, `text`, `blob`, `arrayBuffer` or `formData`
 
+[5.0.2]: https://github.com/iremlopsum/liaise/compare/v5.0.1...v5.0.2
 [5.0.1]: https://github.com/iremlopsum/liaise/compare/v5.0.0...v5.0.1
 [5.0.0]: https://github.com/iremlopsum/liaise/compare/v4.4.3...v5.0.0
 [4.4.3]: https://github.com/iremlopsum/liaise/compare/v4.4.2...v4.4.3

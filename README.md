@@ -11,7 +11,7 @@ Runtime-agnostic, type-safe HTTP client for REST and GraphQL. Built on standard 
 - **Composable middleware** — retry, cache, dedupe, auth, logging — applied at global, per-endpoint, or per-call level
 - **Types by inference** — declare params and response once on the endpoint definition; types flow to every call site automatically
 - **Runtime-agnostic** — Node.js 20+, browsers, Bun, Deno, Cloudflare Workers, React Native (its built-in `fetch`; not tested in CI) — any environment with `fetch`
-- **Tiny** — about **5.6 kB gzipped** for a REST-only import, 6.7 kB for the core entry, 7.8 kB with all middleware (measured by `npm run size`); tree-shaking drops what you do not import
+- **Tiny** — about **5.8 kB gzipped** for a REST-only import, 6.9 kB for the core entry, 8.0 kB with all middleware (measured by `npm run size`); tree-shaking drops what you do not import
 
 ```
 npm install liaise
@@ -134,6 +134,8 @@ const getItem = new Request<{ orgId: string; id: string }, Item>({
 // Calls GET /orgs/acme/items/42
 await api.getItem({ orgId: 'acme', id: '42' })
 ```
+
+A path parameter must be a non-empty string, a finite number, a bigint or a boolean. Anything else (`undefined`, `null`, `''`, an object, an array, a `Date`, `NaN`) is refused before the request is sent, with an error Result naming the parameter. This catches the common front-end mistake of calling before an id has loaded: `getItem({ orgId: 'acme', id: undefined })` returns an error instead of fetching `/orgs/acme/items/undefined`.
 
 #### `responseType`
 
