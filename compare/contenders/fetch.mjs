@@ -102,7 +102,7 @@ export default {
     default: { create: createDefault, notes: { getWithAuth: 'hand-written: naive refresh on 401, retry once' } },
     configured: { create: createConfigured, notes: {
       getJson: `hand-written: res.ok check that throws (${MDN_OK}), signal: AbortSignal.timeout(3000) (${MDN_TIMEOUT}), skip parsing a 204`,
-      getUser: 'hand-written: template string, same as default',
+      getUser: 'same as default; fetch has no path-param option',
       search: `hand-written: abort the previous call with AbortController (${MDN_ABORT})`,
       getWithAuth: 'hand-written: one shared refresh promise, retry once',
       getWithDeadline: `hand-written: loop of 4 attempts under one AbortSignal.timeout(3000) (${MDN_TIMEOUT})`,

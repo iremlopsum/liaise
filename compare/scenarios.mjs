@@ -41,17 +41,21 @@ export const scenarios = [
       const started = performance.now()
       const settled = await Promise.allSettled(Array.from({ length: 5 }, () => c.getWithAuth('/s/orders')))
       const ok = settled.filter(s => s.status === 'fulfilled' && (s.value?.error == null) && (s.value?.data ?? s.value)?.ok === true).length
-      return { outcome: `${server.counts.get('POST /s/refresh') ?? 0} refresh calls, ${ok}/5 succeed`, ms: Math.round(performance.now() - started) }
+      const refreshes = server.counts.get('POST /s/refresh') ?? 0
+      return { outcome: `${refreshes} refresh ${refreshes === 1 ? 'call' : 'calls'}, ${ok}/5 succeed`, ms: Math.round(performance.now() - started) }
     }) },
   { id: 'deadline', title: 'Slow 503s, 3 s deadline, 3 retries: when does the caller hear back',
     run: v => withServer(v, async (c, server) => {
       if (!offered(c, 'getWithDeadline')) return notOffered
       const r = await observe(() => c.getWithDeadline('/s/slow-503'), { expected: { ok: true }, waitMs: 15_000 })
-      return { outcome: `after ${(r.ms / 1000).toFixed(1)}s: ${r.outcome} (${server.counts.get('GET /s/slow-503') ?? 0} attempts)`, ms: r.ms }
+      const attempts = server.counts.get('GET /s/slow-503') ?? 0
+      return { outcome: `after ${(r.ms / 1000).toFixed(1)}s: ${r.outcome} (${attempts} ${attempts === 1 ? 'attempt' : 'attempts'})`, ms: r.ms }
     }) },
   { id: 'missing-param', title: 'Path param is undefined',
-    run: v => withServer(v, async c => {
+    run: v => withServer(v, async (c, server) => {
       const r = await observe(() => c.getUser(undefined))
+      const sent = [...server.counts.keys()].some(k => k.startsWith('GET /s/users/'))
+      if (!sent && /^(throws|error result)/.test(r.outcome)) return { ...r, outcome: `refused before sending (${r.outcome})` }
       return { ...r, outcome: r.outcome.replace(/^resolves with (.*)$/, (_, j) => { try { return `requests ${JSON.parse(j).requested}` } catch { return r.outcome } }) }
     }) },
   { id: 'wrong-shape', title: 'Response is missing a field the type promises',

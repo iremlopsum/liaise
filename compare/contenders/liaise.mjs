@@ -70,11 +70,11 @@ export default {
   name: 'liaise',
   version: pkg.version,
   variants: {
-    default: { create: ctx => make(ctx, false), notes: { getWithAuth: 'same refresh middleware, without share' } },
+    default: { create: ctx => make(ctx, false), notes: { getWithAuth: 'hand-written: same refresh middleware, without share' } },
     configured: { create: ctx => make(ctx, true), notes: {
-      getJson: `timeout: 3000 (${DOCS.timeout}); responseType: 'none' for the 204 (${DOCS.responseType})`,
+      getJson: `timeout: 3000 (${DOCS.timeout}); responseType: 'none' declared on the 204 endpoint; liaise has no option for an endpoint that answers JSON or an empty body (${DOCS.responseType})`,
       search: `dedupe: true (${DOCS.dedupe})`,
-      getWithAuth: `share: true on refresh, the README recipe (${DOCS.share})`,
+      getWithAuth: `hand-written: auth middleware from the README recipe (${DOCS.share}); share: true on refresh replaces the shared refresh promise`,
       getWithDeadline: `timeout: 3000 (${DOCS.timeout}) + retryMiddleware({ max: 3 }) (${DOCS.retry})`,
       getValidated: `schema, Standard Schema (${DOCS.schema})`,
     } },

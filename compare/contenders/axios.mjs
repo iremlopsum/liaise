@@ -88,7 +88,18 @@ function createConfigured({ baseUrl, auth }) {
     getUser: id => http.get(`/s/users/${id}`).then(r => r.data),
     search,
     getWithAuth: path => authed.get(path).then(r => r.data),
-    // getWithDeadline: no built-in retry; the README points to no option (needs a plugin such as axios-retry).
+    // hand-written: loop of up to 4 attempts under one AbortSignal.timeout(3000); axios has no
+    // built-in retry. `signal` is documented under "Cancellation > AbortController" (DOCS.cancel).
+    getWithDeadline: async path => {
+      const signal = AbortSignal.timeout(3000)
+      for (let attempt = 0; ; attempt++) {
+        try {
+          return (await http.get(path, { signal })).data
+        } catch (e) {
+          if (!(e?.response?.status >= 500) || attempt === 3) throw e
+        }
+      }
+    },
     // getValidated: no built-in option.
   }
 }
@@ -102,7 +113,7 @@ export default {
       getJson: `timeout: 3000 (${DOCS.timeouts}); responseType: 'json' + transitional.silentJSONParsing: false (${DOCS.config})`,
       search: `hand-written: abort the previous call with signal + AbortController (${DOCS.cancel})`,
       getWithAuth: `hand-written: refresh in a response interceptor (${DOCS.interceptors}), one shared refresh promise`,
-      getWithDeadline: 'no built-in option (retries need a plugin such as axios-retry)',
+      getWithDeadline: `hand-written: loop of 4 attempts under one AbortSignal.timeout(3000) (${DOCS.cancel})`,
       getValidated: 'no built-in option',
     } },
   },
