@@ -673,6 +673,36 @@ describe('share', () => {
     // Every sharer gave up, so the shared request must have been aborted.
     expect(fetchAborted).toBe(true)
   })
+
+  it('does not key a shared call by headers a global middleware adds', async () => {
+    // Documents a hazard the README warns about: sharing is decided before
+    // middleware runs, so two callers that differ only in a middleware-added
+    // header (e.g. the current user's token on a server) join one request.
+    let user = 'alice'
+    const addUser: Middleware = (ctx, next) => {
+      ctx.request.headers.set('x-user', user)
+      return next()
+    }
+    const mock = vi.fn(async (_url: string, init: RequestInit) => {
+      await new Promise(r => setTimeout(r, 10))
+      return new Response(JSON.stringify({ for: new Headers(init.headers).get('x-user') }), {
+        headers: { 'content-type': 'application/json' },
+      })
+    })
+    vi.stubGlobal('fetch', mock)
+    const api = createApi({
+      baseUrl: 'https://x.test',
+      middleware: [addUser],
+      requests: { me: new Request<Record<string, never>, { for: string }>({ method: 'GET', path: '/me', share: true }) },
+    })
+    const a = api.me()
+    user = 'bob'
+    const b = api.me()
+    const [ra, rb] = await Promise.all([a, b])
+    expect(mock).toHaveBeenCalledTimes(1)
+    expect(ra.data).toEqual({ for: 'alice' })
+    expect(rb.data).toEqual({ for: 'alice' }) // bob received alice's response
+  })
 })
 
 // ---------------------------------------------------------------------------
