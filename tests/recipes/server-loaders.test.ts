@@ -19,21 +19,15 @@ import { createApi, defineRequest } from 'liaise'
 
 const me = defineRequest<User>()({ method: 'GET', path: '/me', share: true })
 
-// One client per incoming request: that page's loaders share one /me call,
-// and one user's call can never join another user's.
-function apiFor(req: IncomingRequest) {
-  return createApi({
-    baseUrl: 'https://users.internal',
-    headers: { cookie: req.headers.cookie ?? '' },
-    requests: { me },
-  })
-}
+// One client for the whole server. Sharing compares what is actually sent,
+// so one user's call never joins another's.
+const api = createApi({ baseUrl: 'https://users.internal', requests: { me } })
 
 async function renderPage(req: IncomingRequest) {
-  const api = apiFor(req)
+  const asUser = { headers: { cookie: req.headers.cookie ?? '' } }
   const [header, cart] = await Promise.all([
-    api.me().then(r => r.data?.name),   // header loader
-    api.me().then(r => r.data?.cartId), // cart loader
+    api.me({}, asUser).then(r => r.data?.name),   // header loader
+    api.me({}, asUser).then(r => r.data?.cartId), // cart loader
   ])
   return { header, cart }
 }
