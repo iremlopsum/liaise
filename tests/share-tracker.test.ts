@@ -107,6 +107,7 @@ describe('ShareTracker.run (5.1.0)', () => {
   })
 
   it('a call after settlement is a fresh request, not a join', async () => {
+    // Pins a contract held by two redundant guards (settle's map delete and the settled check).
     const t = new ShareTracker()
     const first = await t.run('k', () => undefined, undefined, async () => ex('old'))
     const second = await t.run('k', () => undefined, undefined, async () => ex('fresh'))
@@ -148,8 +149,13 @@ describe('ShareTracker.run (5.1.0)', () => {
     ac.abort()
     await a
     const fresh = vi.fn(async () => ex())
-    const r = await t.run('k', () => undefined, undefined, fresh)
-    expect(r.joined).toBe(false)
+    // Pins a contract held by redundant guards (abandon delete, refs <= 0, signal.aborted).
+    let timer!: ReturnType<typeof setTimeout>
+    const guard = new Promise<'hung'>(res => { timer = setTimeout(() => res('hung'), 500) })
+    const r = await Promise.race([t.run('k', () => undefined, undefined, fresh), guard])
+    clearTimeout(timer)
+    expect(r).not.toBe('hung')
+    expect((r as { joined: boolean }).joined).toBe(false)
     expect(fresh).toHaveBeenCalledTimes(1)
   })
 
@@ -209,8 +215,10 @@ describe('ShareTracker.run (5.1.0)', () => {
     const send = (s: AbortSignal) => { sentSignal = s; return new Promise<Exchange>((_, rej) => s.addEventListener('abort', () => rej(s.reason))) }
     const a = t.run('k', deadline, undefined, send)
     const b = t.run('k', deadline, undefined, send)
-    const guard = new Promise<'hung'>(r => setTimeout(() => r('hung'), 500))
+    let timer!: ReturnType<typeof setTimeout>
+    const guard = new Promise<'hung'>(r => { timer = setTimeout(() => r('hung'), 500) })
     const res = await Promise.race([Promise.all([a, b]), guard])
+    clearTimeout(timer)
     expect(res).not.toBe('hung')
     const [ra, rb] = res as Awaited<typeof a>[]
     expect(deadline).toHaveBeenCalledTimes(1)
