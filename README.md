@@ -2,90 +2,197 @@
 
 *lee-AYZ* — to act as the link between two parties.
 
-> Formerly published as `@iremlopsum/apify`. Same code, same API, full history — switching takes two steps, see [MIGRATION.md](./MIGRATION.md#upgrading-to-500).
+**Your API calls, minus the surprises.**
 
-Runtime-agnostic, type-safe HTTP client for REST and GraphQL. Built on standard `fetch`. Zero dependencies.
+Type-safe REST and GraphQL on plain fetch. Never throws. Zero dependencies. Works with any framework.
 
-- **Unified API** — REST and GraphQL share the same `Result<T>` shape, middleware stack, and error contract
-- **Never throws** — every call returns `{ data, error, response, retry }`, no try/catch required
-- **Composable middleware** — retry, cache, dedupe, auth, logging — applied at global, per-endpoint, or per-call level
-- **Types by inference** — declare params and response once on the endpoint definition; types flow to every call site automatically
-- **Runtime-agnostic** — Node.js 20+, browsers, Bun, Deno, Cloudflare Workers, React Native (its built-in `fetch`; not tested in CI) — any environment with `fetch`
-- **Tiny** — about **5.8 kB gzipped** for a REST-only import, 6.9 kB for the core entry, 8.0 kB with all middleware (measured by `npm run size`); tree-shaking drops what you do not import
+[![npm](https://img.shields.io/npm/v/liaise)](https://www.npmjs.com/package/liaise) [![CI](https://github.com/iremlopsum/liaise/actions/workflows/ci.yml/badge.svg)](https://github.com/iremlopsum/liaise/actions/workflows/ci.yml) ![5.8 kB gzipped](https://img.shields.io/badge/gzipped-5.8%20kB-blue) ![MIT](https://img.shields.io/badge/license-MIT-blue)
 
-```
+```bash
 npm install liaise
 ```
 
-## Table of Contents
+Formerly published as `@iremlopsum/apify`; switching takes two steps, see [MIGRATION.md](./MIGRATION.md#upgrading-to-500).
 
-- [Getting Started](#getting-started)
+**Contents**
+
+- [The problem it solves](#the-problem-it-solves)
+- [Quick start](#quick-start)
+- [How it fits together](#how-it-fits-together)
 - [REST API](#rest-api)
-  - [Request](#request)
-  - [`defineRequest`](#definerequest)
-  - [Response validation](#response-validation)
-  - [Pagination](#pagination)
-  - [Query strings](#query-strings)
-  - [Result](#result)
-  - [Error handling with `onError`](#error-handling-with-onerror)
-  - [Middleware](#middleware)
-    - [Built-in middleware (retry, cache, log)](#built-in-middleware)
-  - [Content types](#content-types)
-  - [Response parsing](#response-parsing)
-  - [Cancellation](#cancellation)
-  - [Timeout](#timeout)
-  - [Sharing](#sharing)
-  - [TypeScript](#typescript)
 - [GraphQL Client](#graphql-client)
-  - [Queries and mutations](#queries-and-mutations)
-  - [GraphQL errors](#graphql-errors)
-  - [Middleware](#middleware-1)
 - [Testing](#testing)
 - [Philosophy](#philosophy)
 - [API Reference](#api-reference)
 - [Contributing](#contributing)
+- [License](#license)
 
-## Getting Started
+## The problem it solves
 
-Define your endpoints as `Request` instances, wire them into a client with `createApi`, and call them with full type safety.
+`fetch` is a good building block. Every project still ends up writing the same few things around it, and they are easy to get subtly wrong. Here is what tends to go wrong, and what liaise does instead.
+
+| With plain fetch | liaise | See |
+| ---------------- | ------ | --- |
+| Typing fast shows old results. A slow early search lands last. | `dedupe` cancels the older call. | [Stale requests](#quick-start) |
+| Five components or five 401s fire five identical requests. | `share` sends one and hands everyone the answer. | [Sharing requests](#quick-start) |
+| A 500 counts as success, offline throws, a hung server waits forever. | Every call returns `{ data, error }`. `error.kind` names the failure. | [Handling errors](#quick-start) |
+| Retries run straight past your timeout. | `timeout` covers the whole operation, retries included. | [Deadlines](#quick-start) |
+| The backend changes a field and the page crashes three components later. | A schema checks the response. A bad shape is an error you handle. | [Validating responses](#quick-start) |
+
+### Before and after
+
+Here is one form submit, written both ways.
+
+**With plain fetch**
 
 ```ts
-import { createApi, Request } from 'liaise'
-
-// 1. Define your endpoints
-interface User {
-  id: string
-  name: string
-  email: string
+try {
+  const res = await fetch('/api/orders', { method: 'POST', body: JSON.stringify(order) })
+  show(`Order ${(await res.json()).id} confirmed`) // a 500 lands here too
+} catch {
+  show('Something went wrong') // offline? broken JSON? no way to tell
 }
+```
 
-const getUser = new Request<{ id: string }, User>({
-  method: 'GET',
-  path: '/users/:id'
-})
+**With liaise**
 
-const createUser = new Request<{ name: string; email: string }, User>({
+<!-- tested: problem-after -->
+```ts
+async function submit(order: { items: string[] }) {
+  const { data, error } = await api.placeOrder(order)
+  if (!error) return show(`Order ${data.id} confirmed`)
+
+  switch (error.kind) {
+    case 'http':    return show(`The server said no (${error.status})`)
+    case 'network': return show("You're offline. We'll try again.")
+    case 'timeout': return show('This is taking too long. Try again.')
+    case 'parse':   return show('The server sent something unexpected.')
+  }
+}
+```
+
+`api.placeOrder` is an endpoint defined like the ones in [Quick start](#quick-start), with `timeout: 5000` so a hung server gives up after five seconds.
+
+**The API client you'd build on your third project, with the edge cases already handled.**
+
+## Quick start
+
+Define two endpoints, create a client, and make a call.
+
+<!-- tested: quick-start -->
+```ts
+import { createApi, defineRequest } from 'liaise'
+
+type User = { id: string; name: string; email: string }
+
+// 1. Describe your endpoints. The path decides which params are required.
+const getUser = defineRequest<User>()({ method: 'GET', path: '/users/:id' })
+const createUser = defineRequest<User, { name: string; email: string }>()({
   method: 'POST',
-  path: '/users'
+  path: '/users',
 })
 
-// 2. Create the client
+// 2. Create the client.
 const api = createApi({
   baseUrl: 'https://api.example.com',
   requests: { getUser, createUser },
-  onError: (error) => console.error(`${error.request.method} ${error.request.url}`, error.status)
 })
 
-// 3. Make a call — params and response are fully typed
-const { data, error, retry } = await api.getUser({ id: '42' })
+// 3. Call it. This never throws: you always get { data, error }.
+const { data, error } = await api.getUser({ id: '42' })
 
 if (error) {
-  console.error(error.status, error.body)
-  return
+  // error.kind says what went wrong: 'http', 'network', 'timeout', ...
+  console.error(error.kind, error.status)
+} else {
+  console.log(data.name) // data is a User here
 }
+```
 
-// data is typed as User
-console.log(data.name)
+### What you just got
+
+- The params are checked against the path, so `getUser({ userId: '42' })` is a compile error.
+- `data` is typed from `defineRequest<User>`.
+- Nothing throws, not even when you're offline.
+- Checking `error` first narrows `data` to `User`, so you never write `data!`.
+
+### Next
+
+- [Handling errors](#quick-start): every `error.kind` and what to do about it.
+- [Add an auth header and refresh the token on a 401](#quick-start)
+- [Use with TanStack Query](#quick-start)
+- [Use with React](#quick-start)
+
+## How it fits together
+
+liaise has four pieces, and every call takes the same path through them.
+
+### Four pieces
+
+| Piece | What it is |
+| ----- | ---------- |
+| Endpoint definition (`defineRequest`) | A recipe for one endpoint: its method, its path and the types of its params and response. It does nothing on its own. |
+| Client (`createApi`) | Turns your recipes into typed functions, one per endpoint. |
+| Call | `api.getUser(params, options)`. The params, plus optional per-call options such as `signal`, `timeout`, `headers` and `middleware`. |
+| `Result` | `{ data, error, response, retry }`, which is what every call returns. Either `data` or `error` is set, never both. `retry()` runs the same call again. |
+
+Types flow from the endpoint definition through `createApi` to every call, so you never annotate a call. When you need a type by name, it is listed under [Type exports](#type-exports).
+
+### The path of one call
+
+```text
+params → URL + body → your middleware → fetch → parse → validate → Result
+```
+
+Middleware is a function that wraps the call, so it can add a header, retry or log. Any step can fail, and the failure lands in `error` instead of being thrown.
+
+### Three levels of settings
+
+You can write a setting in three places: on the client, on the endpoint, or on one call. The most specific one wins.
+
+| Level | Where you write it | `headers` | `middleware` |
+| ----- | ------------------ | --------- | ------------ |
+| Client | `createApi({ headers, middleware })` | Sent with every call | Runs first, around everything else |
+| Endpoint | `defineRequest<T>()({ headers, middleware })` | Replaces the client's value for the same header | Runs second |
+| Call | `api.getUser(params, { headers, middleware })` | Replaces both | Runs last, closest to `fetch` |
+
+Middleware works differently. Every level's middleware runs, the client's first, then the endpoint's, then the call's.
+
+Headers merge by name, so setting one header on a call keeps every other header from the client and the endpoint. A `Content-Type` you set at any level replaces the one liaise picks from the body.
+
+```ts
+import { createApi, defineRequest } from 'liaise'
+
+type Report = { total: number }
+
+const api = createApi({
+  baseUrl: 'https://api.example.com',
+  headers: { 'x-api-version': '1' }, // every call
+  requests: {
+    getReport: defineRequest<Report>()({
+      method: 'GET',
+      path: '/report',
+      headers: { 'x-api-version': '2' }, // this endpoint: replaces the client's
+    }),
+  },
+})
+
+await api.getReport() // sends x-api-version: 2
+await api.getReport({}, { headers: { 'x-api-version': '3' } }) // sends x-api-version: 3
+```
+
+### Type exports
+
+```ts
+import type {
+  Result,
+  CallOptions,
+  Middleware,
+  MiddlewareContext,
+  MiddlewareNext,
+  RequestConfig,
+  ApiConfig
+} from 'liaise'
 ```
 
 ## REST API
@@ -898,13 +1005,7 @@ A `ReadableStream` body can be sent once. A retry (`retryMiddleware`, `result.re
 
 A `Map`, `Set` or class with private state nested inside a JSON body is sent as `{}`, because that is what `JSON.stringify` does. Convert it first.
 
-Header merge precedence (most specific wins):
-
-1. **Global headers** (from `createApi` config) -- lowest priority
-2. **Per-request headers** (from `Request` config) -- overrides global
-3. **Per-call headers** (from `CallOptions`) -- highest priority
-
-Explicitly set `Content-Type` headers at any level override the auto-detected value.
+Headers you set yourself, including `Content-Type`, follow the [three levels of settings](#three-levels-of-settings).
 
 ### Response parsing
 
@@ -1113,49 +1214,6 @@ const patient = api.getProduct({ id: '42' })                      // keeps waiti
 **`result.retry()` on a shared result** re-runs the pipeline using the *acquiring caller's* own per-call options (headers, signal, timeout) — that is, whichever call first started the shared request, not whichever caller happens to invoke `retry()`. This falls out of every non-aborting sharer receiving the literal same `Result` object; it's unavoidable given that design, but worth knowing before relying on it.
 
 **Signal-replacing middleware is safe under `share: true`.** A middleware that installs its own `ctx.request.signal` (a per-attempt timeout, say) does not detach the shared request from the refcount: the refcount signal is merged back in before `fetch`, so the request is still aborted once every sharer has given up.
-
-### TypeScript
-
-Type inference flows automatically from `Request` generics through `createApi` to the call site. You never annotate the API methods manually.
-
-```ts
-// 1. Types are declared on the Request
-const getUser = new Request<{ id: string }, User>({
-  method: 'GET',
-  path: '/users/:id'
-})
-
-// 2. createApi infers method signatures from the requests record
-const api = createApi({
-  baseUrl: '/api',
-  requests: { getUser }
-})
-
-// 3. Call site is fully typed -- no annotations needed
-const { data, error } = await api.getUser({ id: '42' })
-//      ^? User | null
-```
-
-The inference chain works like this:
-
-- `Request<TParams, TResponse>` carries the type info.
-- `createApi` uses internal conditional types to pull the `TParams` and `TResponse` generics from each `Request` instance.
-- A mapped type transforms the requests record into callable methods: each key becomes `(params: TParams, options?: CallOptions) => Promise<Result<TResponse>>`.
-- When `TParams` is `Record<string, never>` (no params), the params argument becomes optional.
-
-All exported types are available for annotation when needed:
-
-```ts
-import type {
-  Result,
-  CallOptions,
-  Middleware,
-  MiddlewareContext,
-  MiddlewareNext,
-  RequestConfig,
-  ApiConfig
-} from 'liaise'
-```
 
 ## GraphQL Client
 
