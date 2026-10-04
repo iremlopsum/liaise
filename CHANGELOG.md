@@ -14,7 +14,8 @@ A documentation release. Nothing in the package's behaviour changes. See
 
 - **The README is reorganised around what you need first.** It now runs from the
   problem, to a quick start, a guide, tested recipes and a comparison, and ends with
-  a complete reference. Every recipe in it runs in CI (`npm run docs:check`).
+  a complete reference. Every recipe in it runs as a test in CI, and
+  `npm run docs:check` fails if the README copy drifts from that test.
 - **`src/types.ts` comments corrected.** More than ten stale or wrong comments,
   including the claim that a raw string param is never shared, and a comparison of
   timeouts with axios, XHR and got that the project cannot support, which is removed.
@@ -23,7 +24,8 @@ A documentation release. Nothing in the package's behaviour changes. See
 
 - **The `share` option's type documentation no longer lists signal-replacing
   middleware as a known limitation.** It was fixed in 3.0.0 (the shared signal is
-  re-merged when a middleware replaces `ctx.request.signal`), and a test pins it.
+  re-merged when a middleware replaces `ctx.request.signal`), and an existing test
+  pins it.
 
 ### Added (repository only, not in the package)
 
@@ -34,7 +36,8 @@ A documentation release. Nothing in the package's behaviour changes. See
 - Tests for behaviour the README states: a throwing middleware gives
   `kind: 'middleware'` with `status: 0`; a caller's cancel still ends the call as
   `'abort'` when a middleware replaces `ctx.request.signal`, without aborting the
-  request itself; and the defaults of `retryMiddleware` (`max` 3, `baseDelay` 250,
+  request itself; a header added by middleware is not part of the `share` key;
+  and the defaults of `retryMiddleware` (`max` 3, `baseDelay` 250,
   `maxDelay` 30000) and `cacheMiddleware` (`ttl` 5 minutes, `maxSize` 50).
 
 ## [5.0.2] — 2026-10-04

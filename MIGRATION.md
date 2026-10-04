@@ -9,7 +9,7 @@ For the full record of what changed in each release, see [CHANGELOG.md](./CHANGE
 
 ## Upgrading to 5.0.3
 
-No action needed. Documentation only, plus a corrected type comment.
+No action needed. Documentation only, plus corrected type comments in `src/types.ts`.
 
 ---
 
