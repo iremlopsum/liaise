@@ -1,7 +1,6 @@
 import { it, expect, afterEach, vi, beforeEach } from 'vitest'
 import { mockFetch, jsonResponse } from 'liaise/testing'
 
-type Report = { rows: number }
 let mock: ReturnType<typeof mockFetch>
 beforeEach(() => { vi.spyOn(Math, 'random').mockReturnValue(0) }) // full jitter → no wait
 afterEach(() => { mock.restore(); vi.restoreAllMocks() })
@@ -9,6 +8,8 @@ afterEach(() => { mock.restore(); vi.restoreAllMocks() })
 // readme:flaky-backend:start
 import { createApi, defineRequest } from 'liaise'
 import { retryMiddleware } from 'liaise/middleware'
+
+type Report = { rows: number }
 
 const retry = retryMiddleware({
   max: 3,

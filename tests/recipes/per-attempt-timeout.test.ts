@@ -1,4 +1,4 @@
-import { it, expect, afterEach, vi } from 'vitest'
+import { it, expect, afterEach, beforeEach, vi } from 'vitest'
 import { mockFetch, jsonResponse } from 'liaise/testing'
 import { defineRequest } from 'liaise'
 
@@ -6,16 +6,18 @@ type User = { id: string; name: string }
 const getUser = defineRequest<User>()({ method: 'GET', path: '/users/:id' })
 
 const controllers: AbortController[] = []
-vi.spyOn(AbortSignal, 'timeout').mockImplementation(() => {
-  const c = new AbortController()
-  controllers.push(c)
-  return c.signal
+beforeEach(() => {
+  vi.spyOn(AbortSignal, 'timeout').mockImplementation(() => {
+    const c = new AbortController()
+    controllers.push(c)
+    return c.signal
+  })
 })
 const mock = mockFetch({
   'GET /api/users/:id': [() => new Promise<Response>(() => {}), jsonResponse({ id: '1', name: 'Ada' })],
 })
 mock.install()
-afterEach(() => mock.restore())
+afterEach(() => { mock.restore(); vi.restoreAllMocks() })
 
 // readme:per-attempt-timeout:start
 import { createApi } from 'liaise'

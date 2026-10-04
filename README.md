@@ -1390,6 +1390,8 @@ Use this when a backend sometimes fails with a 5xx, a rate limit or a dropped co
 import { createApi, defineRequest } from 'liaise'
 import { retryMiddleware } from 'liaise/middleware'
 
+type Report = { rows: number }
+
 const retry = retryMiddleware({
   max: 3,
   // Retry server errors, rate limits and dropped connections. Not 4xx.
