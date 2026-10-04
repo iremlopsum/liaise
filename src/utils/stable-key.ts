@@ -1,19 +1,22 @@
 // =============================================================================
-// stable-key.ts — the identity of a request's params, for share and cacheMiddleware
+// stable-key.ts — the identity of a request's params, for cacheMiddleware
+// =============================================================================
+// `share` used this key too until 5.1.0. It now compares the request as it is
+// about to be sent instead (`requestKey` in ./share.js), after middleware, so
+// a header a middleware adds is part of the comparison.
 // =============================================================================
 
 /**
  * Builds the string that decides whether two calls are "the same request".
- * `share` hands one in-flight response to every caller with the same key;
  * `cacheMiddleware` serves a stored response for it. Equal keys must therefore
  * mean "the same request", and `null` means "cannot say" — the caller must
- * neither share nor cache. Declining is always safe; handing one caller the
- * response meant for another never is.
+ * not cache. Declining is always safe; handing one caller the response meant
+ * for another never is.
  *
  * The rule: the key never merges two values that any transport keeps apart —
  * a JSON body or a query string, where `buildUrl` writes array items with
- * `String()`. Over-separating only costs a share or cache hit; merging hands
- * one request's response to another.
+ * `String()`. Over-separating only costs a cache hit; merging hands one
+ * request's response to another.
  *
  * Keys are built by content, in the order the rules are checked:
  *
@@ -52,7 +55,7 @@
  * object with no own enumerable key, whose state is invisible — a class
  * holding its state in private fields, an `Error`, a `Promise`. Before 4.4.3
  * every one of these keyed as `{}` below the top level, so two different
- * requests shared one response. `isSpecialBody` (`./special-body.js`) answers
+ * requests could be handed one response. `isSpecialBody` (`./special-body.js`) answers
  * a different question — whether params can be split into path and query
  * pairs — and is not a keying check.
  *

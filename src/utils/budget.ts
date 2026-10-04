@@ -2,95 +2,31 @@ import { anySignal } from './any-signal.js'
 import { timeoutSignalFor } from './timeout.js'
 
 /**
- * The two deadlines a call can carry, which are not the same thing.
+ * One call's own deadline: how long THIS caller's pipeline may take — its
+ * signal, merged with the first defined of its per-call, per-request and
+ * client timeouts (non-positive at that level means none).
  *
- * Under `share`, one request serves many callers, so "how long this operation
- * may take" and "how long *this caller* is willing to wait" diverge. Conflating
- * them is a real bug this library has shipped: a shared socket once ran 1077 ms
- * against a 100 ms configured deadline because a per-caller budget was applied
- * to the shared request.
- */
-export interface Budget {
-  /** Bounds the whole operation. Shared by every caller under `share`. */
-  operation: AbortSignal | undefined
-  /** Bounds this caller only. Never reaches a shared request. */
-  perCaller: AbortSignal | undefined
-}
-
-/**
- * The operation's own deadline: how long the whole request may take.
+ * Both clients build it once per `execute()`, so a retrying middleware's
+ * attempts draw from one budget and `result.retry()` gets a fresh one.
  *
- * Under `share` this is the operation's limit alone — a single caller's
- * patience must never shorten a request that other callers are still waiting
- * on. Unshared there is one caller and one operation, so the caller's own
- * signal and per-call timeout are part of it.
+ * Under `share` it is still this caller's alone. A shared request has a
+ * deadline of its own — the endpoint's, else the client's, measured from when
+ * it was sent — which create-api.ts's share step hands to the tracker. Using
+ * a caller's budget for the shared request instead is a real bug this library
+ * has shipped: a shared socket once ran 1077 ms against a 100 ms configured
+ * deadline.
  *
- * The operation's limit is the endpoint's, falling back to the client's
- * (`clientTimeout`); an endpoint `timeout: 0` opts out of the client default.
+ * @param callTimeout - `CallOptions.timeout`, this caller's patience.
+ * @param requestTimeout - `RequestConfig.timeout` / `OperationConfig.timeout`.
+ * @param clientTimeout - `ApiConfig.timeout` / `GraphQLBaseConfig.timeout`,
+ *   the client-wide fallback when neither the call nor the endpoint defines one.
+ * @param callerSignal - `CallOptions.signal`.
  */
 export function operationBudget(
   callTimeout: number | undefined,
   requestTimeout: number | undefined,
   clientTimeout: number | undefined,
-  callerSignal: AbortSignal | undefined,
-  shared: boolean
-): AbortSignal | undefined {
-  if (shared) return timeoutSignalFor(undefined, requestTimeout, clientTimeout)
-  return anySignal([callerSignal, timeoutSignalFor(callTimeout, requestTimeout, clientTimeout)])
-}
-
-/**
- * This caller's patience: their own signal and per-call timeout, and nothing
- * belonging to the operation.
- *
- * Only meaningful under `share`, where the two roles diverge. Unshared,
- * `operationBudget` already covers both.
- */
-export function perCallerBudget(
-  callTimeout: number | undefined,
   callerSignal: AbortSignal | undefined
 ): AbortSignal | undefined {
-  return anySignal([callerSignal, timeoutSignalFor(callTimeout, undefined)])
-}
-
-/**
- * Resolve both deadlines for one call.
- *
- * Prefer `operationBudget` / `perCallerBudget` when only one field is
- * consumed. Building both is not free: the per-caller merge registers an
- * `abort` listener on the caller's signal, and `anySignal` only unregisters
- * when something actually aborts — so a discarded per-caller budget leaves a
- * listener on a signal that routinely outlives the request (a component-scoped
- * controller reused across many calls). One retained listener per call is the
- * accumulation `any-signal.ts` exists to avoid.
- *
- * When `shared` is false the distinction collapses — there is one caller and
- * one operation — so both fields are the same signal, and the caller's own
- * signal is merged in.
- *
- * @param callTimeout - `CallOptions.timeout`, this caller's patience.
- * @param requestTimeout - `RequestConfig.timeout`, the operation's own limit.
- * @param clientTimeout - `ApiConfig.timeout`, the client-wide fallback when
- *   neither the call nor the endpoint defines one.
- * @param callerSignal - `CallOptions.signal`.
- * @param shared - Whether this call may join a shared request.
- */
-export function resolveBudget(
-  callTimeout: number | undefined,
-  requestTimeout: number | undefined,
-  clientTimeout: number | undefined,
-  callerSignal: AbortSignal | undefined,
-  shared: boolean
-): Budget {
-  if (!shared) {
-    // One signal serves both roles, and the shared identity is part of the
-    // contract — callers compare the two fields to test for this case.
-    const signal = operationBudget(callTimeout, requestTimeout, clientTimeout, callerSignal, false)
-    return { operation: signal, perCaller: signal }
-  }
-
-  return {
-    operation: operationBudget(callTimeout, requestTimeout, clientTimeout, callerSignal, true),
-    perCaller: perCallerBudget(callTimeout, callerSignal),
-  }
+  return anySignal([callerSignal, timeoutSignalFor(callTimeout, requestTimeout, clientTimeout)])
 }

@@ -38,6 +38,11 @@ export interface Exchange {
  * Thrown rather than recorded: an abort is the request's outcome, not the
  * body's. `cause` is what the read threw (it becomes `error.body`, as it
  * always has); `reason` is the signal's reason (it decides `kind`).
+ *
+ * create-api.ts's share step also throws one for a shared request whose
+ * `fetch` rejected because the shared request's own signal aborted: that
+ * signal is no caller's, so this is how the provenance reaches each caller's
+ * classification. `cause` is then what `fetch` threw.
  */
 export class AbortedRead {
   constructor(readonly cause: unknown, readonly reason: unknown) {}

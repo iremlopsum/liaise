@@ -402,13 +402,20 @@ describe('createApi — a hung middleware', () => {
 
 // ---------------------------------------------------------------------------
 // createApi — share: true
+//
+// Since 5.1.0 every caller runs its own middleware, and only the round trip
+// inside core is shared. A hung middleware is therefore that caller's own,
+// bounded by that caller's own deadline exactly as for an unshared call; the
+// endpoint's timeout bounds the shared request itself from when it is sent
+// (tests/share.test.ts, "bounds the shared operation with the per-request
+// timeout, even for a more patient caller").
 // ---------------------------------------------------------------------------
 
-describe('createApi share: true — a hung middleware on the shared request', () => {
+describe('createApi share: true — a hung middleware', () => {
   const req = (timeout?: number) =>
     new Request<{ id: string }, { ok: boolean }>({ method: 'GET', path: '/x/:id', share: true, timeout })
 
-  it('settles every sharer when only RequestConfig.timeout applies, and reports once', async () => {
+  it('settles every caller when only RequestConfig.timeout applies, and reports once per caller', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => new Response('{"ok":true}', { status: 200 })))
     const kinds: string[] = []
     const mw = vi.fn(never)
@@ -417,31 +424,36 @@ describe('createApi share: true — a hung middleware on the shared request', ()
     const [a, b] = await Promise.all([within(api.x({ id: '1' })), within(api.x({ id: '1' }))])
     expect((a as Result<unknown>).error?.kind).toBe('timeout')
     expect((b as Result<unknown>).error?.kind).toBe('timeout')
-    expect(mw).toHaveBeenCalledTimes(1) // one shared chain
+    expect(mw).toHaveBeenCalledTimes(2) // each caller ran its own chain
     await flush()
-    expect(kinds).toEqual(['timeout'])
-
-    // The shared slot was released: the next call starts a fresh request.
-    void api.x({ id: '1' })
-    await flush()
-    expect(mw).toHaveBeenCalledTimes(2)
+    // Each caller's hung middleware is its own failure; nothing was shared,
+    // since neither reached the round trip.
+    expect(kinds).toEqual(['timeout', 'timeout'])
+    expect(globalThis.fetch).not.toHaveBeenCalled()
   })
 
-  it('bounds a sharer by the shorter RequestConfig.timeout even when its per-call timeout is longer', async () => {
+  it("bounds a caller's hung middleware by its own deadline, per-call over the endpoint's", async () => {
     vi.stubGlobal('fetch', vi.fn(async () => new Response('{"ok":true}', { status: 200 })))
-    const api = createApi({ baseUrl: '', middleware: [never], requests: { x: req(30) } })
+    const api = createApi({ baseUrl: '', middleware: [never], requests: { x: req(5000) } })
     const started = Date.now()
-    const r = (await within(api.x({ id: '1' }, { timeout: 5000 }))) as Result<unknown>
+    const r = (await within(api.x({ id: '1' }, { timeout: 30 }))) as Result<unknown>
     expect(r.error?.kind).toBe('timeout')
     expect(Date.now() - started).toBeLessThan(500)
   })
 
-  it('when every sharer gives up, the refcount still aborts the shared request and the slot is freed', async () => {
-    vi.stubGlobal('fetch', vi.fn(async () => new Response('{"ok":true}', { status: 200 })))
+  it('when every caller gives up while its middleware hangs, the refcount aborts the shared request and the slot is freed', async () => {
+    // Each caller's middleware sends (next() reaches core and joins the one
+    // round trip) and then hangs instead of returning the answer.
+    const sent: AbortSignal[] = []
+    vi.stubGlobal('fetch', vi.fn((_u: string, init: RequestInit) => {
+      sent.push(init.signal as AbortSignal)
+      return new Promise<Response>((_res, rej) => {
+        init.signal?.addEventListener('abort', () => rej(init.signal!.reason), { once: true })
+      })
+    }))
     const kinds: string[] = []
-    const seen: AbortSignal[] = []
-    const capture: Middleware = ctx => { seen.push(ctx.request.signal!); return new Promise(() => {}) }
-    const api = createApi({ baseUrl: '', middleware: [capture], onError: e => { kinds.push(e.kind) }, requests: { x: req() } })
+    const sendThenHang: Middleware = (_ctx, next) => { void next(); return new Promise(() => {}) }
+    const api = createApi({ baseUrl: '', middleware: [sendThenHang], onError: e => { kinds.push(e.kind) }, requests: { x: req() } })
 
     const [a, b] = await Promise.all([
       within(api.x({ id: '1' }, { timeout: 20 })),
@@ -449,16 +461,16 @@ describe('createApi share: true — a hung middleware on the shared request', ()
     ])
     expect((a as Result<unknown>).error?.kind).toBe('timeout')
     expect((b as Result<unknown>).error?.kind).toBe('timeout')
-    expect(seen).toHaveLength(1)
-    expect(seen[0].aborted).toBe(true)
+    expect(sent).toHaveLength(1)
+    expect(sent[0].aborted).toBe(true)
 
     await flush(); await flush()
-    // One report per caller that gave up; the abandoned operation adds none.
+    // One report per caller that gave up; the abandoned request adds none.
     expect(kinds).toEqual(['timeout', 'timeout'])
 
     void api.x({ id: '1' }, { timeout: 20 })
     await flush()
-    expect(seen).toHaveLength(2)
+    expect(sent).toHaveLength(2)
   })
 })
 
@@ -671,9 +683,14 @@ describe('a signal-shaped value whose reason throws still yields a Result', () =
 })
 
 describe('the backstop adds no microtask hop to a chain that settles normally', () => {
-  // Share-site reporting is decided by microtask ordering (see `hasSettled`
-  // in create-api.ts). These pin the exact boundaries measured on 4.4.1: a
-  // sharer's give-up landing k microtasks after the chain returns.
+  // Measured on 4.4.1 as microtask boundaries: a sharer's give-up landing k
+  // microtasks after its chain returns must not turn the shared failure's
+  // single report into two, and a give-up that lands after the chain has
+  // answered must not replace that answer. Since 5.1.0 the report count is
+  // held by the shared round trip's token (each caller's 'http' error carries
+  // it, stamped in core before any middleware sees the Result) rather than by
+  // ordering, so these now pin that the count is the same either side of the
+  // old boundaries.
   const run = async (k: number) => {
     vi.stubGlobal('fetch', vi.fn(async () => new Response('{}', { status: 500 })))
     const kinds: string[] = []

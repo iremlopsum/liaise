@@ -71,19 +71,19 @@ describe('cancellation', () => {
 // retry() and the untyped JS call shape
 // =============================================================================
 //
-// `result.retry` IS `execute` — the same closure that this file's abort and
-// dedupe tests drive through `sharedSignal`/`onSettled`, execute()'s real
-// (internal-only) parameters for the share/cancellation machinery. Its public
-// type is `() => Promise<Result<unknown>>`, but it is handed to consumers as
-// a plain function value, and nothing stops a consumer's own call shape from
-// supplying arguments: `arr.map(result.retry)` is the classic trap, since
-// Array.prototype.map calls its callback as `(value, index, array)`.
+// `result.retry` re-enters `execute` — the same pipeline this file's abort
+// and dedupe tests drive. Its public type is `() => Promise<Result<unknown>>`,
+// but it is handed to consumers as a plain function value, and nothing stops
+// a consumer's own call shape from supplying arguments: `arr.map(result.retry)`
+// is the classic trap, since Array.prototype.map calls its callback as
+// `(value, index, array)`.
 //
-// `onSettled` is invoked unconditionally, the instant a Result exists, by
-// create-api.ts's post-execution hook — before dedupe cleanup, before
-// onError. A non-function value landing there must not turn the library's
-// "no public entry point ever rejects" contract into a lie for the one
-// function most likely to be passed around as a bare reference.
+// Before 5.1.0 `execute` had internal parameters for the share machinery
+// (a shared signal and a settlement callback), and values landing there
+// could reject the call or drop the caller's signal. Neither `retry` nor
+// `execute` takes a parameter any more; these pin that whatever a consumer
+// passes stays harmless, for the one function most likely to be passed
+// around as a bare reference.
 // =============================================================================
 
 describe('retry survives being called with extra arguments', () => {

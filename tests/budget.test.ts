@@ -1,35 +1,39 @@
 import { describe, it, expect } from 'vitest'
-import { resolveBudget } from '../src/utils/budget.js'
+import { operationBudget } from '../src/utils/budget.js'
 import { timeoutSignalFor } from '../src/utils/timeout.js'
 
-describe('resolveBudget', () => {
-  it('gives an unshared call one signal covering both roles', () => {
-    const b = resolveBudget(undefined, 50, undefined, undefined, false)
-    expect(b.operation).toBeInstanceOf(AbortSignal)
-    expect(b.perCaller).toBe(b.operation)
+describe('operationBudget', () => {
+  it('returns undefined when there is neither a signal nor a timeout', () => {
+    expect(operationBudget(undefined, undefined, undefined, undefined)).toBeUndefined()
   })
 
-  it('keeps a per-call timeout out of the shared operation', () => {
-    const b = resolveBudget(20, undefined, undefined, undefined, true)
-    expect(b.operation).toBeUndefined()
-    expect(b.perCaller).toBeInstanceOf(AbortSignal)
-  })
-
-  it('lets a per-request timeout bound the shared operation', () => {
-    const b = resolveBudget(undefined, 50, undefined, undefined, true)
-    expect(b.operation).toBeInstanceOf(AbortSignal)
-  })
-
-  it('merges the caller signal into the per-caller budget', () => {
+  it("returns the caller's own signal unchanged when no timeout applies", () => {
     const c = new AbortController()
-    const b = resolveBudget(undefined, undefined, undefined, c.signal, true)
-    expect(b.perCaller).toBe(c.signal)
+    expect(operationBudget(undefined, undefined, undefined, c.signal)).toBe(c.signal)
   })
 
-  it('returns undefined for both when nothing is configured', () => {
-    const b = resolveBudget(undefined, undefined, undefined, undefined, false)
-    expect(b.operation).toBeUndefined()
-    expect(b.perCaller).toBeUndefined()
+  it('merges the caller signal with the resolved timeout', () => {
+    const c = new AbortController()
+    const s = operationBudget(undefined, 5000, undefined, c.signal)
+    expect(s).toBeInstanceOf(AbortSignal)
+    expect(s).not.toBe(c.signal)
+    c.abort(new Error('mine'))
+    expect(s!.aborted).toBe(true)
+    expect((s!.reason as Error).message).toBe('mine')
+  })
+
+  it('falls back call → request → client, and 0 at the first defined level means none', async () => {
+    // Each case leaves exactly one level able to fire within the test.
+    const fires = async (s: AbortSignal | undefined) => {
+      if (!s) return false
+      await new Promise(r => setTimeout(r, 30))
+      return s.aborted
+    }
+    expect(await fires(operationBudget(10, 60_000, 60_000, undefined))).toBe(true)
+    expect(await fires(operationBudget(undefined, 10, 60_000, undefined))).toBe(true)
+    expect(await fires(operationBudget(undefined, undefined, 10, undefined))).toBe(true)
+    expect(operationBudget(undefined, 0, 10, undefined)).toBeUndefined()
+    expect(operationBudget(0, 10, 10, undefined)).toBeUndefined()
   })
 })
 

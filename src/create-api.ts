@@ -15,7 +15,10 @@
 //      c. Serializes the body (JSON, FormData, etc.)
 //      d. Computes the effective abort signal (with dedupe if enabled)
 //      e. Composes middleware (global + per-request + per-call, minus skipped)
-//      f. Executes the composed chain → core fetch → returns Result
+//      f. Executes the composed chain → core fetch → returns Result. Under
+//         share: true, core joins an identical request already in flight
+//         instead of sending its own — identical meaning what is about to go
+//         on the wire, after every middleware ran for this caller
 //      g. Fires onError if the final result has an error
 //
 // The generated methods are fully typed — TypeScript infers the params and
@@ -41,12 +44,12 @@ import { composeMiddleware } from './middleware.js'
 import { buildUrl, joinUrl, FragmentError } from './utils/path-params.js'
 import { serializeBody } from './utils/serialize.js'
 import { DedupeTracker } from './utils/dedupe.js'
-import { ShareTracker, isAbandoned } from './utils/share.js'
+import { ShareTracker, requestKey, tagShared, markJoined } from './utils/share.js'
 import { mergeHeaders } from './utils/headers.js'
 import { abortKind, propagatesReason } from './utils/abort-kind.js'
-import { anySignal, releaseSignal } from './utils/any-signal.js'
-import { operationBudget, perCallerBudget } from './utils/budget.js'
-import { stableKey } from './utils/stable-key.js'
+import { releaseSignal } from './utils/any-signal.js'
+import { operationBudget } from './utils/budget.js'
+import { timeoutSignalFor } from './utils/timeout.js'
 import { createBackstop } from './utils/backstop.js'
 import { isReadableStream } from './utils/special-body.js'
 import { classifyParams } from './utils/classify-params.js'
@@ -240,31 +243,22 @@ function resolveRequestUrl(
  * The most accurate URL that can be named for an error report.
  *
  * `buildFailedResult`'s default: used by every failure with no `Response`
- * behind it that did not capture a URL of its own — the `share: true` give-up
- * path, `execute()`'s setup catch, and the share block's own setup catch.
- * Each of those now names the address the call was *for*, which is what
- * `error.request.url` documents; it is not a claim that bytes went there.
- * 4.0.1 settled that reading when a middleware failing before `fetch` started
- * reporting the resolved URL.
+ * behind it that did not capture a URL of its own — `execute()`'s setup catch,
+ * and the backstop's last-resort `onFailure`. Each of those names the address
+ * the call was *for*, which is what `error.request.url` documents; it is not a
+ * claim that bytes went there. 4.0.1 settled that reading when a middleware
+ * failing before `fetch` started reporting the resolved URL.
  *
  * The `catch` is load-bearing on exactly one path: when `buildUrl` is what
  * threw, no URL was ever resolvable and the un-substituted template is the
  * only honest answer. `buildUrl` throws a second time here to establish that —
  * harmless, and only on a path that is already failing.
  *
- * Deliberately not memoized. Caching Step 4's value in the `api[name]` closure
- * would fill it for a share initiator and leave it empty for a joiner, and the
- * two would then disagree — which is what `tests/error-url.test.ts`'s
- * agreement test exists to catch. The recompute is identical for identical
- * inputs, so the cache would buy nothing on a path that is already failing.
- * Two cases make the inputs not actually identical, and a cache would not fix
- * either: `stableKey` sorts keys when building `shareKey`
- * (`src/utils/stable-key.ts`) while `buildUrl` serializes query params in
- * `Object.entries` insertion order, so two callers that coalesce into one
- * shared request (an agreeing `shareKey`) can still recompute different query
- * strings; and `params` reaches middleware by reference, so an in-place
- * mutation there can make the recompute differ from what Step 4 built. Each
- * caller's URL is still correct for its own params in both cases.
+ * Deliberately not memoized: the recompute is identical for identical inputs,
+ * so a cache would buy nothing on a path that is already failing. `params`
+ * reaches middleware by reference, so an in-place mutation there can make the
+ * recompute differ from what Step 4 built; a cache would not fix that either,
+ * and the URL is still correct for the params as they now are.
  */
 function urlForError(baseUrl: string, request: Request<any, any>, params: object): string {
   try {
@@ -286,9 +280,9 @@ function urlForError(baseUrl: string, request: Request<any, any>, params: object
  *
  * Three situations produce one:
  *
- * - a sharer giving up before the shared request settles (`'abort'`) — the
- *   shared request itself is unaffected unless this was the last reference,
- *   which is the refcount's job, not this function's;
+ * - the backstop settling a call whose own signal aborted while its chain had
+ *   not answered (`'abort'`, or `'timeout'` by that signal's reason) — see
+ *   utils/backstop.ts;
  * - a synchronous error during request setup (`'network'`), most often the
  *   `TypeError` `buildUrl` throws for a nested query-string object;
  * - a rejection escaping the middleware chain (`'middleware'`, or `'network'`
@@ -350,25 +344,6 @@ function syntheticResult(
   return createNetworkErrorResult(error, retry)
 }
 
-/**
- * True when a `HeadersInit` carries no entries at all.
- *
- * The `share` gate needs *emptiness*, not truthiness: `headers: {}` and
- * `middleware: []` are both truthy, so a plain `!options.headers` test would
- * silently disable coalescing for a caller that passed an empty object —
- * exactly the shape a `...spread` of an optional config produces.
- */
-function isEmptyHeaders(init: HeadersInit | undefined): boolean {
-  if (init === undefined) return true
-  if (init instanceof Headers) {
-    let empty = true
-    init.forEach(() => { empty = false })
-    return empty
-  }
-  if (Array.isArray(init)) return init.length === 0
-  return Object.keys(init).length === 0
-}
-
 // =============================================================================
 // createApi — the main export
 // =============================================================================
@@ -391,6 +366,9 @@ function isEmptyHeaders(init: HeadersInit | undefined): boolean {
  * 5. Composes the middleware chain (global → per-request → per-call, minus skipped)
  * 6. Executes the chain, with the core fetch as the innermost layer
  * 7. Fires the onError callback if the final result has an error
+ *
+ * Every call runs all of that for itself, `share: true` included: sharing
+ * happens inside the core fetch, on the request as it is about to be sent.
  *
  * **Dedupe integration:**
  *
@@ -472,8 +450,10 @@ export function createApi<TRequests extends Record<string, Request<any, any>>>(
   // Share tracker — shared across all endpoints in this API instance, same
   // per-createApi lifetime rationale as dedupeTracker above.
   //
-  // share and dedupe are opposites (share joins the existing call, dedupe
-  // cancels it), so a Request that sets both is a contradiction with no
+  // Under share: true, core() joins an identical request already in flight
+  // instead of sending its own (see the share step in core). share and
+  // dedupe are opposites (share joins the existing request, dedupe cancels
+  // it), so a Request that sets both is a contradiction with no
   // sensible combined semantics. Validate this up front, at construction
   // time, rather than at call time: it's the one sanctioned throw outside a
   // Result, because it's a configuration mistake, not a request failure.
@@ -506,40 +486,23 @@ export function createApi<TRequests extends Record<string, Request<any, any>>>(
       /**
        * A `Result` for a failure with no `Response` behind it — construction
        * only, no reporting. A function declaration rather than a const so it
-       * can name `execute` (as the Result's `retry`) before that binding
-       * exists further down.
+       * can name `retry` (as the Result's `retry`) before that binding exists
+       * further down.
        *
-       * Split out of `failedResult` (below) because the share path's `onAbort`
-       * builds a Result and reports it in two visibly separate steps. That
-       * split is now presentational rather than conditional — since the
-       * tracker marks abandonment explicitly, `onAbort` reports every time —
-       * but keeping construction free of the side effect is what let the
-       * reporting decision move out of this function in the first place.
+       * Split out of `failedResult` (below) because most call sites hand the
+       * Result to the post-execution hook, which decides reporting itself;
+       * only the two sites outside that hook report as they build.
        *
-       * `url`, when supplied, overrides the default. Only the two
-       * `'middleware'` call sites in `execute()` pass it, from
+       * `url`, when supplied, overrides the default. The sites inside
+       * `execute()` that can see the middleware context pass
        * `context.request.url` — that reflects a middleware which rewrote the
        * URL, which nothing recomputed here could know about.
        *
        * Every other site takes the default, `urlForError`, which rebuilds the
-       * address through the same `resolveRequestUrl` Step 4 uses. A recompute
-       * is sound because a joiner and the initiator agree on the request name
-       * and on every param value: `shareKey` is `name` plus stringified params.
-       * Two caveats to that agreement, neither of which breaks it: `params`
-       * reaches middleware by reference, so an in-place mutation there can
-       * make the recompute differ from what Step 4 built; and `stableKey`
-       * sorts keys for `shareKey` while `buildUrl` serializes query params in
-       * insertion order, so an agreeing `shareKey` does not guarantee an
-       * identical query string. Each caller's URL is still correct for its own
-       * params either way. It was not done before that extraction existed
-       * because hand-reproducing Step 4 at a second site would have been free
-       * to drift from it — the extraction removed the objection; it was not a
-       * change of mind about the risk.
-       *
-       * Considered and rejected: capturing Step 4's `url` in this closure. A
-       * joiner never runs its own `execute()`, so its capture stays empty while
-       * the initiator's is set, and the two then disagree — which the agreement
-       * test in `tests/error-url.test.ts` exists to catch.
+       * address through the same `resolveRequestUrl` Step 4 uses, from this
+       * caller's own params. Every caller runs its own `execute()`, `share:
+       * true` included, so there is no second caller whose view of the URL
+       * this one could disagree with.
        */
       function buildFailedResult(
         reason: unknown,
@@ -575,38 +538,25 @@ export function createApi<TRequests extends Record<string, Request<any, any>>>(
       /**
        * The execute function encapsulates the entire request lifecycle.
        *
-       * It is defined as a named function (not an arrow) so that it can be
-       * passed as the `retry` callback in Result objects. When the caller
-       * calls `result.retry()`, it re-enters execute() from scratch —
-       * rebuilding the URL, re-merging headers, re-composing middleware,
-       * and re-executing the fetch. This ensures that retry always goes
-       * through the full pipeline (auth re-injection, logging, etc.).
+       * Every Result's `retry` re-enters it (through `retry`, below) from
+       * scratch — rebuilding the URL, re-merging headers, re-composing
+       * middleware, and re-executing the fetch. This ensures that retry
+       * always goes through the full pipeline (auth re-injection, logging,
+       * etc.), with this caller's own options.
+       *
+       * Every call runs its own execute(), `share: true` included: setup,
+       * middleware in both directions, its own deadlines and signal, its own
+       * Result and its own onError decision. Sharing is the innermost step
+       * only — core() joins an identical request already in flight instead
+       * of sending its own (see the share step there).
        *
        * The entire body is wrapped in try/catch to capture synchronous
        * errors (e.g., TypeError from buildUrl when a nested object is
        * passed as a query string param). These are returned as Result
        * errors rather than unhandled rejections, keeping the "never throws"
        * contract intact.
-       *
-       * `sharedSignal`, when given, is merged with the operation's own
-       * deadline to form the signal that actually drives the fetch, displacing
-       * this caller's personal `options.signal` / timeout from it. It is never
-       * an override — hence the name. This is used only by the `share: true`
-       * path below: the first caller to acquire a shared slot hands `execute`
-       * the ShareTracker's own refcounted signal, so the real network request
-       * is governed by "has every sharer given up?" rather than by any single
-       * caller's personal signal or timeout.
-       * `result.retry()` calls `execute` with no argument — through `retry`,
-       * below, never directly — so a retry (shared or not) always falls back
-       * to this caller's own `options.signal` / timeout: a retry is a fresh,
-       * unshared request.
-       *
-       * `onSettled`, when given, is invoked the instant this operation has a
-       * `Result` and BEFORE that Result is reported to `onError`. The share
-       * site uses it to tell a genuine give-up from a vestigial one; see the
-       * post-execution hook.
        */
-      const execute = (sharedSignal?: AbortSignal, onSettled?: () => void): Promise<Result<unknown>> => {
+      const execute = (): Promise<Result<unknown>> => {
         // Every merged signal this run creates. Released once the run has a
         // Result (or its setup failed), so a long-lived caller signal does not
         // collect one listener per call. Released after settlement, never
@@ -655,60 +605,30 @@ export function createApi<TRequests extends Record<string, Request<any, any>>>(
           // set on the first attempt that reaches core() and survives across
           // retries, which keeps registration once per execute().
           // -----------------------------------------------------------------
-          // Resolve the deadline: per-call beats per-request, and non-positive
+          // Resolve the deadline: per-call, then per-request, then the
+          // client's — the first defined level wins, and non-positive there
           // means none. The signal is created once here — not inside core() —
           // so a retry sequence draws from a single budget rather than getting
-          // a fresh one per attempt.
+          // a fresh one per attempt. It is resolved once per execute(), not
+          // once per api-method call: `result.retry()` re-enters execute()
+          // and must draw a FRESH deadline, not the exhausted remains of the
+          // first attempt's (tests/timeout.test.ts, "gives retry() a fresh
+          // budget").
           //
-          // Under `share` (sharedSignal supplied) only the *per-request*
-          // deadline applies here, merged with the refcount signal rather than
-          // replacing it. `RequestConfig.timeout` is a property of the
-          // operation — "this endpoint must answer within 5s" — so it belongs
-          // to the one real request every sharer is waiting on, and is measured
-          // from when that request started. Suppressing it here instead, and
-          // applying it per-caller at the share site, is what let a steady
-          // arrival of joiners hold one socket open indefinitely: each new
-          // joiner's clock started at *its* join time, and the request itself
-          // had no deadline at all.
-          //
-          // `CallOptions.timeout` is deliberately absent from this branch: a
-          // single caller's patience must not shorten (or lengthen) the shared
-          // operation for everyone else, so it is observed per-caller at the
-          // share site instead.
-          //
-          // Both deadlines come from one `resolveBudget`, which is the single
-          // place that knows the operation/per-caller split. It is resolved
-          // here, once per execute(), rather than once per api-method call:
-          // `result.retry()` re-enters execute() and must draw a FRESH
-          // deadline, not the exhausted remains of the first attempt's
-          // (tests/timeout.test.ts, "gives retry() a fresh budget"). Within a
-          // single execute() it is still resolved exactly once, so a
-          // retryMiddleware sequence draws from one budget rather than a new
-          // one per attempt.
-          //
-          // `shared` is keyed on whether THIS run was handed the tracker's
-          // signal, not on `request.config.share`: a share: true endpoint
-          // called with per-call headers, per-call middleware or opaque params
-          // declines to coalesce and arrives here with no `sharedSignal`, and
-          // so does every `result.retry()`. Both are ordinary unshared calls
-          // and must keep this caller's own `options.signal` and
-          // `options.timeout`; keying on the config would silently drop them.
-          // Only the operation half is built here: the per-caller half is the
-          // share site's business, and constructing it here would leave a
-          // retained `abort` listener on the caller's signal for a value this
-          // branch never reads.
+          // Under `share` this is still this caller's own budget, bounding
+          // this caller's own pipeline and nothing else. The shared request
+          // has a deadline of its own — the endpoint's, else the client's,
+          // measured from when it was sent — which the share step in core()
+          // hands to the tracker. A per-call timeout therefore bounds only its
+          // caller, and a late joiner cannot extend the shared request.
           const operation = operationBudget(
             options.timeout,
             request.config.timeout,
             clientTimeout,
-            options.signal,
-            sharedSignal !== undefined
+            options.signal
           )
           own(operation, options.signal)
-          const callerSignal: AbortSignal | undefined = sharedSignal
-            ? anySignal([sharedSignal, operation])
-            : operation
-          own(callerSignal, sharedSignal, operation)
+          const callerSignal: AbortSignal | undefined = operation
           let dedupeController: AbortController | undefined
 
           // -----------------------------------------------------------------
@@ -719,18 +639,27 @@ export function createApi<TRequests extends Record<string, Request<any, any>>>(
           // middleware in the chain calls next() which invokes this core.
           //
           // The core function receives the (possibly mutated) middleware
-          // context and performs:
+          // context and performs one attempt:
           // a. Build the fetch RequestInit (method, headers, signal, body)
           // b. Call fetch with the resolved URL and init, and read the body
-          //    once (`sendExchange`, src/utils/exchange.ts)
-          // c. Decode that read based on the configured responseType
+          //    once (`sendExchange`, src/utils/exchange.ts) — or, under
+          //    share: true, join an identical request already in flight
+          // c. Decode that read based on the configured responseType, for
+          //    this caller alone
           // d. Return a success or error Result
           //
           // Network errors (fetch throws), and a body read our own signal
           // aborted, are caught and returned as network error Results
           // (status 0, no response).
+          //
+          // `attempt` is that body; `core` wraps it so every Result it
+          // returns passes through one stamp, below. `round` records whether
+          // this attempt took part in a shared round trip, and how.
           // -----------------------------------------------------------------
-          const core = async (ctx: MiddlewareContext): Promise<Result<unknown>> => {
+          const attempt = async (
+            ctx: MiddlewareContext,
+            round: { token: object | undefined; joined: boolean }
+          ): Promise<Result<unknown>> => {
             try {
               // Register with the dedupe tracker on the first attempt that
               // reaches core() — we are committed to sending a request. Any
@@ -751,18 +680,6 @@ export function createApi<TRequests extends Record<string, Request<any, any>>>(
               // it. Because registration happens only once, that field still
               // holds a live signal here — never a previous attempt's already
               // aborted dedupe signal.
-
-              // A middleware may have replaced ctx.request.signal with its own
-              // (a deadline, a circuit breaker), dropping the shared
-              // controller — the same hazard the dedupe registration below
-              // re-merges for. Without this, every sharer releasing no longer
-              // aborts the real request: the socket stays open with nobody
-              // waiting on it.
-              if (sharedSignal && ctx.request.signal !== sharedSignal) {
-                const installed = ctx.request.signal
-                ctx.request.signal = anySignal([installed, sharedSignal])
-                own(ctx.request.signal, installed, sharedSignal)
-              }
 
               if (request.config.dedupe && !dedupeController) {
                 const external = ctx.request.signal ?? callerSignal
@@ -812,7 +729,61 @@ export function createApi<TRequests extends Record<string, Request<any, any>>>(
               // other read failure is recorded on the exchange and rethrown by
               // decodeBody inside the branch's own try below, where it was
               // always handled.
-              const exchange = await sendExchange(ctx.request.url, fetchInit, request.config.responseType ?? 'json')
+              //
+              // Under `share`, join an identical request already in flight —
+              // identical meaning what is about to go on the wire (spec §3.2):
+              // the final method, URL, headers and body, built after every
+              // middleware, so a header an auth middleware added (the current
+              // user) is part of the comparison. Everything before this point
+              // ran for this caller alone, and so does everything after it:
+              // only the round trip is shared, and each caller decodes its own
+              // copy of the one read. A body that can't be compared cheaply
+              // and safely (an upload) has no key and is sent as usual.
+              const responseType = request.config.responseType ?? 'json'
+              const shareKey = request.config.share === true
+                ? requestKey(name, ctx.request.method, ctx.request.url, ctx.request.headers, fetchInit.body ?? null)
+                : null
+              let exchange: Exchange
+              if (shareKey === null) {
+                exchange = await sendExchange(ctx.request.url, fetchInit, responseType)
+              } else {
+                const url = ctx.request.url
+                const shared = await shareTracker.run(
+                  shareKey,
+                  // The shared request's own deadline: the endpoint's, else
+                  // the client's, measured from when it is sent — so a stream
+                  // of late joiners can't hold it open. A per-call timeout
+                  // bounds only its own caller, through ctx.request.signal.
+                  // Called synchronously, inside this try: timeoutSignalFor
+                  // clamps any number, and whatever it throws for a non-number
+                  // (a BigInt from untyped config) becomes this caller's Result.
+                  () => timeoutSignalFor(undefined, request.config.timeout, clientTimeout),
+                  // This caller's patience, as its pipeline left it — a signal a
+                  // middleware installed included. When it aborts, this caller
+                  // alone is released (run() rejects with its reason, classified
+                  // below as this caller's own abort or timeout); the request is
+                  // cancelled only once every caller has gone.
+                  ctx.request.signal,
+                  // Sent with the first caller's init, headers included (so its
+                  // tracing headers), and the shared signal: the refcount plus
+                  // the deadline above, never any one caller's.
+                  signal => sendExchange(url, { ...fetchInit, signal }, responseType).catch((err: unknown) => {
+                    // The provenance rule the unshared path applies to the
+                    // signal it hands fetch, applied to the one this request
+                    // was sent with: if that aborted (the shared deadline —
+                    // abandonment reaches nobody), the failure is that abort,
+                    // whatever shape fetch rejected with. A fetch that rejects
+                    // with its own AbortError (whatwg-fetch, React Native)
+                    // must still read as 'timeout' to every waiting caller.
+                    if (signal.aborted && !(err instanceof AbortedRead)) throw new AbortedRead(err, signal.reason)
+                    throw err
+                  })
+                )
+                round.token = shared.token
+                round.joined = shared.joined
+                if (!shared.outcome.ok) throw shared.outcome.error
+                exchange = shared.outcome.exchange
+              }
               const response = exchange.response
 
               // ---------------------------------------------------------------
@@ -1022,14 +993,29 @@ export function createApi<TRequests extends Record<string, Request<any, any>>>(
               // `sendExchange` already established that on the signal handed
               // to fetch — so it is not re-checked against ctx.request.signal,
               // which a middleware could have reassigned while core awaited.
+              // Under share the signal handed to fetch is the shared request's,
+              // not this caller's, so the share step reports ITS aborts (at
+              // fetch time too) the same way.
+              //
+              // Under share, this caller giving up arrives here as its own
+              // signal's reason (ShareTracker.run rejects with it), and the
+              // `signal?.aborted` arm classifies it exactly as it classifies
+              // an unshared caller's cancel.
               // ---------------------------------------------------------------
               const aborted = err instanceof AbortedRead
               const signal = ctx.request.signal
+              const ownGiveUp = !aborted && signal?.aborted === true
               const kind = aborted
                 ? (abortKind(err.reason) ?? 'abort')
-                : signal?.aborted === true
+                : ownGiveUp
                   ? (abortKind(signal.reason) ?? 'abort')
                   : (abortKind(err) ?? 'network')
+              // Classified as this caller's own give-up, so it is this
+              // caller's failure, not the shared round trip's — even when the
+              // round trip had already answered (the give-up landed in the
+              // same tick): it must not carry the round trip's token (core's
+              // stamp, below).
+              if (ownGiveUp) round.token = undefined
               const error = new ApiError({
                 status: 0,
                 kind,
@@ -1041,6 +1027,28 @@ export function createApi<TRequests extends Record<string, Request<any, any>>>(
 
               return createNetworkErrorResult(error, retry)
             }
+          }
+
+          const core = async (ctx: MiddlewareContext): Promise<Result<unknown>> => {
+            const round: { token: object | undefined; joined: boolean } = { token: undefined, joined: false }
+            const result = await attempt(ctx, round)
+            // An error derived from the shared round trip — its HTTP error,
+            // parse or schema failure, network failure or deadline — carries
+            // the round trip's token, so onError hears about one failed shared
+            // request once, whichever of its callers reaches the hook first
+            // (spec §4.3). This caller's OWN give-up is its own failure and
+            // stays untagged: ShareTracker.run rejecting leaves no token, and
+            // attempt's catch drops it when it classifies a failure by this
+            // caller's signal. Deciding by how the error was classified, not
+            // by whether the signal is aborted by now, matters when the
+            // caller's abort lands in the same tick as a shared failure: the
+            // caller then holds the shared 'http' or 'parse', which must not
+            // report a second time. Anything a middleware makes of the Result
+            // afterwards is a different error object, and untagged too.
+            if (round.token !== undefined && result.error) tagShared(result.error, round.token)
+            // For the logger's `, shared` suffix: this caller sent nothing.
+            if (round.joined) markJoined(result)
+            return result
           }
 
           // -----------------------------------------------------------------
@@ -1133,12 +1141,14 @@ export function createApi<TRequests extends Record<string, Request<any, any>>>(
           // the whole chain, not only the part that reaches fetch: a
           // middleware awaiting something the signal does not reach (a
           // stalled token refresh) can no longer hold the call past its own
-          // deadline. It watches the operation's own signal — the deadline,
-          // the caller's signal and, under share, the refcount — and, once
+          // deadline. It watches this call's own signal — the deadline and
+          // the caller's signal (and, under dedupe, the supersede) — and, once
           // it aborts, gives the chain one macrotask to answer before
           // settling with the abort Result itself. See utils/backstop.ts for
           // why the grace period exists. `guard` stops a middleware that
           // resumes after that from sending a request nobody is waiting on.
+          // Under share nothing changes: a caller waiting on a shared round
+          // trip is waiting inside core(), on its own signal, like any other.
           // -----------------------------------------------------------------
           const backstop = createBackstop<Result<unknown>>(signal =>
             buildFailedResult(signal.reason, signal, 'abort', context.request.url)
@@ -1184,26 +1194,6 @@ export function createApi<TRequests extends Record<string, Request<any, any>>>(
           //    (only fires on final error — if retry middleware recovered, no fire)
           // -----------------------------------------------------------------
           return backstop.follow(resultPromise, (result, preempted) => {
-            // This operation now has a Result. Announce it before reporting
-            // anything: a sharer whose own signal is aborted from inside the
-            // `onError` below must be able to tell, synchronously, that it was
-            // never left waiting. Every later hop is too late — see the share
-            // site's `onAbort`.
-            // `retry` no longer hands this function to consumers (see
-            // `retry` below), but the guard stays: "only the share site passes
-            // a second argument" is a property of this file, not of the
-            // types, and a non-function here would throw from inside the one
-            // path that must always produce a Result.
-            // A function that itself throws is guarded too, for the same
-            // reason: this hook must never fail a request that already has a
-            // perfectly good Result, and a throw here is exactly the kind of
-            // consumer-supplied misbehaviour that would resurrect the
-            // rejection path the share site's defense-in-depth handlers exist
-            // to catch (see ShareTracker's callers in this file).
-            if (typeof onSettled === 'function') {
-              try { onSettled() } catch { /* a settlement callback must not fail a request */ }
-            }
-
             // Clean up dedupe tracking after the request completes.
             // This must happen before onError so that onError handlers can
             // immediately fire a new request without triggering a dedupe abort.
@@ -1236,57 +1226,21 @@ export function createApi<TRequests extends Record<string, Request<any, any>>>(
             // its opportunity to handle/recover the error. Guarded: a throwing
             // handler must not reject a promise that already holds a Result.
             //
-            // Abandonment is not itself a failure: the tracker aborted this
-            // request because nobody is waiting on it any more, not because
-            // anything went wrong. This guard exists so that outcome doesn't
-            // get reported here as an operation-level failure. `sharedSignal`
-            // is consulted rather than the error's body because the tracker's
-            // abort reason is authoritative: it says *why the request ended*,
-            // whereas the error body is whatever `fetch` (or a middleware
-            // reacting to the abort) happened to produce.
-            //
-            // This is NOT "every caller has already received and reported its
-            // own Result" — that used to be true, but Task 10 (`onError` no
-            // longer fires for `error.kind === 'abort'`) broke it. A plain
-            // abort-flavoured give-up is dropped by `fireOnError`'s own kind
-            // check regardless of this guard, so it produces ZERO reports —
-            // the caller still gets a real `ErrorResult` back, it just never
-            // reaches `onError`. `tests/share.test.ts`'s "two sharers both
-            // abort" (row 2) pins exactly that: `kinds` ends up `[]`. Only a
-            // give-up whose kind survives `fireOnError` (a genuine timeout) is
-            // actually reported, by that caller's own `onAbort` — see "two
-            // sharers both time out" (row 2b) in the same file.
-            //
-            // What this guard does still guarantee: it is never a *second*
-            // report of a failure a sharer's own `onAbort` already reported or
-            // will report for the SAME operation-level outcome. Two legs, both
-            // load-bearing:
-            //
-            //  1. `release()` has exactly one call site — the share site's
-            //     `onAbort` — and the `fireOnError` call there is `if
-            //     (!hasSettled()) fireOnError(...)`, not unconditional. The
-            //     guard can only suppress that caller's own report; it never
-            //     adds one, so it can never turn into a SECOND report for
-            //     the same operation-level outcome.
-            //  2. A sharer with no `perCaller` budget never releases at all.
-            //     It takes the `if (!perCaller) return promise.then(...)`
-            //     fast path, so it holds its reference for as long as it
-            //     waits, which keeps `refs > 0` and makes abandonment
-            //     unreachable while any such caller is still waiting.
-            //
-            // Leg 2 is why abandonment can never fire out from under a caller
-            // that has no give-up path of its own. Adding a second `release()`
-            // call site, or giving that fast path one, breaks the invariant
-            // this suppression assumes.
-            const abandoned = sharedSignal?.aborted === true && isAbandoned(sharedSignal.reason)
-            if (result.error && !abandoned) fireOnError(result.error as ApiError)
+            // One failed shared request reports once, whichever of its callers
+            // gets here first: every caller's error derived from that round
+            // trip carries the same token (see core), and
+            // ShareTracker.shouldReport lets one token through once. Anything
+            // else — an unshared call, a caller's own give-up, an error a
+            // middleware produced — is untagged and reports as always. A
+            // round trip whose callers have all given up reaches nobody's
+            // pipeline at all, so its own failure is never seen here.
+            if (result.error && shareTracker.shouldReport(result.error)) fireOnError(result.error as ApiError)
 
             return result
           }, (err: unknown) => {
             // Only reachable with a signal-shaped value whose `reason` throws —
-            // `retry` called with arbitrary arguments, or a fake signal from
-            // plain JS — so the backstop could not build its Result. Never
-            // throws holds regardless.
+            // a fake `CallOptions.signal` from plain JS — so the backstop could
+            // not build its Result. Never throws holds regardless.
             releaseAll()
             return failedResult(err, undefined, 'abort')
           })
@@ -1322,207 +1276,21 @@ export function createApi<TRequests extends Record<string, Request<any, any>>>(
       }
 
       /**
-       * What every Result hands consumers as `retry`. Not `execute` itself:
-       * `execute`'s parameters are internal, and `retry` is passed around as
-       * a bare function — `[r].map(r.retry)` supplies `(value, index)`,
-       * `retry({})` supplies an object. Landing in `sharedSignal`, any value
-       * marks the run as shared, whose budget deliberately excludes the
-       * caller's own `signal` and per-call `timeout` — so a retry called that
-       * way silently dropped both. Zero parameters makes that unreachable.
+       * What every Result hands consumers as `retry`: this caller's own
+       * pipeline again, with this caller's own options — under `share` too,
+       * where it may share again with whatever identical request is then in
+       * flight. Kept apart from `execute` on purpose: `retry` is passed
+       * around as a bare function (`[r].map(r.retry)` supplies
+       * `(value, index)`, `retry({})` an object), and an internal parameter
+       * on `execute` once received those values and silently dropped the
+       * caller's signal and timeout. Zero parameters here keeps any future
+       * one out of reach.
        */
       function retry(): Promise<Result<unknown>> {
         return execute()
       }
 
-      // -----------------------------------------------------------------------
-      // Coalescing (share: true)
-      // -----------------------------------------------------------------------
-      // Coalescing wraps the whole chain — unlike dedupe, which registers
-      // inside core(). Running the middleware once for ten callers is the
-      // actual saving; ten auth injections and ten cache lookups for one
-      // network call would be most of the cost.
-      //
-      // Per-call headers or middleware change *what* is requested, so such a
-      // call never shares — it always gets its own execute(). A per-call
-      // signal or timeout only changes *who is waiting*, so it does not
-      // disable sharing: it is observed for this caller alone, below.
-      //
-      // The share key is `name|stableKey(params)`. A null key means the
-      // params cannot be keyed soundly — a BigInt, an opaque body type, a
-      // private-state instance, at any depth (see stable-key.ts) — and such
-      // a call never shares: two different payloads must never collide on
-      // one key and hand one caller the response to the other's request.
-      // That is the same "security-shaped bug" this doc warns about for
-      // per-call headers, reachable through a different vector. Declining
-      // to share is always safe; corrupting a response never is. Before
-      // 4.4.3 this was a depth-0 list (isOpaqueParams); 2.2.1 had narrowed it
-      // from isSpecialBody so that string-param endpoints still coalesce.
-      //
-      // The whole block is wrapped in try/catch for the same reason execute()
-      // is: it runs in the bare body of the api method, so anything thrown
-      // here — by isSpecialBody, stableKey, timeoutSignalFor, or the
-      // synchronous part of the Promise executor — escapes as a rejection
-      // rather than a Result. This is the one region of the request path where
-      // "every call returns a Result" would otherwise not be enforced by
-      // construction.
-      // -----------------------------------------------------------------------
-      // Hoisted so the catch below can release it: built before acquire(), it
-      // would otherwise keep its listener if anything after it threw.
-      let builtPerCaller: AbortSignal | undefined
-      try {
-        // Emptiness, not truthiness: `headers: {}` and `middleware: []` are
-        // both truthy, and neither changes what is requested, so neither is a
-        // reason to decline coalescing.
-        // The cheap checks first; the key is only built for a call that could share.
-        const key =
-          request.config.share === true &&
-          isEmptyHeaders(options.headers) &&
-          (options.middleware === undefined || options.middleware.length === 0)
-            ? stableKey(params)
-            : null
-        if (key === null) return execute()
-
-        const shareKey = `${name}|${key}`
-
-        // This caller's own signal and per-call timeout, kept entirely separate
-        // from the signal the real fetch runs on. It bounds only whether THIS
-        // caller keeps waiting — it must never reach into the shared request.
-        //
-        // Deliberately *not* `request.config.timeout`: that one belongs to the
-        // operation, is shared by every caller, and is applied inside execute()
-        // against the request's own start time. `perCallerBudget` is the half
-        // of the budget that knows only about this caller — asking for exactly
-        // that half is what keeps the two straight, and avoids allocating an
-        // operation deadline nobody here reads. Computed before acquire() so a
-        // throw from here cannot strand a shared request that this caller then
-        // never releases.
-        const perCaller = perCallerBudget(options.timeout, options.signal)
-        builtPerCaller = perCaller
-
-        // acquire() either starts the real request (first caller — exec is
-        // called with the tracker's own refcounted signal, which becomes the
-        // signal that actually drives fetch) or joins an identical one already
-        // in flight. Either way every sharer gets the same promise back.
-        const { promise, release, hasSettled } = shareTracker.acquire(shareKey, (signal, markSettled) =>
-          execute(signal, markSettled)
-        )
-
-        // execute() converts synchronous errors to Results, but a *rejection*
-        // from the middleware chain (an async middleware that throws) escapes
-        // it and would arrive here as a bare reason. Handing that to a caller
-        // as though it were a Result is worse than the rejection it replaces:
-        // `const { data, error } = await api.get(...)` then yields
-        // undefined/undefined, `if (error)` is false, and the consumer carries
-        // on as if the call had succeeded with no data. Convert it instead.
-        //
-        // No `perCaller` signal/timeout means there's no separate give-up path
-        // for this caller to race against — it can only ever learn its result
-        // from `promise` settling, so this is the whole story for it, same as
-        // it always reported.
-        //
-        // As of the never-throws fix (Task 9), `execute()` itself converts a
-        // middleware rejection into a Result before it ever gets here — so
-        // `promise` has no live producer of a rejection today, and this arm
-        // is dead in normal operation. Kept as defense-in-depth: "execute()
-        // never rejects" is an invariant held by code, not by types. The
-        // invariant itself — not this now-unreachable arm — is what is
-        // pinned, by `tests/never-throws.test.ts`: if a future change lets
-        // `execute()` reject again, those tests fail loudly, and this arm
-        // becomes live again to catch exactly the rejection they'd be
-        // failing on.
-        if (!perCaller) return promise.then(r => r, (err: unknown) => failedResult(err, undefined, 'network'))
-
-        // Race this caller's own giving-up against the shared result settling.
-        // Giving up calls release(), which only decrements the refcount — the
-        // underlying request is aborted by ShareTracker itself, and only once
-        // every sharer (including this one) has released.
-        return new Promise<Result<unknown>>(resolve => {
-          let done = false
-          const finish = (r: Result<unknown>): void => {
-            if (done) return
-            done = true
-            perCaller.removeEventListener('abort', onAbort)
-            // perCaller may be a merge of this caller's signal and its own
-            // timeout; it is this caller's alone, so it goes as soon as this
-            // caller has its answer. Unless it IS the caller's signal (no
-            // per-call timeout): that may be another call's merge — see `own`
-            // in execute().
-            if (perCaller !== options.signal) releaseSignal(perCaller)
-            resolve(r)
-          }
-
-          promise.then(
-            r => finish(r),
-            (err: unknown) => {
-              // Fix 2 (2.2.1, "cross-kind double report"): this caller may
-              // already be `done` — most commonly because `onAbort` below
-              // already gave it a Result. `finish` would discard whatever we
-              // build here anyway, but `failedResult` reports to onError as a
-              // side effect of being built, which would report the SAME
-              // underlying give-up a second time, under a DIFFERENT kind
-              // ('network' here vs. whatever `onAbort` already reported).
-              // Bail before constructing anything.
-              //
-              // Same status as the `!perCaller` arm above: since Task 9,
-              // `execute()` converts a middleware rejection into a Result
-              // before `promise` can ever reject, so this whole rejection
-              // handler — the `done` bail included — has no live producer
-              // today. Kept as defense-in-depth for the same reason: the
-              // no-reject invariant lives in code, not in types, and it is
-              // that invariant — pinned by `tests/never-throws.test.ts` —
-              // rather than this arm itself, that is what is actually
-              // tested. If `execute()` ever rejects again, those tests fail
-              // loudly, and this bail (and the arm around it) is what
-              // catches the fallout.
-              if (done) return
-              finish(failedResult(err, undefined, 'network'))
-            }
-          )
-
-          // This caller gave up. That is its own failure, distinct from the
-          // operation's, and this path builds its Result directly rather than
-          // through execute()'s hook — so it reports, always.
-          //
-          // Unconditional is now correct because abandonment is explicit: if
-          // this release was the last one, the tracker aborts the shared
-          // request with ABANDONED and execute()'s hook stays silent. Before
-          // that sentinel existed this had to guess whether the delegate would
-          // report, and guessed wrong in both directions — twice producing a
-          // duplicate, twice producing zero.
-          //
-          // "Gave up" is the load-bearing word. A caller whose operation has
-          // already produced a Result was never left waiting: its abort is
-          // vestigial, and the operation has already reported that Result
-          // itself. The realistic source is an `onError` handler that cancels
-          // the rest of a batch on the first failure — it runs inside the
-          // hook above, so the abort lands while this listener is still
-          // armed. Reporting then produces two reports ('http' and 'abort')
-          // where an identical non-shared call produces one.
-          //
-          // `hasSettled()` is the operation's own synchronous answer, taken
-          // before it reported. Neither `done` nor any flag set from
-          // `promise.then` can serve here: the hook fires ~3 microtask hops
-          // ahead of them, so both are still false in exactly the window this
-          // guards. The Result handed back is unchanged either way — only the
-          // report is suppressed.
-          const onAbort = (): void => {
-            release()
-            const result = buildFailedResult(perCaller.reason, perCaller, 'abort')
-            if (!hasSettled()) fireOnError(result.error as ApiError)
-            finish(result)
-          }
-
-          if (perCaller.aborted) onAbort()
-          else perCaller.addEventListener('abort', onAbort, { once: true })
-        })
-      } catch (err) {
-        // Setup for the share path itself threw (e.g. a BigInt timeout
-        // reaching Math.min in perCallerBudget) — before acquire(), so there
-        // is no operative signal yet to check provenance against.
-        // Same guard as `finish`: the caller's own signal is not ours to release.
-        if (builtPerCaller !== options.signal) releaseSignal(builtPerCaller)
-        return Promise.resolve(failedResult(err, undefined, 'network'))
-      }
+      return execute()
     }
   }
 

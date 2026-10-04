@@ -20,10 +20,11 @@ async function runMany(call: (signal: AbortSignal) => Promise<unknown>) {
 
 describe('a long-lived caller signal ends with no listeners', () => {
   // [name, request config, per-call timeout]. With any timeout the operation
-  // budget is a fresh merge and every later merge (dedupe, share) listens to
-  // THAT, not to the caller's signal. The `no timeout` rows are the search-box
-  // case: the caller's signal is the budget itself, so the dedupe merge is
-  // the one listening to it, and only releasing that merge clears it.
+  // budget is a fresh merge and every later listener (the dedupe merge, the
+  // share step's wait in core) listens to THAT, not to the caller's signal.
+  // The `no timeout` rows are the search-box case: the caller's signal is the
+  // budget itself, so the dedupe merge, or a shared call's wait on its round
+  // trip, listens to it directly and must let go once the call settles.
   const cases: Array<[string, Partial<RequestConfig>, number | undefined]> = [
     ['plain', {}, 5000],
     ['dedupe', { dedupe: true }, 5000],
@@ -31,6 +32,7 @@ describe('a long-lived caller signal ends with no listeners', () => {
     ['timeout', { timeout: 5000 }, 5000],
     ['dedupe + timeout', { dedupe: true, timeout: 5000 }, 5000],
     ['share', { share: true }, 5000],
+    ['share, no timeout', { share: true }, undefined],
     ['share + timeout', { share: true, timeout: 5000 }, 5000],
   ]
 

@@ -3,7 +3,7 @@ import { composeMiddleware } from './middleware.js'
 import { DedupeTracker } from './utils/dedupe.js'
 import { mergeHeaders } from './utils/headers.js'
 import { abortKind, propagatesReason } from './utils/abort-kind.js'
-import { resolveBudget } from './utils/budget.js'
+import { operationBudget } from './utils/budget.js'
 import { releaseSignal } from './utils/any-signal.js'
 import { createBackstop } from './utils/backstop.js'
 import { runSchema } from './utils/validate.js'
@@ -178,16 +178,12 @@ export function createGraphQL(config: any): any {
           // dedupeController doubles as the "already registered" flag: it is
           // set on the first attempt that reaches core() and survives across
           // retries, which keeps registration once per execute().
-          // Resolve the deadline: per-call beats per-operation, and non-positive
+          // Resolve the deadline: per-call, then per-operation, then the
+          // client's — the first defined level wins, and non-positive there
           // means none. The signal is created once here — not inside core() —
           // so a retry sequence draws from a single budget rather than getting
           // a fresh one per attempt.
-          //
-          // GraphQL never coalesces, so the operation's deadline and this
-          // caller's patience are the same signal — both budget fields are
-          // identical and either may be read.
-          const budget = resolveBudget(options.timeout, operation.config.timeout, clientTimeout, options.signal, false)
-          const callerSignal: AbortSignal | undefined = budget.operation
+          const callerSignal: AbortSignal | undefined = operationBudget(options.timeout, operation.config.timeout, clientTimeout, options.signal)
           own(callerSignal, options.signal)
           let dedupeController: AbortController | undefined
 

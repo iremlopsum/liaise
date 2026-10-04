@@ -17,12 +17,14 @@ export function isReadableStream(value: unknown): value is ReadableStream {
  * `serializeBody`. A raw string belongs here: it is a body-serialisation
  * concern, and a string can't be decomposed into path/query params either.
  *
- * Do not use this to decide whether params can be *keyed* (cache/share) —
- * that is a different question, answered by `stableKey` in `./stable-key.js`,
- * which keys by content at every depth and returns `null` for what it cannot
- * key. `cacheMiddleware` and `share`'s gate used to share this predicate, but
- * excluding `string` disabled caching and coalescing for every string-param
- * endpoint even though a string keys soundly (fixed in 2.2.1).
+ * Do not use this to decide whether params can be *keyed* for
+ * `cacheMiddleware` — that is a different question, answered by `stableKey`
+ * in `./stable-key.js`, which keys by content at every depth and returns
+ * `null` for what it cannot key. `cacheMiddleware` and `share` used to share
+ * this predicate, but excluding `string` disabled caching and sharing for
+ * every string-param endpoint even though a string keys soundly (fixed in
+ * 2.2.1). `share` no longer keys params at all; it compares the request as
+ * sent (`requestKey` in `./share.js`).
  */
 export function isSpecialBody(value: unknown): boolean {
   return (

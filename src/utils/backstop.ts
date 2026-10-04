@@ -31,8 +31,8 @@ export interface Backstop<T> {
    * grace period immediately.
    *
    * Only the operation's *own* signals belong here — the deadline, the
-   * caller's signal, a share refcount, a dedupe supersede. A signal some
-   * middleware installed is that middleware's business.
+   * caller's signal, a dedupe supersede. A signal some middleware installed
+   * is that middleware's business.
    */
   watch(signal: AbortSignal | undefined): void
 
@@ -51,16 +51,16 @@ export interface Backstop<T> {
    *
    * `hook` runs synchronously inside the settlement rather than in a `.then`
    * on the returned promise, so it fires at the same microtask a plain
-   * `chain.then(hook)` would. Share-site reporting is sensitive to that
-   * ordering (see `hasSettled` in create-api.ts); an extra hop widened an
-   * existing window.
+   * `chain.then(hook)` would: the backstop adds no hop between a chain
+   * answering and its Result being reported (tests/hung-middleware.test.ts
+   * pins this).
    *
    * `onFailure` turns the three things that could otherwise reject it — the
    * chain rejecting (callers convert rejections before following, so this is
    * defence-in-depth), `abortResult` throwing, or `hook` throwing — into a
    * value. It is a parameter rather than a `.catch` on the returned promise
-   * for the same ordering reason as `hook`: a trailing `.catch` is one more
-   * hop before a sharer receives the Result.
+   * for the same reason as `hook`: a trailing `.catch` is one more hop before
+   * the caller receives the Result.
    */
   follow(
     chain: Promise<T>,
@@ -128,9 +128,9 @@ export function createBackstop<T>(abortResult: (signal: AbortSignal) => T): Back
 
   return {
     watch(signal) {
-      // Duck-typed, not `instanceof`: `result.retry` is handed to consumers
-      // as a bare function, so `[r].map(r.retry)` or `retry({}, 0)` delivers
-      // arbitrary values into execute()'s internal signal parameter. Anything
+      // Duck-typed, not `instanceof`: a `CallOptions.signal` from plain JS
+      // can be any value at all, and (before execute() lost its parameters)
+      // `[r].map(r.retry)` once delivered arbitrary values here too. Anything
       // that cannot be listened to is not a signal this call can be governed
       // by, and must not throw here — see tests/cancellation.test.ts.
       if (settled || typeof signal?.addEventListener !== 'function') return
