@@ -517,7 +517,7 @@ const api = createApi({
 - **An empty body under `'json'` is a `'parse'` error.** You declared JSON and the server sent none, so no value could honestly match your type. The error has the response's own status (a 204 reports 204), the `response`, and `''` in `error.body`.
 - **A literal `null` body is not empty.** It is valid JSON, so the call succeeds with `data: null`.
 - **`'none'` is for an endpoint that sends no body on success**, such as a `DELETE` that answers 204, or 200 with an empty body. liaise reads nothing, `data` is `undefined`, and a body the server sends anyway is discarded. Its stream is cancelled, which frees the connection.
-- **Declare `'none'` with the response type `undefined`.** `defineRequest` enforces this ([Defining endpoints](#defining-endpoints)). With `new Request` it is only a convention, and `data` is `undefined` at runtime whatever type you wrote.
+- **Declare `'none'` with the response type `undefined`.** `defineRequest` enforces this ([Defining endpoints](#defining-endpoints)). [Without defineRequest](#without-definerequest) it is only a convention, and `data` is `undefined` at runtime whatever type you wrote.
 - **A non-2xx body is still read into `error.body`**, because an error body usually explains what went wrong. Under `'none'` it is read as JSON, and `error.body` is `null` when it isn't JSON:
 
   ```ts
@@ -722,7 +722,7 @@ const [a, b] = await Promise.all([
 - **`share` joins the call already running. [`dedupe`](#drop-stale-calls-with-dedupe) cancels it.** Setting both on one endpoint throws when you create the client, so you find the mistake straight away.
 - **Identical means the same endpoint and the same params, compared by content.** Key order doesn't matter, and two `Date`s with the same time match. Different params or a different endpoint never share. [Share key and refcount](#share-key-and-refcount) has the full rules.
 - **A per-call `headers` or `middleware` turns sharing off for that call.** Either one can change what is requested, so that call gets a request of its own.
-- **Params that can't be compared safely turn sharing off too.** These include a BigInt, an `ArrayBuffer`, `Blob`, `FormData` or `URLSearchParams`, a circular structure, and an object with no enumerable state, such as an `Error` or a class instance that keeps its state in private fields, at any depth. Two different values of those kinds could look the same, so that call gets its own request.
+- **Params that can't be compared safely, such as a `Blob` or a circular structure, turn sharing off** ([full list](#share-key-and-refcount)). That call gets its own request.
 - **A `Date`, `Map`, `Set`, typed array or string param shares normally.**
 - **A per-call `signal` or `timeout` only lets that caller leave.** The caller that gives up gets `kind: 'abort'` or `'timeout'`, reported to [`onError`](#reporting-errors-with-onerror) as an unshared call would be. The request keeps running for the others, and is cancelled once every caller has given up.
 - **The endpoint's own `timeout` bounds the shared request for everyone.** It counts from when the request started. A caller that joins late can't extend it, and `timeout: 0` on one call can't turn it off.
@@ -818,7 +818,7 @@ const { data } = await api.getUser({ id: '42' }, { skipMiddleware: [getUserCache
 - **Only successes are cached.** An error always goes to the network again.
 - **The key includes the URL, the params and the headers.** When your auth header is set before the cache runs, one user never sees another user's entry. [Cache key](#cache-key) has the details.
 - **Put a middleware that adds a unique header to each call after `cacheMiddleware`.** A request ID added before it makes every call look new, and nothing is ever cached. Client middleware always runs before endpoint middleware, so either list the request-ID middleware on the endpoint after the cache, or put the cache on the client before it.
-- The options are `ttl` in milliseconds (default 5 minutes), `maxSize` in entries (default 50), and `debug`, which logs hits and misses to the console (default `false`).
+- The options are `ttl`, `maxSize` and `debug` ([Cache options](#cache-options)).
 
 #### Log every call
 
@@ -1663,7 +1663,7 @@ The second argument of every call, as in `api.getUser(params, options)`. [`pagin
 | `skipMiddleware` | `Middleware[]` | — | Middleware to leave out of this call, matched by reference ([details](#skipping-a-middleware-for-one-call)). |
 | `headers` | `HeadersInit` | — | Replaces the client's and the endpoint's value for the same header. Turns off `share` for this call. |
 | `signal` | `AbortSignal` | — | Cancels the call, which ends with `kind: 'abort'` ([details](#cancel-with-a-signal)). |
-| `timeout` | `number` (ms) | the endpoint's `timeout` | Replaces the endpoint's deadline for this call. `0` turns it off. |
+| `timeout` | `number` (ms) | the endpoint's `timeout` | Replaces the endpoint's deadline for this call. `0` turns it off. Under `share`, it bounds only this caller's wait ([details](#share-key-and-refcount)). |
 
 A fractional `timeout` is rounded down to whole milliseconds, with a minimum of 1 ms. A value above the timer limit of 2³¹ − 1 ms is capped there. Zero or a negative number means no deadline.
 
@@ -1871,7 +1871,7 @@ A call can't share when its params hold any of these, at any depth:
 
 Per-call `headers: {}` and `middleware: []` are empty, so they don't turn sharing off. Only a header or a middleware that is actually there does.
 
-Each caller holds a place in the shared request. A caller whose own `signal` or `timeout` fires gives up its place, and the request is cancelled when the last place is given up. What that caller receives is under [Sharing identical requests](#sharing-identical-requests).
+Each caller holds a place in the shared request, counted by a refcount. A caller whose own `signal` or `timeout` fires gives up its place. What happens when every caller has given up, and what the caller who leaves receives, is under [Sharing identical requests](#sharing-identical-requests).
 
 The endpoint's `timeout` counts from when the shared request started. If each new caller restarted it, a steady stream of callers could keep one request open forever.
 
@@ -1955,9 +1955,8 @@ A `ReadableStream` body is used up as it is sent, so liaise can't send it again.
 
 #### Empty bodies
 
-- **A 2xx with an empty body under `'json'`** is a `'parse'` error, as [Reading responses](#reading-responses) says. It keeps the response's own status, with no special case for 204, and its `Result` still has `retry()`.
+- **A 2xx with an empty body under `'json'`** is a `'parse'` error ([Reading responses](#reading-responses)), and its `Result` still has `retry()`.
 - **A non-2xx with an empty body** is an ordinary `'http'` error with `error.body` set to `null`. So is a non-2xx whose JSON body doesn't parse, such as an HTML page from a gateway. Nobody promised a body on failure, so neither is a `'parse'` error.
-- **Under `'none'`**, an empty error body is `null` too.
 - **On GraphQL**, a 2xx with neither `data` nor `errors` is a `'parse'` error with the raw text in `error.body` ([GraphQL errors](#graphql-errors)). That includes a root of `null`, a number or an array. Each is valid JSON, but GraphQL requires an object.
 
 ## Upgrading, contributing, licence

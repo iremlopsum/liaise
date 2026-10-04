@@ -217,7 +217,7 @@ export interface RequestConfig {
    * Declaring `responseType: 'none'` alongside a schema is a contradiction —
    * there is no body to validate, and every call will fail validation. It is
    * not rejected at compile time because the runtime failure is immediate and
-   * loud; see the spec's non-goals.
+   * loud.
    *
    * On this class path, `schema` and `TResponse` are also not tied together at
    * compile time: `new Request<P, User>({ ..., schema: numberSchema })`
@@ -264,9 +264,9 @@ export interface RequestConfig {
    * That is, at any depth: a BigInt, a function or symbol, an `ArrayBuffer`,
    * `Blob`, `FormData` or `URLSearchParams`, a boxed primitive, a circular
    * structure, or a non-plain object with no enumerable keys (an `Error`, a
-   * class keeping its state in private fields). Two different payloads of
-   * these kinds could get the same key, and one caller would receive the
-   * response to the other's request. A string, `Date`, `Map`, `Set` or typed
+   * class keeping its state in private fields). These are declined because
+   * their content can't be keyed reliably, and a wrong match would hand one
+   * caller the response to another's request. A string, `Date`, `Map`, `Set` or typed
    * array is compared by content and shares normally.
    *
    * `result.retry()` on a shared result re-runs the pipeline using the
@@ -506,10 +506,9 @@ export interface CallOptions {
  * Middleware can read and modify `ctx.request.headers` and `ctx.request.body`
  * before calling `next()` — changes will propagate to the actual fetch call.
  *
- * **Typing note:** The spec defines MiddlewareContext with generic TParams and
- * TResponse, but middleware is intentionally loosely typed. Authors work with
- * `unknown` and cast internally if they need specific types. This avoids
- * complex generic inference issues and keeps middleware composable.
+ * Middleware is deliberately loosely typed: authors work with `unknown` and
+ * cast internally if they need specific types. This avoids complex generic
+ * inference issues and keeps middleware composable.
  */
 export interface MiddlewareContext {
   /** Mutable request details — middleware can modify headers and body. */
@@ -780,7 +779,7 @@ export interface OperationConfig {
    *
    * Unlike the REST side, a schema here does **not** supply the response type —
    * `Operation`'s `TData` stays explicit, because only the REST pipeline has a
-   * factory that can infer it. See the spec's non-goals.
+   * factory that can infer it.
    */
   schema?: StandardSchemaV1<unknown>
 
