@@ -6,7 +6,7 @@
 
 Type-safe REST and GraphQL on plain fetch. Never throws. Zero dependencies. Works with any framework.
 
-[![npm](https://img.shields.io/npm/v/liaise)](https://www.npmjs.com/package/liaise) [![CI](https://github.com/iremlopsum/liaise/actions/workflows/ci.yml/badge.svg)](https://github.com/iremlopsum/liaise/actions/workflows/ci.yml) ![5.8 kB gzipped](https://img.shields.io/badge/gzipped-5.8%20kB-blue) ![MIT](https://img.shields.io/badge/license-MIT-blue)
+[![npm](https://img.shields.io/npm/v/liaise)](https://www.npmjs.com/package/liaise) [![CI](https://github.com/iremlopsum/liaise/actions/workflows/ci.yml/badge.svg)](https://github.com/iremlopsum/liaise/actions/workflows/ci.yml) ![6.2 kB gzipped](https://img.shields.io/badge/gzipped-6.2%20kB-blue) ![MIT](https://img.shields.io/badge/license-MIT-blue)
 
 ```bash
 npm install liaise
@@ -1527,7 +1527,7 @@ Measured on 4 October 2026 against axios 1.20.0, ky 2.1.0 and ofetch 1.5.1. Othe
 | --- | :-- | :-- | :-- | :-- | :-- |
 | Server answers 500 | throws Error* | throws AxiosError | throws HTTPError | throws FetchError | error result (http) |
 | Server unreachable | throws TypeError* | throws AxiosError (name: Error) | throws NetworkError | throws FetchError | error result (network) |
-| Server never answers | throws TimeoutError, 3002 ms* | throws AxiosError, 3005 ms | throws TimeoutError, 3005 ms | throws FetchError, 3003 ms | error result (timeout), 3003 ms |
+| Server never answers | throws TimeoutError, 3002 ms* | throws AxiosError, 3006 ms | throws TimeoutError, 3005 ms | throws FetchError, 3004 ms | error result (timeout), 3004 ms |
 | 200 with broken JSON | throws SyntaxError* | throws AxiosError (name: SyntaxError) | throws SyntaxError | throws SyntaxError | error result (parse) |
 | 204 with no body, on a JSON call | resolves with undefined* | resolves with "" | resolves with undefined | resolves with undefined | resolves with undefined |
 | Search as you type: which results stay on screen | shows "rea"* | shows "rea"* | shows "rea"* | shows "rea"* | shows "rea" |
@@ -1546,12 +1546,12 @@ Out of the box, liaise has no timeout (only ky has one by default) and treats a 
 | axios | 19.1 | 17.3 |
 | ky | 9.6 | 8.5 |
 | ofetch | 4.0 | 3.6 |
-| liaise | 5.8 | 5.2 |
-| liaise + retryMiddleware | 6.3 | 5.7 |
+| liaise | 6.3 | 5.7 |
+| liaise + retryMiddleware | 6.8 | 6.2 |
 
 fetch is built into the runtime; its row is the call site only, the floor rather than a library.
 
-Request overhead on localhost, sequential (median requests per second): fetch 16,797, axios 13,691, ky 13,742, ofetch 16,230, liaise 16,414.
+Request overhead on localhost, sequential (median requests per second): fetch 17,075, axios 13,972, ky 14,602, ofetch 16,915, liaise 16,912.
 
 Out-of-the-box results, request overhead in full and the notes: [compare/results.md](https://github.com/iremlopsum/liaise/blob/main/compare/results.md).
 
@@ -1561,7 +1561,7 @@ With enough of your own code, every library gets the right result in almost ever
 
 ky is the closest alternative. Apart from throwing instead of returning errors, it differs from liaise in two rows of the table. Its search as you type needs code, and it sends the undefined path param. Out of the box, ky is the only one that times out, and it retries, as ofetch does. In size, liaise is larger than ofetch and smaller than ky and axios.
 
-In request overhead, liaise ties fetch and ofetch. axios and ky handle about 16% fewer requests per second than liaise. Overhead is measured in microseconds; on a real network each request takes milliseconds.
+In request overhead, liaise ties fetch and ofetch. axios handles about 17% and ky about 14% fewer requests per second than liaise. Overhead is measured in microseconds; on a real network each request takes milliseconds.
 
 ### Where it runs
 
@@ -1852,7 +1852,7 @@ How the stub behaves, beyond [Testing your code](#testing-your-code):
 
 ### Exports
 
-Each entry point is a separate import, and your bundler leaves out what you don't import. Gzipped, as measured by `npm run size`: about 5.8 kB for a REST-only import, 6.9 kB for the whole core entry, and 8.0 kB with all the middleware.
+Each entry point is a separate import, and your bundler leaves out what you don't import. Gzipped, as measured by `npm run size`: about 6.2 kB for a REST-only import, 7.5 kB for the whole core entry, and 9.2 kB with all the middleware.
 
 **`liaise`**
 

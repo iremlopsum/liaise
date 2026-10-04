@@ -14,7 +14,10 @@ const entries = {
 
 // Gzip budgets in bytes, about 10% above the measured value. Raising one is a
 // deliberate edit in the same PR as the growth.
-const budgets = { 'REST only': 6233, 'core entry': 7453, 'core + middleware': 8576 }
+// 5.1.0 raised all three: sharing on what is sent moved into core (GraphQL share,
+// the wire-key, per-caller pipelines) and the logger moved into core (the `log`
+// option on both clients; logMiddleware now shares it).
+const budgets = { 'REST only': 7000, 'core entry': 8480, 'core + middleware': 10310 }
 
 let failed = false
 for (const [name, contents] of Object.entries(entries)) {
