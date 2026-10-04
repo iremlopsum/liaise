@@ -1,4 +1,6 @@
 import type { Result } from '../types.js'
+import type { Exchange } from './exchange.js'
+import { anySignal, releaseSignal } from './any-signal.js'
 
 interface Entry {
   promise: Promise<Result<unknown>>
@@ -38,6 +40,75 @@ export function isAbandoned(reason: unknown): boolean {
 }
 
 /**
+ * Headers that identify a request for tracing and never change the server's
+ * answer. Left out of the share key; otherwise a middleware stamping a unique
+ * ID on every call would silently stop all sharing. The shared request goes
+ * out with the first caller's values. Fixed on purpose (spec §3.3).
+ */
+export const TRACING_HEADERS: ReadonlySet<string> = new Set([
+  'traceparent', 'tracestate', 'baggage', 'sentry-trace', 'x-request-id', 'x-correlation-id',
+])
+
+/**
+ * The share key: what this request would put on the wire. Two requests with
+ * the same key are byte-for-byte the same to the server, so sharing them is
+ * safe; anything that differs never shares. `null` means the body can't be
+ * compared cheaply and safely (an upload), so the call is never shared.
+ */
+export function requestKey(name: string, method: string, url: string, headers: Headers, body: unknown): string | null {
+  let bodyKey: unknown
+  if (body === null || body === undefined) bodyKey = null
+  else if (typeof body === 'string') bodyKey = ['s', body]
+  else if (body instanceof URLSearchParams) bodyKey = ['u', body.toString()]
+  else return null
+
+  const pairs: [string, string][] = []
+  headers.forEach((value, key) => {
+    if (!TRACING_HEADERS.has(key)) pairs.push([key, value])
+  })
+  pairs.sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0))
+  return JSON.stringify([name, method.toUpperCase(), url, pairs, bodyKey])
+}
+
+/** What one shared round trip produced. Never a rejection: a failed send is `ok: false`. */
+export type SharedOutcome = { ok: true; exchange: Exchange } | { ok: false; error: unknown }
+
+/** One caller's view of a shared round trip. */
+export interface Shared {
+  outcome: SharedOutcome
+  /** Identity of the round trip — every caller of it gets the same object. */
+  token: object
+  /** True when this caller joined a request someone else sent. */
+  joined: boolean
+}
+
+interface RunEntry {
+  promise: Promise<SharedOutcome>
+  controller: AbortController
+  refs: number
+  settled: boolean
+  token: object
+}
+
+const sharedTokens = new WeakMap<object, object>()
+const joinedResults = new WeakSet<object>()
+
+/** Marks an error as derived from the shared round trip `token`. */
+export function tagShared(error: object, token: object): void {
+  sharedTokens.set(error, token)
+}
+
+/** Marks a Result as having joined a request someone else sent (the logger's `, shared`). */
+export function markJoined(result: object): void {
+  joinedResults.add(result)
+}
+
+/** Whether `markJoined` was called on this Result. */
+export function wasJoined(result: object): boolean {
+  return joinedResults.has(result)
+}
+
+/**
  * Joins identical concurrent requests onto one in-flight call.
  *
  * Sibling of `DedupeTracker`, with the opposite intent: dedupe cancels the
@@ -50,6 +121,98 @@ export function isAbandoned(reason: unknown): boolean {
  */
 export class ShareTracker {
   private inflight = new Map<string, Entry>()
+
+  private runs = new Map<string, RunEntry>()
+  private reported = new WeakSet<object>()
+
+  /**
+   * Send `key`'s request, or join an identical one already in flight.
+   *
+   * The first caller (the leader) calls `send` with a signal that aborts only
+   * when every caller has given up (ABANDONED) or the leader's `deadline()`
+   * fires — never on the leader's own signal: the leader giving up must not
+   * cancel the request for anyone else. `deadline` is called only by the
+   * leader, so the shared deadline is measured from when the request was sent.
+   *
+   * A caller whose `callerSignal` aborts first is released and the returned
+   * promise rejects with that signal's reason; everyone else keeps waiting.
+   * A settled entry is never joined: a call arriving after the answer starts
+   * a fresh request (no caching).
+   */
+  run(
+    key: string,
+    deadline: () => AbortSignal | undefined,
+    callerSignal: AbortSignal | undefined,
+    send: (signal: AbortSignal) => Promise<Exchange>
+  ): Promise<Shared> {
+    let entry = this.runs.get(key)
+    if (entry && (entry.settled || entry.refs <= 0 || entry.controller.signal.aborted)) entry = undefined
+    const joined = entry !== undefined
+
+    if (!entry) {
+      const controller = new AbortController()
+      const limit = deadline()
+      // Always defined: controller.signal is one of the inputs. With no limit,
+      // anySignal returns it unchanged; otherwise a merged signal that carries
+      // the aborting input's reason (so a TimeoutError stays a TimeoutError).
+      const signal = anySignal([controller.signal, limit]) as AbortSignal
+      const created: RunEntry = { controller, refs: 0, settled: false, token: {}, promise: undefined as unknown as Promise<SharedOutcome> }
+      // `send` may throw synchronously; the async wrapper turns that into a
+      // rejection so it lands in the same ok:false arm. That is what keeps
+      // `created.promise` from ever rejecting, so nothing downstream can
+      // produce an unhandled rejection.
+      created.promise = (async () => send(signal))()
+        .then(
+          (exchange): SharedOutcome => { created.settled = true; return { ok: true, exchange } },
+          (error: unknown): SharedOutcome => { created.settled = true; return { ok: false, error } }
+        )
+        .finally(() => {
+          if (this.runs.get(key) === created) this.runs.delete(key)
+          releaseSignal(signal)
+        })
+      this.runs.set(key, created)
+      entry = created
+    }
+
+    const held = entry
+    held.refs++
+
+    return new Promise<Shared>((resolve, reject) => {
+      let done = false
+      const onAbort = (): void => {
+        if (done) return
+        done = true
+        held.refs--
+        if (held.refs <= 0 && !held.settled && !held.controller.signal.aborted) held.controller.abort(ABANDONED)
+        reject(callerSignal!.reason)
+      }
+      if (callerSignal?.aborted === true) {
+        onAbort()
+        return
+      }
+      callerSignal?.addEventListener('abort', onAbort, { once: true })
+      void held.promise.then(outcome => {
+        if (done) return
+        done = true
+        callerSignal?.removeEventListener('abort', onAbort)
+        resolve({ outcome, token: held.token, joined })
+      })
+    })
+  }
+
+  /**
+   * Whether `onError` should hear about this error: always for an error not
+   * derived from a shared round trip, and once per round trip otherwise —
+   * every caller of one failed shared request gets its own error object, all
+   * tagged with the same token.
+   */
+  shouldReport(error: object): boolean {
+    const token = sharedTokens.get(error)
+    if (token === undefined) return true
+    if (this.reported.has(token)) return false
+    this.reported.add(token)
+    return true
+  }
 
   /**
    * Join the in-flight request for `key`, or start one with `exec`.
