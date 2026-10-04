@@ -29,19 +29,19 @@ Formerly published as `@iremlopsum/apify`; switching takes two steps, see [MIGRA
 
 ## The problem it solves
 
-`fetch` is a good building block. Every project still ends up writing the same few things around it, and they are easy to get subtly wrong. Here is what tends to go wrong, and what liaise does instead.
+`fetch` is a good building block. Every project still ends up writing the same few things around it, and they are easy to get subtly wrong.
 
 | With plain fetch | liaise | See |
 | ---------------- | ------ | --- |
-| Typing fast shows old results. A slow early search lands last. | `dedupe` cancels the older call. | [Stale requests](#quick-start) |
-| Five components or five 401s fire five identical requests. | `share` sends one and hands everyone the answer. | [Sharing requests](#quick-start) |
+| Typing fast in a search box shows old results. A slow early search lands last. | `dedupe` cancels the older call. | [Stale requests](#quick-start) |
+| Five components load the same data, or five 401s each refresh the token. That's five identical requests. | `share` sends one and hands everyone the answer. | [Sharing requests](#quick-start) |
 | A 500 counts as success, offline throws, a hung server waits forever. | Every call returns `{ data, error }`. `error.kind` names the failure. | [Handling errors](#quick-start) |
 | Retries run straight past your timeout. | `timeout` covers the whole operation, retries included. | [Deadlines](#quick-start) |
 | The backend changes a field and the page crashes three components later. | A schema checks the response. A bad shape is an error you handle. | [Validating responses](#quick-start) |
 
 ### Before and after
 
-Here is one form submit, written both ways.
+Here is one form submit, written both ways. `show` stands for whatever puts a message on screen.
 
 **With plain fetch**
 
@@ -72,6 +72,8 @@ async function submit(order: { items: string[] }) {
 ```
 
 `api.placeOrder` is an endpoint defined like the ones in [Quick start](#quick-start), with `timeout: 5000` so a hung server gives up after five seconds.
+
+The `switch` leaves out `'abort'` and `'middleware'`, because nothing here cancels a call and a middleware error is a bug in your own code ([all six kinds](#quick-start)).
 
 **The API client you'd build on your third project, with the edge cases already handled.**
 
@@ -118,14 +120,14 @@ if (error) {
 
 ### Next
 
-- [Handling errors](#quick-start): every `error.kind` and what to do about it.
+- [Handling errors](#quick-start)
 - [Add an auth header and refresh the token on a 401](#quick-start)
 - [Use with TanStack Query](#quick-start)
 - [Use with React](#quick-start)
 
 ## How it fits together
 
-liaise has four pieces, and every call takes the same path through them.
+liaise has four pieces, and every call takes the same path through them. Middleware is a function that wraps a call, so it can add a header, retry or log.
 
 ### Four pieces
 
@@ -133,8 +135,8 @@ liaise has four pieces, and every call takes the same path through them.
 | ----- | ---------- |
 | Endpoint definition (`defineRequest`) | A recipe for one endpoint: its method, its path and the types of its params and response. It does nothing on its own. |
 | Client (`createApi`) | Turns your recipes into typed functions, one per endpoint. |
-| Call | `api.getUser(params, options)`. The params, plus optional per-call options such as `signal`, `timeout`, `headers` and `middleware`. |
-| `Result` | `{ data, error, response, retry }`, which is what every call returns. Either `data` or `error` is set, never both. `retry()` runs the same call again. |
+| Call | `api.getUser(params, options)`, where `options` can set `signal`, `timeout`, `headers` or `middleware` for this call only. |
+| `Result` | `{ data, error, response, retry }`, which is what every call returns. `data` and `error` are never both set. `retry()` runs the same call again. |
 
 Types flow from the endpoint definition through `createApi` to every call, so you never annotate a call. When you need a type by name, it is listed under [Type exports](#type-exports).
 
@@ -144,19 +146,17 @@ Types flow from the endpoint definition through `createApi` to every call, so yo
 params → URL + body → your middleware → fetch → parse → validate → Result
 ```
 
-Middleware is a function that wraps the call, so it can add a header, retry or log. Any step can fail, and the failure lands in `error` instead of being thrown.
+Any step can fail, and the failure lands in `error` instead of being thrown.
 
 ### Three levels of settings
 
-You can write a setting in three places: on the client, on the endpoint, or on one call. The most specific one wins.
+You can write a setting in three places: on the client, on the endpoint, or on one call. For headers, the most specific one wins. For middleware, every level runs, the client's first.
 
 | Level | Where you write it | `headers` | `middleware` |
 | ----- | ------------------ | --------- | ------------ |
 | Client | `createApi({ headers, middleware })` | Sent with every call | Runs first, around everything else |
 | Endpoint | `defineRequest<T>()({ headers, middleware })` | Replaces the client's value for the same header | Runs second |
-| Call | `api.getUser(params, { headers, middleware })` | Replaces both | Runs last, closest to `fetch` |
-
-Middleware works differently. Every level's middleware runs, the client's first, then the endpoint's, then the call's.
+| Call | `api.getUser(params, { headers, middleware })` | Replaces the client's and the endpoint's value for the same header | Runs last, closest to `fetch` |
 
 Headers merge by name, so setting one header on a call keeps every other header from the client and the endpoint. A `Content-Type` you set at any level replaces the one liaise picks from the body.
 
