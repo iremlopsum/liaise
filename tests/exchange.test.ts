@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, afterEach } from 'vitest'
 import { sendExchange, AbortedRead } from '../src/utils/exchange.js'
+import type { Exchange } from '../src/utils/exchange.js'
 
 afterEach(() => vi.unstubAllGlobals())
 
@@ -34,7 +35,13 @@ describe('sendExchange', () => {
   it('records a read failure that the signal did not cause', async () => {
     const broken = new Response(new ReadableStream({ start(c) { c.error(new TypeError('stream broke')) } }))
     stub(broken)
-    const ex = await sendExchange('https://x.test', {}, 'json')
+    // A live, never-aborted signal: having a signal at all must not turn a
+    // read failure into an AbortedRead — only an aborted one does. Caught
+    // rather than awaited bare, so that regression fails as an assertion.
+    const outcome: unknown = await sendExchange('https://x.test', { signal: new AbortController().signal }, 'json')
+      .catch((e: unknown) => e)
+    expect(outcome).not.toBeInstanceOf(AbortedRead)
+    const ex = outcome as Exchange
     expect(ex.readFailed).toBe(true)
     expect(String(ex.readError)).toContain('stream broke')
   })

@@ -1017,13 +1017,18 @@ export function createApi<TRequests extends Record<string, Request<any, any>>>(
               //
               // An abort during the body read arrives as AbortedRead: its
               // `reason` classifies it, its `cause` (what the read threw) is
-              // the body, as before.
+              // the body, as before. It is our abort unconditionally —
+              // `sendExchange` already established that on the signal handed
+              // to fetch — so it is not re-checked against ctx.request.signal,
+              // which a middleware could have reassigned while core awaited.
               // ---------------------------------------------------------------
               const aborted = err instanceof AbortedRead
               const signal = ctx.request.signal
-              const kind = signal?.aborted === true
-                ? (abortKind(signal.reason) ?? 'abort')
-                : (abortKind(aborted ? err.reason : err) ?? 'network')
+              const kind = aborted
+                ? (abortKind(err.reason) ?? 'abort')
+                : signal?.aborted === true
+                  ? (abortKind(signal.reason) ?? 'abort')
+                  : (abortKind(err) ?? 'network')
               const error = new ApiError({
                 status: 0,
                 kind,

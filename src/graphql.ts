@@ -275,14 +275,12 @@ export function createGraphQL(config: any): any {
               // to the network catch would report status 0 and discard the
               // Response, telling the caller they are offline when they are not.
               //
-              // A failed read is rethrown OUTSIDE that try, deliberately, and
-              // lands in the outer `catch (err)` as status 0. That is where
-              // this read has always sat (it used to be the `await
-              // response.text()` on this line), so a body stream that breaks
-              // mid-download is a 'network' failure here — unlike
-              // create-api.ts, whose success-path read sat inside its parse
-              // try and reports the same break as 'parse'. An abort during
-              // the read never gets this far: it is an AbortedRead from
+              // A failed read is rethrown OUTSIDE that try, deliberately, so a
+              // body stream that breaks mid-download reaches the outer
+              // `catch (err)` as status 0, kind 'network' — unlike
+              // create-api.ts, which rethrows the same failure inside its
+              // decode try and reports it as 'parse'. An abort during the
+              // read never gets this far: it is an AbortedRead from
               // `sendExchange`, also classified in the outer catch; "abort
               // during a success-body download" in
               // tests/create-graphql.test.ts pins that case.
@@ -410,12 +408,17 @@ export function createGraphQL(config: any): any {
               //
               // An abort during the body read arrives as AbortedRead: its
               // `reason` classifies it, its `cause` (what the read threw) is
-              // the body, as before.
+              // the body, as before. It is our abort unconditionally —
+              // `sendExchange` already established that on the signal handed
+              // to fetch — so it is not re-checked against ctx.request.signal,
+              // which a middleware could have reassigned while core awaited.
               const aborted = err instanceof AbortedRead
               const signal = ctx.request.signal
-              const kind = signal?.aborted === true
-                ? (abortKind(signal.reason) ?? 'abort')
-                : (abortKind(aborted ? err.reason : err) ?? 'network')
+              const kind = aborted
+                ? (abortKind(err.reason) ?? 'abort')
+                : signal?.aborted === true
+                  ? (abortKind(signal.reason) ?? 'abort')
+                  : (abortKind(err) ?? 'network')
               const error = new ApiError({
                 status: 0,
                 kind,
