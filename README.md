@@ -73,7 +73,13 @@ async function submit(order: { items: string[] }) {
 
 `api.placeOrder` is an endpoint defined like the ones in [Quick start](#quick-start), with `timeout: 5000` so a hung server gives up after five seconds.
 
-The `switch` leaves out `'abort'` and `'middleware'`, because nothing here cancels a call and a middleware error is a bug in your own code ([all six kinds](#quick-start)).
+The `switch` leaves out `'abort'`, because nothing here cancels a call, and `'middleware'`, which points at a bug in your own code ([all six kinds](#quick-start)).
+
+### Why another API client?
+
+Without it, you have two options. You can hand-roll a wrapper around fetch, which means writing the same boilerplate on every project: a typed function per endpoint, status checks, error handling, retries, cancellation. Or you can reach for a large library like Apollo or urql. They're built for very large apps with complex data needs. For most products, that's bringing a tank to a chess match, and you spend hours on setup and configuration for features you never use.
+
+liaise sits in between. It's the wrapper you'd otherwise hand-roll, already written and tested. Your whole setup is a base URL and your endpoints.
 
 **The API client you'd build on your third project, with the edge cases already handled.**
 
