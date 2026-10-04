@@ -1029,3 +1029,39 @@ describe('createGraphQL — an empty errors array', () => {
     expect(data).toBeNull()
   })
 })
+
+describe('createGraphQL — client-level timeout (5.1.0)', () => {
+  const ep = 'https://api.example.com/graphql'
+  const slowOp = (extra: { timeout?: number } = {}) =>
+    new Operation<Record<string, never>, unknown>({ operation: gql`query { x }`, ...extra })
+
+  it('applies the client timeout when neither the operation nor the call sets one', async () => {
+    vi.stubGlobal('fetch', hangingGqlFetch())
+    const client = createGraphQL({ endpoint: ep, timeout: 20, operations: { slow: slowOp() } })
+    expect((await client.slow()).error?.kind).toBe('timeout')
+  })
+
+  it('lets the operation timeout beat the client timeout', async () => {
+    vi.stubGlobal('fetch', hangingGqlFetch())
+    const client = createGraphQL({ endpoint: ep, timeout: 5_000, operations: { slow: slowOp({ timeout: 20 }) } })
+    const started = Date.now()
+    expect((await client.slow()).error?.kind).toBe('timeout')
+    expect(Date.now() - started).toBeLessThan(1_000)
+  })
+
+  it('lets an operation timeout of 0 opt out of the client timeout', async () => {
+    vi.stubGlobal('fetch', hangingGqlFetch())
+    const client = createGraphQL({ endpoint: ep, timeout: 20, operations: { slow: slowOp({ timeout: 0 }) } })
+    const ac = new AbortController()
+    const pending = client.slow({}, { signal: ac.signal })
+    await new Promise(r => setTimeout(r, 60))
+    ac.abort()
+    expect((await pending).error?.kind).toBe('abort')
+  })
+
+  it('lets a per-call timeout beat both', async () => {
+    vi.stubGlobal('fetch', hangingGqlFetch())
+    const client = createGraphQL({ endpoint: ep, timeout: 5_000, operations: { slow: slowOp({ timeout: 5_000 }) } })
+    expect((await client.slow({}, { timeout: 20 })).error?.kind).toBe('timeout')
+  })
+})

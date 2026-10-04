@@ -241,3 +241,40 @@ describe('without AbortSignal.timeout or DOMException (Hermes)', () => {
     }
   })
 })
+
+describe('client-level timeout (5.1.0)', () => {
+  afterEach(() => vi.restoreAllMocks())
+  const slow = (extra: { timeout?: number } = {}) => new Request<Record<string, never>, unknown>({ method: 'GET', path: '/slow', ...extra })
+
+  it('applies the client timeout when neither the endpoint nor the call sets one', async () => {
+    vi.stubGlobal('fetch', hangingFetch())
+    const api = createApi({ baseUrl: 'https://x.test', timeout: 20, requests: { slow: slow() } })
+    const r = await api.slow()
+    expect(r.error?.kind).toBe('timeout')
+  })
+
+  it('lets the endpoint timeout beat the client timeout', async () => {
+    vi.stubGlobal('fetch', hangingFetch())
+    const api = createApi({ baseUrl: 'https://x.test', timeout: 5_000, requests: { slow: slow({ timeout: 20 }) } })
+    const started = Date.now()
+    const r = await api.slow()
+    expect(r.error?.kind).toBe('timeout')
+    expect(Date.now() - started).toBeLessThan(1_000)
+  })
+
+  it('lets an endpoint timeout of 0 opt out of the client timeout', async () => {
+    vi.stubGlobal('fetch', hangingFetch())
+    const api = createApi({ baseUrl: 'https://x.test', timeout: 20, requests: { slow: slow({ timeout: 0 }) } })
+    const ac = new AbortController()
+    const pending = api.slow({}, { signal: ac.signal })
+    await new Promise(r => setTimeout(r, 60))
+    ac.abort()
+    expect((await pending).error?.kind).toBe('abort') // not 'timeout': no deadline applied
+  })
+
+  it('lets a per-call timeout beat both', async () => {
+    vi.stubGlobal('fetch', hangingFetch())
+    const api = createApi({ baseUrl: 'https://x.test', timeout: 5_000, requests: { slow: slow({ timeout: 5_000 }) } })
+    expect((await api.slow({}, { timeout: 20 })).error?.kind).toBe('timeout')
+  })
+})

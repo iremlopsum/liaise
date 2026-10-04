@@ -1,7 +1,7 @@
 import { describe, it, expectTypeOf } from 'vitest'
 import { createApi } from '../src/create-api.js'
 import { Request } from '../src/request.js'
-import type { MiddlewareContext, CallOptions, RequestConfig } from '../src/types.js'
+import type { MiddlewareContext, CallOptions, RequestConfig, ApiConfig, GraphQLBaseConfig } from '../src/types.js'
 import type { ApiErrorKind } from '../src/types.js'
 import { successResult, errorResult } from '../src/testing.js'
 import type { ApiError } from '../src/types.js'
@@ -462,5 +462,12 @@ describe('defineRequest — schema-inferred response types', () => {
 
     // @ts-expect-error  the empty-body guard still fires
     defineRequest<User>()({ method: 'DELETE', path: '/u', responseType: 'none' })
+  })
+})
+
+describe('client-level timeout (5.1.0)', () => {
+  it('is an optional number on both client configs', () => {
+    expectTypeOf<ApiConfig<{}>['timeout']>().toEqualTypeOf<number | undefined>()
+    expectTypeOf<GraphQLBaseConfig['timeout']>().toEqualTypeOf<number | undefined>()
   })
 })

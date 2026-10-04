@@ -432,7 +432,7 @@ export function createApi<TRequests extends Record<string, Request<any, any>>>(
 ): Api<TRequests> {
   // Destructure the config for convenience. Default globalMiddleware to an
   // empty array so we don't need null checks throughout the function.
-  const { baseUrl, requests, middleware: globalMiddleware = [], headers: globalHeaders, onError } = config
+  const { baseUrl, requests, middleware: globalMiddleware = [], headers: globalHeaders, onError, timeout: clientTimeout } = config
 
   /**
    * Calls the consumer's `onError`, swallowing anything it throws.
@@ -700,6 +700,7 @@ export function createApi<TRequests extends Record<string, Request<any, any>>>(
           const operation = operationBudget(
             options.timeout,
             request.config.timeout,
+            clientTimeout,
             options.signal,
             sharedSignal !== undefined
           )

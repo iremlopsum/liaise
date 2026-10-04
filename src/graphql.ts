@@ -81,6 +81,7 @@ export function createGraphQL(config: any): any {
     middleware: globalMiddleware = [],
     headers: globalHeaders,
     onError,
+    timeout: clientTimeout,
   } = config
 
   const dedupeTracker = new DedupeTracker()
@@ -185,7 +186,7 @@ export function createGraphQL(config: any): any {
           // GraphQL never coalesces, so the operation's deadline and this
           // caller's patience are the same signal — both budget fields are
           // identical and either may be read.
-          const budget = resolveBudget(options.timeout, operation.config.timeout, options.signal, false)
+          const budget = resolveBudget(options.timeout, operation.config.timeout, clientTimeout, options.signal, false)
           const callerSignal: AbortSignal | undefined = budget.operation
           own(callerSignal, options.signal)
           let dedupeController: AbortController | undefined

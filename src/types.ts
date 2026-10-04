@@ -322,8 +322,9 @@ export interface RequestConfig {
    * ```
    *
    * A timeout produces an error with `kind: 'timeout'` and `status: 0`.
-   * `result.retry()` starts a fresh budget. Non-positive or omitted means no
-   * timeout.
+   * `result.retry()` starts a fresh budget. Non-positive means no timeout and
+   * stops the fallback to the client's `ApiConfig.timeout`; omitted falls back
+   * to it (and to none if that is unset too).
    *
    * This also bounds a middleware that never looks at the signal: one stuck
    * awaiting work of its own (a stalled token refresh) cannot hold the call
@@ -476,7 +477,9 @@ export interface CallOptions {
   signal?: AbortSignal
 
   /**
-   * Overrides `RequestConfig.timeout` for this call only. Same whole-operation
+   * Overrides `RequestConfig.timeout` (and the client's `ApiConfig.timeout`)
+   * for this call only; the precedence is call, endpoint, client, and `0` at
+   * any level stops the fallback. Same whole-operation
    * deadline semantics — see there for details. Non-positive means no timeout.
    *
    * Under `share: true` this bounds only *this* caller's wait. The operation's
@@ -643,6 +646,17 @@ export interface ApiConfig<TRequests extends Record<string, unknown>> {
   requests: TRequests
 
   /**
+   * A deadline for every call this client makes, in milliseconds. No default.
+   *
+   * The most specific level wins: a per-call `timeout`, then the endpoint's
+   * (`RequestConfig.timeout` / `OperationConfig.timeout`), then this one. `0`
+   * or a negative value at any level means "no deadline" and stops the
+   * fallback, so `timeout: 0` on an endpoint opts it out of this default.
+   * Like every liaise timeout it covers the whole operation, retries included.
+   */
+  timeout?: number
+
+  /**
    * Global middleware applied to every request.
    * Runs first in the middleware chain (before per-request and per-call middleware).
    */
@@ -791,8 +805,9 @@ export interface OperationConfig {
    * {@link RequestConfig.timeout} for the full rationale, which applies
    * identically here — including that it bounds a middleware which never
    * looks at the signal. A timeout produces an error with `kind: 'timeout'` and
-   * `status: 0`. `result.retry()` starts a fresh budget. Non-positive or
-   * omitted means no timeout.
+   * `status: 0`. `result.retry()` starts a fresh budget. Non-positive means no
+   * timeout, and stops the fallback to the client's `GraphQLBaseConfig.timeout`;
+   * omitted falls back to it (and to none if that is unset too).
    */
   timeout?: number
 }
@@ -818,6 +833,17 @@ export interface GraphQLError {
 export interface GraphQLBaseConfig {
   /** The full URL of the GraphQL endpoint, e.g. `'https://api.example.com/graphql'`. */
   endpoint: string
+
+  /**
+   * A deadline for every call this client makes, in milliseconds. No default.
+   *
+   * The most specific level wins: a per-call `timeout`, then the endpoint's
+   * (`RequestConfig.timeout` / `OperationConfig.timeout`), then this one. `0`
+   * or a negative value at any level means "no deadline" and stops the
+   * fallback, so `timeout: 0` on an endpoint opts it out of this default.
+   * Like every liaise timeout it covers the whole operation, retries included.
+   */
+  timeout?: number
 
   /**
    * Global middleware applied to every operation.

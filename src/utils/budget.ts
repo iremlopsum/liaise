@@ -24,15 +24,19 @@ export interface Budget {
  * patience must never shorten a request that other callers are still waiting
  * on. Unshared there is one caller and one operation, so the caller's own
  * signal and per-call timeout are part of it.
+ *
+ * The operation's limit is the endpoint's, falling back to the client's
+ * (`clientTimeout`); an endpoint `timeout: 0` opts out of the client default.
  */
 export function operationBudget(
   callTimeout: number | undefined,
   requestTimeout: number | undefined,
+  clientTimeout: number | undefined,
   callerSignal: AbortSignal | undefined,
   shared: boolean
 ): AbortSignal | undefined {
-  if (shared) return timeoutSignalFor(undefined, requestTimeout)
-  return anySignal([callerSignal, timeoutSignalFor(callTimeout, requestTimeout)])
+  if (shared) return timeoutSignalFor(undefined, requestTimeout, clientTimeout)
+  return anySignal([callerSignal, timeoutSignalFor(callTimeout, requestTimeout, clientTimeout)])
 }
 
 /**
@@ -66,24 +70,27 @@ export function perCallerBudget(
  *
  * @param callTimeout - `CallOptions.timeout`, this caller's patience.
  * @param requestTimeout - `RequestConfig.timeout`, the operation's own limit.
+ * @param clientTimeout - `ApiConfig.timeout`, the client-wide fallback when
+ *   neither the call nor the endpoint defines one.
  * @param callerSignal - `CallOptions.signal`.
  * @param shared - Whether this call may join a shared request.
  */
 export function resolveBudget(
   callTimeout: number | undefined,
   requestTimeout: number | undefined,
+  clientTimeout: number | undefined,
   callerSignal: AbortSignal | undefined,
   shared: boolean
 ): Budget {
   if (!shared) {
     // One signal serves both roles, and the shared identity is part of the
     // contract — callers compare the two fields to test for this case.
-    const signal = operationBudget(callTimeout, requestTimeout, callerSignal, false)
+    const signal = operationBudget(callTimeout, requestTimeout, clientTimeout, callerSignal, false)
     return { operation: signal, perCaller: signal }
   }
 
   return {
-    operation: operationBudget(callTimeout, requestTimeout, callerSignal, true),
+    operation: operationBudget(callTimeout, requestTimeout, clientTimeout, callerSignal, true),
     perCaller: perCallerBudget(callTimeout, callerSignal),
   }
 }
