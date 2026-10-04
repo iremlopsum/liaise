@@ -13,4 +13,9 @@ test('classifies outcomes', async () => {
   assert.equal((await observe(() => new Promise(() => {}), { waitMs: 50 })).outcome, 'still waiting after 0.05s')
   assert.equal((await observe(async () => undefined, {})).outcome, 'resolves with undefined')
   assert.equal((await observe(async () => '', {})).outcome, 'resolves with ""')
+  // A library error class whose instance carries a copied `name` (axios's AxiosError.from does this).
+  class AxiosError extends Error {}
+  assert.equal((await observe(async () => { const e = new AxiosError('x'); e.name = 'Error'; throw e }, {})).outcome, 'throws AxiosError (name: Error)')
+  assert.equal((await observe(async () => { throw new DOMException('t', 'TimeoutError') }, {})).outcome, 'throws TimeoutError')
+  assert.equal((await observe(async () => { throw new TypeError('t') }, {})).outcome, 'throws TypeError')
 })

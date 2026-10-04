@@ -3,7 +3,7 @@ import { startServer, deadUrl } from './server.mjs'
 
 const user = { id: '1', name: 'Ada' }
 
-/** @typedef {{ id: string, title: string, run: (variant, contenderName) => Promise<{ outcome: string, ms: number }> }} Scenario */
+/** @typedef {{ id: string, title: string, run: (variant) => Promise<{ outcome: string, ms: number }> }} Scenario */
 
 const withServer = async (variant, fn) => {
   const server = await startServer()
@@ -20,7 +20,7 @@ export const scenarios = [
   { id: 'offline', title: 'Server unreachable',
     run: async v => { const c = v.create({ baseUrl: await deadUrl(), auth: { access: 'x', refresh: 'r1' } }); return observe(() => c.getJson('/s/ok'), { expected: { ok: true } }) } },
   { id: 'hang', title: 'Server never answers',
-    run: v => withServer(v, c => observe(() => c.getJson('/s/hang'), { expected: { ok: true }, waitMs: 10_000 })) },
+    run: v => withServer(v, c => observe(() => c.getJson('/s/hang'), { expected: { ok: true }, waitMs: 15_000 })) },
   { id: 'broken-json', title: '200 with broken JSON',
     run: v => withServer(v, c => observe(() => c.getJson('/s/broken-json'), { expected: { ok: true } })) },
   { id: 'empty-204', title: '204 with no body, on a JSON call',

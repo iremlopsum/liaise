@@ -12,8 +12,9 @@ const DOCS = {
   retry: `${README}#retry`,
   parseJson: `${README}#parsejson`,
   cancel: `${README}#cancellation`,
-  beforeRequest: `${README}#hooksbeforerequest`,
-  afterResponse: `${README}#hooksafterresponse`,
+  beforeRetry: `${README}#hooksbeforeretry`,
+  faqAuth: `${README}#how-do-i-add-authentication-headers-to-every-request`,
+  faqRefresh: `${README}#how-do-i-implement-token-refresh-on-401-responses`,
 }
 
 // Standard Schema, hand-built so the harness needs no validator dependency.
@@ -71,22 +72,29 @@ function createConfigured({ baseUrl, auth }) {
     return http.get('/s/search', { searchParams: { q }, signal: searchController.signal }).json()
   }
 
-  // Token refresh, following the readme's `hooks.afterResponse` example ("Or retry with a
-  // fresh token on a 401 error", DOCS.afterResponse), adapted to this server: the refresh
-  // endpoint takes the refresh token in its body. The bearer header is set in
-  // `hooks.beforeRequest`, as in that section's example (DOCS.beforeRequest).
+  // Token refresh, following the readme's FAQ "How do I implement token refresh on 401
+  // responses?" (DOCS.faqRefresh): `retry: { statusCodes: [401] }` plus a `beforeRetry` hook
+  // (DOCS.beforeRetry) that calls a user-supplied `refreshToken()` and sets the new header.
+  // The bearer is set first in `hooks.beforeRequest`, the readme's FAQ "How do I add
+  // authentication headers to every request?" (DOCS.faqAuth).
+  // hand-written: `refreshToken()` shares one in-flight promise, and skips the refresh when
+  // another call already replaced the token this request was sent with. This is the same
+  // guard the fetch, axios and ofetch contenders get.
+  let refreshing = null
+  function refreshToken() {
+    refreshing ??= ky.post(`${baseUrl}/s/refresh`, { json: { token: auth.refresh } }).json()
+      .then(t => { Object.assign(auth, t) })
+      .finally(() => { refreshing = null })
+    return refreshing
+  }
   const authed = http.extend({
+    retry: { statusCodes: [401] },
     hooks: {
       beforeRequest: [({ request }) => { request.headers.set('authorization', `Bearer ${auth.access}`) }],
-      afterResponse: [
-        async ({ request, response, retryCount }) => {
-          if (response.status === 401 && retryCount === 0) {
-            const t = await ky.post(`${baseUrl}/s/refresh`, { json: { token: auth.refresh } }).json()
-            Object.assign(auth, t)
-            const headers = new Headers(request.headers)
-            headers.set('authorization', `Bearer ${t.access}`)
-            return ky.retry({ request: new Request(request, { headers }), code: 'TOKEN_REFRESHED' })
-          }
+      beforeRetry: [
+        async ({ request }) => {
+          if (request.headers.get('authorization') === `Bearer ${auth.access}`) await refreshToken()
+          request.headers.set('authorization', `Bearer ${auth.access}`)
         },
       ],
     },
@@ -114,7 +122,7 @@ export default {
     configured: { create: createConfigured, notes: {
       getJson: `timeout: 3000 (${DOCS.timeout}); parseJson handles an empty body (${DOCS.parseJson})`,
       search: `hand-written: abort the previous call with signal + AbortController (${DOCS.cancel})`,
-      getWithAuth: `hooks.afterResponse token refresh, the readme's example (${DOCS.afterResponse})`,
+      getWithAuth: `hand-written: one shared refresh promise in beforeRetry (readme FAQ: token refresh, ${DOCS.faqRefresh})`,
       getWithDeadline: `timeout: 3000, totalTimeout: 3000, retry: { limit: 3 } (${DOCS.totalTimeout}, ${DOCS.retry})`,
       getValidated: `.json(schema), Standard Schema (${DOCS.json})`,
     } },

@@ -5,6 +5,17 @@ import { readFileSync } from 'node:fs'
 // liaise's `exports` does not expose ./package.json, so read it from disk.
 const pkg = JSON.parse(readFileSync(new URL('../node_modules/liaise/package.json', import.meta.url), 'utf8'))
 
+// Doc source: liaise's README. Anchors are for the restructured README on this branch.
+const README = 'https://github.com/iremlopsum/liaise/blob/main/README.md'
+const DOCS = {
+  timeout: `${README}#cancelling-deadlines-and-stale-requests`,
+  dedupe: `${README}#drop-stale-calls-with-dedupe`,
+  share: `${README}#add-an-auth-header-and-refresh-the-token-on-a-401`,
+  responseType: `${README}#reading-responses`,
+  schema: `${README}#validating-responses`,
+  retry: `${README}#retries-caching-and-logging`,
+}
+
 const userSchema = { // Standard Schema, hand-built so the harness needs no validator dependency
   '~standard': { version: 1, vendor: 'compare', validate: v =>
     v && typeof v.id === 'string' && typeof v.name === 'string' ? { value: v } : { issues: [{ message: 'name must be a string' }] } },
@@ -25,6 +36,9 @@ function make({ baseUrl, auth }, configured) {
     ctx.request.headers.set('authorization', `Bearer ${auth.access}`)
     return next()
   }
+  // Configured options: `timeout` (DOCS.timeout), `responseType: 'none'` (DOCS.responseType),
+  // `dedupe` (DOCS.dedupe), `share` on the refresh call (DOCS.share, the auth recipe),
+  // `retryMiddleware` (DOCS.retry), `schema` (DOCS.schema).
   const api = createApi({
     baseUrl,
     requests: {
@@ -58,9 +72,11 @@ export default {
   variants: {
     default: { create: ctx => make(ctx, false), notes: { getWithAuth: 'same refresh middleware, without share' } },
     configured: { create: ctx => make(ctx, true), notes: {
-      getJson: 'timeout: 3000; responseType: \'none\' for the 204',
-      search: 'dedupe: true', getWithAuth: 'share: true on refresh (README recipe)',
-      getWithDeadline: 'timeout: 3000 + retryMiddleware({ max: 3 })', getValidated: 'schema (Standard Schema)',
+      getJson: `timeout: 3000 (${DOCS.timeout}); responseType: 'none' for the 204 (${DOCS.responseType})`,
+      search: `dedupe: true (${DOCS.dedupe})`,
+      getWithAuth: `share: true on refresh, the README recipe (${DOCS.share})`,
+      getWithDeadline: `timeout: 3000 (${DOCS.timeout}) + retryMiddleware({ max: 3 }) (${DOCS.retry})`,
+      getValidated: `schema, Standard Schema (${DOCS.schema})`,
     } },
   },
 }

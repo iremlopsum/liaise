@@ -14,7 +14,7 @@ for (const s of scenarios) {
   const results = {}
   await Promise.all(contenders.flatMap(c => ['default', 'configured'].map(async variant => {
     results[c.name] ??= { notes: c.variants.configured.notes, defaultNotes: c.variants.default.notes }
-    results[c.name][variant] = await s.run(c.variants[variant], c.name)
+    results[c.name][variant] = await s.run(c.variants[variant])
   })))
   out.scenarios.push({ id: s.id, title: s.title, results })
   console.log('done')
