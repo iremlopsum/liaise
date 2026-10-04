@@ -87,7 +87,7 @@ describe('empty JSON body — 4.0.0 rule', () => {
 
 // -----------------------------------------------------------------------------
 // Critical 1: the empty-JSON sentinel escaping into `error.body` on a non-2xx
-// response. `parseResponse`'s `json` branch returns the module-private
+// response. `decodeBody`'s `json` branch returns the module-private
 // EMPTY_JSON_BODY symbol for an empty body; the success path normalizes it
 // to `null`, but the `!response.ok` call site originally did not, so the
 // symbol reached `ApiError.body` directly. Silent to the type checker

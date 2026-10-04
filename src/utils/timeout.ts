@@ -4,9 +4,10 @@
 //
 // Both createApi and createGraphQL resolve a whole-operation deadline the
 // same way: a per-call timeout beats a per-request (or per-operation) one,
-// and anything non-positive means "no timeout". This one function is the
-// single source of truth for that precedence — see RequestConfig.timeout and
-// CallOptions.timeout for the user-facing contract.
+// which beats the client's, and anything non-positive means "no timeout".
+// This one function is the single source of truth for that precedence — see
+// RequestConfig.timeout, CallOptions.timeout and ApiConfig.timeout for the
+// user-facing contract.
 // =============================================================================
 
 /**
@@ -36,8 +37,10 @@ function timeoutSignal(ms: number): AbortSignal {
  * Resolves the effective timeout into an `AbortSignal.timeout()` signal, or
  * `undefined` when no timeout applies.
  *
- * Precedence: per-call beats per-request/per-operation; non-positive (or
- * both omitted) means none.
+ * Precedence: per-call, then per-request/per-operation, then client — the
+ * first DEFINED level wins. Non-positive at that level means none and stops
+ * the fallback (so an endpoint's `timeout: 0` opts out of the client's
+ * default); all omitted also means none.
  *
  * `AbortSignal.timeout()` accepts only an integer in `[0, 2^31 - 1]` and
  * throws a `RangeError` for anything else, so the value is normalised before
@@ -57,17 +60,20 @@ function timeoutSignal(ms: number): AbortSignal {
  * @param callTimeout - `CallOptions.timeout` for this specific call.
  * @param requestTimeout - `RequestConfig.timeout` / `OperationConfig.timeout`
  *   for the endpoint or operation.
+ * @param clientTimeout - `ApiConfig.timeout` / `GraphQLBaseConfig.timeout`,
+ *   the client-wide default. Optional so two-argument callers keep compiling.
  */
 export function timeoutSignalFor(
   callTimeout: number | undefined,
-  requestTimeout: number | undefined
+  requestTimeout: number | undefined,
+  clientTimeout?: number
 ): AbortSignal | undefined {
   // Math.min first so Infinity becomes the ceiling rather than surviving into
   // a later Math.floor. The `raw > 0` test happens BEFORE flooring: flooring
   // first would turn any 0 < raw < 1 deadline into 0, which then fails this
   // very test and disables the timeout entirely — the bug this guards
   // against. NaN also falls out here, since `NaN > 0` is false.
-  const raw = Math.min(callTimeout ?? requestTimeout ?? 0, 2 ** 31 - 1)
+  const raw = Math.min(callTimeout ?? requestTimeout ?? clientTimeout ?? 0, 2 ** 31 - 1)
   if (!(raw > 0)) return undefined
   // A genuine positive deadline always yields at least 1ms, even when it
   // floors to 0 (e.g. `timeout: 0.5`) — flooring to nothing would silently

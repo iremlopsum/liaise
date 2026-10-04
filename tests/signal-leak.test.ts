@@ -20,10 +20,11 @@ async function runMany(call: (signal: AbortSignal) => Promise<unknown>) {
 
 describe('a long-lived caller signal ends with no listeners', () => {
   // [name, request config, per-call timeout]. With any timeout the operation
-  // budget is a fresh merge and every later merge (dedupe, share) listens to
-  // THAT, not to the caller's signal. The `no timeout` rows are the search-box
-  // case: the caller's signal is the budget itself, so the dedupe merge is
-  // the one listening to it, and only releasing that merge clears it.
+  // budget is a fresh merge and every later listener (the dedupe merge, the
+  // share step's wait in core) listens to THAT, not to the caller's signal.
+  // The `no timeout` rows are the search-box case: the caller's signal is the
+  // budget itself, so the dedupe merge, or a shared call's wait on its round
+  // trip, listens to it directly and must let go once the call settles.
   const cases: Array<[string, Partial<RequestConfig>, number | undefined]> = [
     ['plain', {}, 5000],
     ['dedupe', { dedupe: true }, 5000],
@@ -31,6 +32,7 @@ describe('a long-lived caller signal ends with no listeners', () => {
     ['timeout', { timeout: 5000 }, 5000],
     ['dedupe + timeout', { dedupe: true, timeout: 5000 }, 5000],
     ['share', { share: true }, 5000],
+    ['share, no timeout', { share: true }, undefined],
     ['share + timeout', { share: true, timeout: 5000 }, 5000],
   ]
 
@@ -39,6 +41,18 @@ describe('a long-lived caller signal ends with no listeners', () => {
     const get = new Request<Record<string, never>, unknown>({ method: 'GET', path: '/x', ...extra })
     const api = createApi({ baseUrl: 'https://x.test', requests: { get } })
     expect(await runMany(signal => api.get({}, { signal, timeout }))).toBe(0)
+  })
+
+  // Under share a caller waits on its own budget merged with any signal a
+  // middleware installed. With no timeout the budget IS the caller's signal,
+  // so that merge listens to it directly and must be released once the call
+  // settles — one retained listener per call otherwise.
+  it('share, with a middleware-installed signal and no timeout', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => json({ ok: true })))
+    const installs: Middleware = (ctx, next) => { ctx.request.signal = new AbortController().signal; return next() }
+    const get = new Request<Record<string, never>, unknown>({ method: 'GET', path: '/x', share: true })
+    const api = createApi({ baseUrl: 'https://x.test', requests: { get }, middleware: [installs] })
+    expect(await runMany(signal => api.get({}, { signal }))).toBe(0)
   })
 
   it('with a retrying middleware', async () => {
@@ -57,6 +71,27 @@ describe('a long-lived caller signal ends with no listeners', () => {
     vi.stubGlobal('fetch', vi.fn(async () => json({ data: { me: { id: '1' } } })))
     const me = new Operation<Record<string, never>, unknown>({ operation: gql`query { me { id } }`, dedupe: true, timeout })
     const client = createGraphQL({ endpoint: 'https://x.test/graphql', operations: { me } })
+    expect(await runMany(signal => client.me({}, { signal }))).toBe(0)
+  })
+
+  // GraphQL's share step, the same as REST's rows above: with no timeout the
+  // caller's signal is the budget itself, and a shared operation's wait on
+  // its round trip listens to it directly.
+  it.each([
+    ['', 5000],
+    [', no timeout', undefined],
+  ])('on the GraphQL client with share%s', async (_name, timeout) => {
+    vi.stubGlobal('fetch', vi.fn(async () => json({ data: { me: { id: '1' } } })))
+    const me = new Operation<Record<string, never>, unknown>({ operation: gql`query { me { id } }`, share: true, timeout })
+    const client = createGraphQL({ endpoint: 'https://x.test/graphql', operations: { me } })
+    expect(await runMany(signal => client.me({}, { signal }))).toBe(0)
+  })
+
+  it('on the GraphQL client with share, a middleware-installed signal and no timeout', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => json({ data: { me: { id: '1' } } })))
+    const installs: Middleware = (ctx, next) => { ctx.request.signal = new AbortController().signal; return next() }
+    const me = new Operation<Record<string, never>, unknown>({ operation: gql`query { me { id } }`, share: true })
+    const client = createGraphQL({ endpoint: 'https://x.test/graphql', middleware: [installs], operations: { me } })
     expect(await runMany(signal => client.me({}, { signal }))).toBe(0)
   })
 })

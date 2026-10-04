@@ -1,6 +1,9 @@
 import { describe, it, expect, beforeAll, afterAll, afterEach, vi } from 'vitest'
+import { AsyncLocalStorage } from 'node:async_hooks'
 import { createApi } from '../../src/create-api.js'
 import { Request } from '../../src/request.js'
+import { defineRequest } from '../../src/define-request.js'
+import type { Middleware } from '../../src/types.js'
 import { retryMiddleware, cacheMiddleware, logMiddleware } from '../../src/built-in-middleware.js'
 import { startServer, type TestServer } from './server.js'
 
@@ -319,19 +322,18 @@ describe('onError', () => {
     expect(onError).not.toHaveBeenCalled()
   })
 
-  // Round 3 review, Finding 1: parseResponse doesn't just parse — it
-  // performs the network body read (response.text()/.blob()/etc.), so an
-  // abort landing AFTER headers arrive (a component unmounting mid-download)
-  // used to surface in the success-path `catch (parseErr)` block, which had
-  // no provenance check: `kind: 'parse'`, `status: 200`, and — worse for
-  // this describe block — reported to onError, mislabelling a user's own
+  // Round 3 review, Finding 1: the network body read (response.text()/
+  // .blob()/etc., today in `sendExchange`, src/utils/exchange.ts) happens
+  // after the headers arrive, so an abort landing then (a component unmounting
+  // mid-download) used to surface in the success-path parse catch, which had
+  // no provenance check: `kind: 'parse'`, `status: 200`, and — worse for this
+  // describe block — reported to onError, mislabelling a user's own
   // cancellation as "the server responded but the body would not parse".
   // graphql.ts already got this right by accident of structure (its network
   // read is outside its own JSON.parse try); this is REST's real-server
-  // reproduction of the same scenario, using a server that sends real
-  // headers, a real partial body, then genuinely pauses — so the abort lands
-  // while parseResponse's response.text() is actually in flight, not
-  // simulated.
+  // reproduction of the same scenario, using a server that sends real headers,
+  // a real partial body, then genuinely pauses — so the abort lands while that
+  // response.text() is actually in flight, not simulated.
   it('does not report a real abort that lands mid-body-download as a parse failure', async () => {
     const onError = vi.fn()
     const slowBody = new Request<Record<string, never>, unknown>({
@@ -356,13 +358,13 @@ describe('onError', () => {
     expect(onError).not.toHaveBeenCalled()
   })
 
-  // Round 4 review, Finding 2: the !response.ok branch reads the error
-  // body too (parseResponse again), and its catch swallowed EVERYTHING into
-  // body: null with no provenance check — so an abort landing while an
-  // error body downloads used to misreport as a genuine 'http' error
-  // (status 503, body null) instead of the user's own cancellation. Same
-  // user action as the 2xx test above; only the server's status code used
-  // to decide which story the caller got.
+  // Round 4 review, Finding 2: the !response.ok branch reads the error body
+  // too (the same read, now in `sendExchange`), and its catch swallowed
+  // EVERYTHING into body: null with no provenance check — so an abort landing
+  // while an error body downloads used to misreport as a genuine 'http' error
+  // (status 503, body null) instead of the user's own cancellation. Same user
+  // action as the 2xx test above; only the server's status code used to decide
+  // which story the caller got.
   it('does not report a real abort that lands mid-error-body-download as an http error', async () => {
     const onError = vi.fn()
     const slowBodyError = new Request<Record<string, never>, unknown>({
@@ -387,8 +389,8 @@ describe('onError', () => {
 
   // Control, reworded (round 5 review, Finding M3): /slow-body-error writes
   // '{"partial":true,' then finishes with '"done":true}' -- the ASSEMBLED
-  // body ('{"partial":true,"done":true}') is valid JSON, so parseResponse
-  // succeeds here and the new abort-provenance catch above is never
+  // body ('{"partial":true,"done":true}') is valid JSON, so `decodeBody`
+  // succeeds here and the non-2xx decode catch in create-api.ts is never
   // entered at all; `error.body` is the parsed object, not null. This does
   // NOT exercise that catch's fallback branch (see
   // tests/parse-errors.test.ts's "classifies as http with a null body..."
@@ -396,8 +398,8 @@ describe('onError', () => {
   // genuinely unparseable body). What this control proves is narrower but
   // still real: the slow-but-uncancelled non-2xx path completes end to end
   // over a real connection -- real status, a real (parsed) body, classified
-  // 'http', reported once -- unaffected by the new check that only
-  // activates on an aborted signal.
+  // 'http', reported once -- unaffected by the abort check in
+  // `sendExchange`, which only activates on an aborted signal.
   it('completes a slow (but uncancelled) non-2xx response normally, end to end', async () => {
     const onError = vi.fn()
     const slowBodyError = new Request<Record<string, never>, { partial: boolean; done: boolean }>({
@@ -570,7 +572,7 @@ describe('REST — a hung middleware against a real server', () => {
   })
 })
 
-describe('REST — share keys params by content (4.4.3)', () => {
+describe('REST — share decides on what is sent: identical requests share, different ones do not (4.4.3, 5.1.0)', () => {
   it('two different nested-Date payloads make two real requests, each answered with its own body', async () => {
     const echo = new Request<{ since: Date }, { body: { since: string } }>({
       method: 'POST',
@@ -604,6 +606,33 @@ describe('REST — share keys params by content (4.4.3)', () => {
     expect(server.callCounts.get('POST /echo')).toBe(1)
     expect(ra.data?.body.since).toBe(d.toISOString())
     expect(rb.data?.body.since).toBe(d.toISOString())
+  })
+})
+
+describe('REST — share decides on what is sent (5.1.0)', () => {
+  const whoami = () => defineRequest<{ authorization: string | null }>()({ method: 'GET', path: '/whoami', share: true })
+
+  it('sends one request for identical concurrent calls', async () => {
+    const api = createApi({ baseUrl: server.baseUrl, requests: { whoami: whoami() } })
+    const rs = await Promise.all([api.whoami(), api.whoami(), api.whoami()])
+    expect(server.callCounts.get('GET /whoami')).toBe(1)
+    expect(rs.every(r => r.error === null)).toBe(true)
+  })
+
+  it('sends one request per user when a global middleware adds the user', async () => {
+    const current = new AsyncLocalStorage<string>()
+    const auth: Middleware = (ctx, next) => {
+      ctx.request.headers.set('authorization', `Bearer ${current.getStore()}`)
+      return next()
+    }
+    const api = createApi({ baseUrl: server.baseUrl, middleware: [auth], requests: { whoami: whoami() } })
+    const [alice, bob] = await Promise.all([
+      current.run('alice', () => api.whoami()),
+      current.run('bob', () => api.whoami()),
+    ])
+    expect(server.callCounts.get('GET /whoami')).toBe(2)
+    expect(alice.data?.authorization).toBe('Bearer alice')
+    expect(bob.data?.authorization).toBe('Bearer bob')
   })
 })
 

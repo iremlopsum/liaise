@@ -5,6 +5,84 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [5.1.0] — 2026-10-04
+
+Fixes a security bug in `share`: on a server, one user's response could be handed to
+another. Also adds GraphQL `share`, a `timeout` option, a `log` option and
+`getHeaders()`. See [MIGRATION.md](./MIGRATION.md#upgrading-to-510).
+
+### Security
+
+- **`share` now compares what is actually sent.** It used to compare the call's
+  params and per-call options and ignore what middleware added. On a server, a shared
+  client whose middleware adds the current user's credentials (a cookie or an
+  `Authorization` header read from the request in flight) could therefore treat two
+  users' calls as the same call and hand one user's response to the other. That can
+  no longer happen: two calls share only when the method, the final URL, the headers
+  after middleware and the body are the same. Each caller runs its own middleware
+  and gets its own `Result`; only the network request is shared.
+
+### Fixed
+
+- **A body that arrived whole is not reported as `'abort'`.** If the signal aborted
+  after the response body was fully received but before it parsed, and the parse then
+  failed, the call returned `kind: 'abort'`. It now returns `kind: 'parse'` for a 2xx
+  response, and `kind: 'http'` with `body: null` for a non-2xx one.
+
+### Added
+
+- **GraphQL `share`** on an `Operation`, with the same semantics as REST. `share`
+  and `dedupe` on one operation throw at `createGraphQL`, as they do at `createApi`.
+- **`timeout` on `createApi` and `createGraphQL`.** There is no default. The first
+  defined level wins: call, then endpoint (or operation), then client. `0` opts out
+  and stops the fallback.
+- **`log` option on both clients.** Off by default. `log: true` prints a line around
+  each call; `{ enabled, data }` turns it off with `enabled: false` and prints the
+  data with `data: true`. It wraps the whole call, including a call a deadline ends,
+  and a call that joined a shared request is tagged `, shared`. It is not a
+  middleware.
+- **`logMiddleware({ enabled, data })`.** `middleware: [logMiddleware]` works
+  unchanged.
+- **`getHeaders()` on every generated method**, REST and GraphQL, including the
+  query and mutation split. It returns configuration headers only: the client's merged with the endpoint's, the
+  endpoint winning, names lowercase. Per-call headers, headers a middleware adds and the
+  derived `Content-Type` are not included. An invalid configured header gives `{}`.
+- New type exports: `LogOptions` (core) and `LogMiddleware` (`liaise/middleware`).
+
+### Changed
+
+- **Middleware runs for every caller that joins a shared request.** A middleware
+  with a side effect now counts once per caller, not once per network request.
+- **`logMiddleware` prints a line pair per caller on a shared endpoint**, tagged
+  `, shared`.
+- **Calls with identical per-call headers or middleware now share.** Before, they
+  never did. Per-call headers that differ still do not share.
+- **`retry()` on a shared result uses the caller's own options**, not the first
+  caller's.
+- **Each sharer gets its own copy of JSON and text data.** Code that relied on two
+  sharers receiving the same object (`a === b`) now sees `false`. A `Blob`,
+  `ArrayBuffer` or `FormData` is still one object.
+- **Calls whose per-call headers differ only in a tracing header now share**, sending
+  the first caller's values. The tracing headers are `traceparent`, `tracestate`,
+  `baggage`, `sentry-trace`, `x-request-id` and `x-correlation-id`.
+- **Params that used to decline sharing are compared as sent.** A `BigInt`, an object
+  with hidden state, a nested `Map` or `Set` and `FormData` params share when the
+  bytes sent are identical. A `FormData`, `Blob`, `ArrayBuffer`, typed array,
+  `DataView` or stream body never shares.
+- **JSON bodies and GraphQL variables with the same keys in a different order no
+  longer share**, because they are different bytes.
+- **`onError` runs once per failed shared request.** A shared request that hangs until
+  the endpoint or client deadline reports once, and a later, different failure reports
+  too. A per-call timeout or abort stays the caller's own.
+- **A hung middleware under `share` reports once per caller**, since each caller runs
+  its own pipeline.
+- **Under `share`, a per-call timeout bounds that caller's own pipeline** and beats the
+  endpoint's for that caller. The endpoint or client timeout bounds the shared request
+  from when it was sent.
+- **A middleware that replaces `ctx.request.signal`, under `share`:** the caller's own
+  signal and the installed one each release only that caller. The shared request
+  listens only to its refcount and its own deadline.
+
 ## [5.0.3] — 2026-10-04
 
 A documentation release. Nothing in the package's behaviour changes. See
@@ -1066,6 +1144,7 @@ Initial release of the rewritten client. Reconstructed from the release commit
   `ArrayBuffer` and strings
 - Response parsing as `json`, `text`, `blob`, `arrayBuffer` or `formData`
 
+[5.1.0]: https://github.com/iremlopsum/liaise/compare/v5.0.3...v5.1.0
 [5.0.3]: https://github.com/iremlopsum/liaise/compare/v5.0.2...v5.0.3
 [5.0.2]: https://github.com/iremlopsum/liaise/compare/v5.0.1...v5.0.2
 [5.0.1]: https://github.com/iremlopsum/liaise/compare/v5.0.0...v5.0.1

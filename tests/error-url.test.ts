@@ -26,12 +26,13 @@ const flush = () => new Promise<void>(resolve => setTimeout(resolve, 0))
  * this repo defines its own fetch helpers.
  */
 function controllable() {
-  const calls: { resolve: () => void; aborted: () => boolean }[] = []
+  const calls: { resolve: () => void; reject: (err: unknown) => void; aborted: () => boolean }[] = []
   const fn = vi.fn((_u: string, init: RequestInit) => new Promise<Response>((res, rej) => {
     const s = init.signal as AbortSignal | undefined
     s?.addEventListener('abort', () => rej(s.reason))
     calls.push({
       resolve: () => res(new Response('{"ok":1}', { status: 200 })),
+      reject: rej,
       aborted: () => !!s?.aborted,
     })
   }))
@@ -214,8 +215,10 @@ describe('share: true callers agree with each other', () => {
     // Pinned as agreement, deliberately separate from the literal-value
     // assertions elsewhere in this file: agreement alone would still pass if
     // both sides regressed to the template together. It fails if only one of
-    // the two learns the real URL — which is what a closure-captured URL
-    // produces, since a joiner never runs its own execute().
+    // the two learns the real URL. Before 5.1.0 a joiner never ran its own
+    // execute(), so a URL captured there would have been empty for it; now
+    // every caller runs its own pipeline and names the URL it was about to
+    // send, which for two callers sharing one request is the same URL.
     const f = controllable()
     vi.stubGlobal('fetch', f.fn)
     const shared = sharedApi()
@@ -232,6 +235,26 @@ describe('share: true callers agree with each other', () => {
     expect(jr.error?.kind).toBe('abort')
     expect(ir.error?.kind).toBe('abort')
     expect(jr.error?.request.url).toBe(ir.error?.request.url)
+  })
+})
+
+describe('error.request.url when a shared request fails', () => {
+  afterEach(() => { vi.restoreAllMocks() })
+
+  it('names the resolved URL in every caller\'s own error', async () => {
+    const f = controllable()
+    vi.stubGlobal('fetch', f.fn)
+    const shared = sharedApi()
+    const all = Promise.all([shared.getUser({ id: '42' }), shared.getUser({ id: '42' })])
+    await flush()
+    expect(f.fn.mock.calls.length).toBe(1)
+    f.calls[0].reject(new TypeError('Failed to fetch'))
+    const [a, b] = await all
+    expect(a.error?.kind).toBe('network')
+    expect(b.error?.kind).toBe('network')
+    expect(a.error).not.toBe(b.error)
+    expect(a.error?.request.url).toBe('https://api.test/users/42')
+    expect(b.error?.request.url).toBe('https://api.test/users/42')
   })
 })
 
@@ -278,10 +301,10 @@ describe('error.request.url when setup threw before the URL was built', () => {
 
   // A BigInt timeout is the cheapest reachable setup failure: TypeScript
   // forbids it, JavaScript callers and `as any` config loaders do not, and it
-  // reaches Math.min inside timeoutSignalFor. Both budget calls that use it run
-  // BEFORE the URL is ever built — operationBudget at Step 2 for an unshared
-  // call, perCallerBudget before acquire() for a shared one. Neither request
-  // resolved a URL for itself; both can still name the one it was for, which is
+  // reaches Math.min inside timeoutSignalFor. callBudget runs at Step 2,
+  // BEFORE the URL is ever built, for every call — a share: true endpoint
+  // included, since sharing happens later, inside core. The request never
+  // resolved a URL for itself; it can still name the one it was for, which is
   // what error.request.url documents.
   it('reports the resolved URL for an unshared call', async () => {
     vi.stubGlobal('fetch', vi.fn())
@@ -291,7 +314,7 @@ describe('error.request.url when setup threw before the URL was built', () => {
     expect(globalThis.fetch).not.toHaveBeenCalled()
   })
 
-  it('reports the resolved URL when the share block itself threw', async () => {
+  it('reports the resolved URL for a share: true endpoint whose setup threw', async () => {
     vi.stubGlobal('fetch', vi.fn())
     const r = await sharedApi().getUser({ id: '42' }, { timeout: 10n as unknown as number })
     expect(r.error).not.toBeNull()

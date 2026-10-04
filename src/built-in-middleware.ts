@@ -14,7 +14,8 @@
 // (`createApi`, `Request`, `composeMiddleware`) works perfectly without them.
 // =============================================================================
 
-import type { Middleware, Result, RetryOptions, RetryInfo } from './types.js'
+import type { Middleware, MiddlewareContext, MiddlewareNext, LogOptions, Result, RetryOptions, RetryInfo } from './types.js'
+import { createLogger, loggerFor } from './utils/log.js'
 import { CacheStore } from './utils/cache.js'
 import { stableKey } from './utils/stable-key.js'
 
@@ -306,6 +307,12 @@ export function retryMiddleware(options: number | RetryOptions = 3): Middleware 
 // logMiddleware
 // -----------------------------------------------------------------------------
 
+/** `logMiddleware` works bare (`middleware: [logMiddleware]`) and with options (`logMiddleware({ data: true })`). */
+export type LogMiddleware = Middleware & ((options?: LogOptions) => Middleware)
+
+const defaultLogger = createLogger(false)
+const passThrough: Middleware = (_ctx, next) => next()
+
 /**
  * Middleware that logs the lifecycle of each API request to the console.
  *
@@ -337,6 +344,16 @@ export function retryMiddleware(options: number | RetryOptions = 3): Middleware 
  * [liaise] ← createUser ERROR 422 (89ms)
  * ```
  *
+ * **Options:**
+ *
+ * Use it bare, or call it with `{ enabled, data }`: `logMiddleware({ data: true })`
+ * also prints each call's data (`console.table` for objects and arrays,
+ * `console.log` otherwise, `error.body` on failure). `enabled: false` makes it
+ * a pass-through. A call that joined a shared request is tagged `, shared`.
+ * The client-level `log` option prints the same lines, but is not a
+ * middleware: it wraps the whole call, so it also logs a call the timeout
+ * backstop ends while a middleware is stuck.
+ *
  * **Usage note:**
  *
  * This middleware is intended for development and debugging. In production,
@@ -350,44 +367,17 @@ export function retryMiddleware(options: number | RetryOptions = 3): Middleware 
  * const api = createApi({
  *   baseUrl: '/api',
  *   requests: { getItems, createUser },
- *   middleware: [logMiddleware],
+ *   middleware: [logMiddleware], // or logMiddleware({ data: true })
  * })
  * ```
  */
-export const logMiddleware: Middleware = async (ctx, next) => {
-  // Capture the start time BEFORE calling next(). We use Date.now() which
-  // returns milliseconds since epoch — simple, universal, good enough for
-  // HTTP request timing.
-  const start = Date.now()
-
-  // Log the outgoing request. The format includes the HTTP method, the
-  // request name (which is the key in the `requests` object passed to
-  // createApi), and the fully resolved URL.
-  console.log(`[liaise] → ${ctx.request.method} ${ctx.requestName} ${ctx.request.url}`)
-
-  // Execute the downstream middleware chain and the core fetch.
-  const result = await next()
-
-  // Calculate how long the entire downstream chain took. This includes
-  // all inner middleware processing time plus the actual HTTP round-trip.
-  const duration = Date.now() - start
-
-  // Log the result. We differentiate between errors and successes so
-  // developers can quickly scan logs for problems.
-  if (result.error) {
-    // Error path: include the HTTP status code so developers can see
-    // whether it's a client error (4xx) or server error (5xx).
-    console.log(`[liaise] ← ${ctx.requestName} ERROR ${result.error.status} (${duration}ms)`)
-  } else {
-    // Success path: just "OK" with timing — the status code (200, 201, etc.)
-    // is less interesting when things work correctly.
-    console.log(`[liaise] ← ${ctx.requestName} OK (${duration}ms)`)
+export const logMiddleware = ((first?: unknown, next?: unknown) => {
+  // Called as a middleware: (ctx, next). Otherwise it is the factory.
+  if (typeof next === 'function') {
+    return defaultLogger(first as MiddlewareContext, next as MiddlewareNext<unknown>)
   }
-
-  // Return the result unchanged. This middleware is purely observational —
-  // it never modifies the request or the response.
-  return result
-}
+  return loggerFor((first as LogOptions | undefined) ?? true) ?? passThrough
+}) as LogMiddleware
 
 // -----------------------------------------------------------------------------
 // cacheMiddleware

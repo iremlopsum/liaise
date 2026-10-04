@@ -242,39 +242,53 @@ export interface RequestConfig {
   dedupe?: boolean
 
   /**
-   * Join identical concurrent calls onto a single in-flight request.
+   * Send one network request for identical concurrent calls, instead of one
+   * each.
+   *
+   * Two calls share only if what they would send is identical: the endpoint,
+   * method, final URL, final headers and body — compared after every
+   * middleware has run, so a header an auth middleware adds (the current
+   * user's token) is part of the comparison. Byte-for-byte identical requests
+   * cannot be told apart by the server either, which is what makes sharing
+   * them safe; anything that differs never shares. Per-call `headers` and
+   * `middleware` are judged the same way: identical ones share, and a
+   * middleware that changes nothing does not stop sharing.
+   *
+   * The tracing headers `traceparent`, `tracestate`, `baggage`,
+   * `sentry-trace`, `x-request-id` and `x-correlation-id` are left out of the
+   * comparison; the shared request goes out with the first caller's values.
+   * A body that can't be compared cheaply and safely — `FormData`, `Blob`,
+   * `ArrayBuffer`, a typed array, `DataView` or `ReadableStream` — never
+   * shares; such a call simply sends its own request. A JSON body is compared
+   * as sent, so the same object with its keys in a different order does not
+   * share.
+   *
+   * Every caller runs its own pipeline and gets its own `Result`: its own
+   * middleware in both directions, its own `data` (decoded from the one
+   * response for each caller; a `Blob`, `ArrayBuffer` or `FormData` is handed
+   * over as-is), and its own `result.retry()`, which re-runs that caller's
+   * own pipeline with that caller's own options.
+   *
+   * `onError` fires once per failed shared request, not once per caller. A
+   * hung shared request reports once: every caller timing out to the
+   * endpoint's (or client's) deadline while waiting is that one failure. If
+   * the request then fails another way for callers still waiting, that
+   * failure reports too. A caller's own cancel or per-call timeout, or an
+   * error its own middleware produces, reports as it would without `share`.
+   *
+   * A caller that gives up — its `signal`, its own deadline, or a signal a
+   * middleware installed — releases only itself: it stops waiting, and the
+   * request goes on for the others. The request is cancelled once every
+   * caller has given up. A per-call {@link CallOptions.timeout} bounds only
+   * its caller. The endpoint's {@link RequestConfig.timeout}, else the
+   * client's {@link ApiConfig.timeout}, bounds the shared request itself,
+   * measured from when it is sent, so a late joiner cannot extend it. A call
+   * arriving after the shared request has settled sends a new one; nothing
+   * is cached.
    *
    * Sibling of {@link RequestConfig.dedupe}, not a replacement: dedupe
    * **cancels** the older request, share **joins** the existing one. Setting
    * both throws at `createApi` time.
-   *
-   * Identity is the request name plus a stable serialisation of the params.
-   * A call carrying per-call `headers` or `middleware` is never shared — those
-   * change *what* is requested, and handing one caller another's response
-   * would be a security-shaped bug. (Emptiness is what counts: `headers: {}`
-   * and `middleware: []` still share.) A per-call `signal` or `timeout` does
-   * not prevent sharing: those bound *who is still waiting*, not what is asked
-   * for, and a sharer that gives up receives its own error `Result`
-   * (`kind: 'timeout'` or `'abort'`), reported to `onError` exactly as the
-   * same non-shared call would — which means a `'timeout'` give-up reports
-   * and an `'abort'` give-up does not (see {@link ApiConfig.onError}). A per-*request*
-   * {@link RequestConfig.timeout}, by contrast, bounds the shared request
-   * itself for everyone.
-   * A call whose params cannot be compared by content is also never shared.
-   * That is, at any depth: a BigInt, a function or symbol, an `ArrayBuffer`,
-   * `Blob`, `FormData` or `URLSearchParams`, a boxed primitive, a circular
-   * structure, or a non-plain object with no enumerable keys (an `Error`, a
-   * class keeping its state in private fields). These are declined because
-   * their content can't be keyed reliably, and a wrong match would hand one
-   * caller the response to another's request. A string, `Date`, `Map`, `Set` or typed
-   * array is compared by content and shares normally.
-   *
-   * `result.retry()` on a shared result re-runs the pipeline using the
-   * **acquiring caller's** own per-call options (headers, signal, timeout) —
-   * whichever call first started the shared request — not the options of
-   * whichever caller happens to invoke `retry()`. This falls out of every
-   * non-aborting sharer receiving the literal same `Result` object; it is
-   * unavoidable given that design, but worth knowing before relying on it.
    *
    * @default false
    */
@@ -322,8 +336,9 @@ export interface RequestConfig {
    * ```
    *
    * A timeout produces an error with `kind: 'timeout'` and `status: 0`.
-   * `result.retry()` starts a fresh budget. Non-positive or omitted means no
-   * timeout.
+   * `result.retry()` starts a fresh budget. Non-positive means no timeout and
+   * stops the fallback to the client's `ApiConfig.timeout`; omitted falls back
+   * to it (and to none if that is unset too).
    *
    * This also bounds a middleware that never looks at the signal: one stuck
    * awaiting work of its own (a stalled token refresh) cannot hold the call
@@ -334,11 +349,11 @@ export interface RequestConfig {
    * afterwards sends nothing. Pass `ctx.request.signal` into such work to
    * actually stop it.
    *
-   * Under {@link RequestConfig.share} this deadline belongs to the *operation*:
-   * it bounds the single shared request, measured from when that request
-   * started rather than from when each caller joined, so every sharer is
-   * bounded by it and no individual caller can extend or disable it. A caller's
-   * own {@link CallOptions.timeout} bounds only that caller.
+   * Under {@link RequestConfig.share} it also bounds the shared request
+   * itself, measured from when that request was sent rather than from when
+   * each caller joined, so no individual caller can extend or disable it. Each
+   * caller's own pipeline is bounded as usual by the first defined of its
+   * {@link CallOptions.timeout}, this, and the client's.
    */
   timeout?: number
 }
@@ -476,12 +491,15 @@ export interface CallOptions {
   signal?: AbortSignal
 
   /**
-   * Overrides `RequestConfig.timeout` for this call only. Same whole-operation
+   * Overrides `RequestConfig.timeout` (and the client's `ApiConfig.timeout`)
+   * for this call only; the precedence is call, endpoint, client, and `0` at
+   * any level stops the fallback. Same whole-operation
    * deadline semantics — see there for details. Non-positive means no timeout.
    *
-   * Under `share: true` this bounds only *this* caller's wait. The operation's
-   * own `RequestConfig.timeout` still bounds the shared request for everyone,
-   * so a per-call `timeout: 0` cannot lift it and a longer per-call timeout
+   * Under `share: true` this bounds only *this* caller. The shared request
+   * has a deadline of its own — `RequestConfig.timeout` (or
+   * `OperationConfig.timeout`), else the client's, from when it was sent — so
+   * a per-call `timeout: 0` cannot lift it and a longer per-call timeout
    * cannot outlast it.
    *
    * A fractional or out-of-range value is normalised rather than rejected:
@@ -526,7 +544,9 @@ export interface MiddlewareContext {
     /** Serialized request body, or null when there is none. */
     body: unknown | null
     /**
-     * The AbortSignal that will be handed to `fetch`.
+     * The AbortSignal that governs this call's request: the one handed to
+     * `fetch`, except when a `share: true` call takes part in a shared
+     * request (below).
      *
      * Middleware may read this, or replace it to impose its own cancellation
      * policy — a timeout, a deadline, or a cancel-on-condition rule. The core
@@ -534,18 +554,28 @@ export interface MiddlewareContext {
      * middleware takes effect. Under `dedupe: true` the replacement is merged
      * into the dedupe signal rather than discarded: the fetch is then
      * cancelled by whichever fires first, the middleware's signal or a newer
-     * call superseding this one. Under `share: true` the shared request's
-     * refcount signal is merged back in the same way, so the request is still
-     * cancelled once every sharer has given up.
+     * call superseding this one.
+     *
+     * Under `share: true`, a call whose body can be compared (none, a
+     * string, `URLSearchParams`) takes part in a shared request, even when
+     * it is the only caller. That request is sent with a signal of its own
+     * and is cancelled only once every caller has given up. For this caller,
+     * the field as it is when `next()` reaches the core fetch is merged with
+     * the caller's own `signal` and deadline: whichever fires first, this
+     * caller alone stops waiting. A replacement that never fires therefore
+     * cannot keep a caller waiting past its own cancel. A `share: true` call
+     * whose body can't be compared (`FormData`, `Blob`, `ArrayBuffer`, a
+     * typed array, `DataView`, a stream) sends its own request with this
+     * field, exactly as without `share`.
      *
      * While middleware runs — before `next()` reaches the core fetch — this
      * holds the caller's `CallOptions.signal` merged with the timeout signal
-     * (via `anySignal`) when a `timeout` is configured on the request,
-     * operation, or call. It is `undefined` only when neither is present —
-     * no `CallOptions.signal` and no effective `timeout`. This is true
-     * whether or not dedupe is enabled: the dedupe signal is installed here
-     * by the core fetch, so middleware only observes it after `next()`
-     * returns.
+     * (via `anySignal`) when a `timeout` applies — the call's, else the
+     * request's or operation's, else the client's. It is `undefined` only
+     * when neither is present — no `CallOptions.signal` and no effective
+     * `timeout`. This is true whether or not dedupe is enabled: the dedupe
+     * signal is installed here by the core fetch, so middleware only
+     * observes it after `next()` returns.
      *
      * @example
      * ```ts
@@ -606,6 +636,20 @@ export type Middleware = (context: MiddlewareContext, next: MiddlewareNext<unkno
 // API Config
 // ---------------------------------------------------------------------------
 
+/** Options for the `log` setting on `createApi`/`createGraphQL`, and for `logMiddleware(…)`. */
+export interface LogOptions {
+  /** Turn logging on or off. Defaults to `true` when an options object is given. */
+  enabled?: boolean
+  /**
+   * Also print each call's data — an object or array with `console.table`,
+   * anything else with `console.log` — or, on failure, `error.body`. Off by
+   * default: responses often hold personal data and tokens, and a large list
+   * makes the console noisy and slow.
+   * @default false
+   */
+  data?: boolean
+}
+
 /**
  * Configuration for the `createApi` constructor.
  *
@@ -641,6 +685,31 @@ export interface ApiConfig<TRequests extends Record<string, unknown>> {
    * @example { getUser, listUsers, createUser } → api.getUser(), api.listUsers(), etc.
    */
   requests: TRequests
+
+  /**
+   * A deadline for every call this client makes, in milliseconds. No default.
+   *
+   * The most specific level wins: a per-call `timeout`, then the endpoint's
+   * (`RequestConfig.timeout` / `OperationConfig.timeout`), then this one. `0`
+   * or a negative value at any level means "no deadline" and stops the
+   * fallback, so `timeout: 0` on an endpoint opts it out of this default.
+   * Like every liaise timeout it covers the whole operation, retries included.
+   * Under `share`, it is also the shared request's deadline when the endpoint
+   * sets none, measured from when that request is sent.
+   */
+  timeout?: number
+
+  /**
+   * Log every call to the console: `true`, or `{ enabled, data }`. Off by
+   * default. Pass an environment flag to switch it per environment, e.g.
+   * `log: import.meta.env.DEV`. The logger is not a middleware: it wraps the
+   * whole call, outside all middleware and the timeout backstop, so each call
+   * logs once, with its final outcome — after retries, and at its deadline
+   * when a stuck middleware leaves the backstop to end it. A call whose setup
+   * fails before anything runs (a refused param) logs nothing. A call that
+   * joined a shared request is tagged `, shared`.
+   */
+  log?: boolean | LogOptions
 
   /**
    * Global middleware applied to every request.
@@ -771,6 +840,43 @@ export interface OperationConfig {
   dedupe?: boolean
 
   /**
+   * Join an identical operation already in flight instead of sending your own.
+   *
+   * "Identical" means what would be sent: the operation name, the endpoint,
+   * the headers (after every middleware has run, so a header an auth
+   * middleware adds — the current user's token — is part of the comparison;
+   * the tracing headers `traceparent`, `tracestate`, `baggage`,
+   * `sentry-trace`, `x-request-id` and `x-correlation-id` are left out, and
+   * the shared request goes out with the first caller's values) and the body:
+   * the query and variables as serialised, so variables in a different key
+   * order do not share. Anything that differs never shares.
+   *
+   * Each caller still runs its own middleware and gets its own `Result`, with
+   * its own `data` (or `partialData`) parsed from the one response, and its
+   * own `result.retry()`. `onError` fires once per failed shared operation,
+   * not once per caller, a hung one included: every caller timing out to this
+   * operation's (or the client's) deadline while waiting is that one failure.
+   * A caller's own cancel or per-call timeout, or an error its own middleware
+   * produces, reports as it would without `share`.
+   *
+   * A caller that gives up — its `signal`, its own deadline, or a signal a
+   * middleware installed — releases only itself; the request is cancelled
+   * once every caller has given up. A per-call {@link CallOptions.timeout}
+   * bounds only its caller. {@link OperationConfig.timeout}, else the
+   * client's {@link GraphQLBaseConfig.timeout}, bounds the shared request
+   * itself, measured from when it is sent. A call arriving after the shared
+   * operation has settled sends a new one; nothing is cached.
+   *
+   * Allowed on mutations, where it merges identical concurrent calls into one
+   * — usually wanted for reads and refresh-style calls, rarely for writes.
+   * Cannot be combined with `dedupe`: setting both throws at `createGraphQL`
+   * time.
+   *
+   * @default false
+   */
+  share?: boolean
+
+  /**
    * Optional runtime validation of the GraphQL response's `data`.
    *
    * Same contract as `RequestConfig.schema`: any Standard Schema validator, no
@@ -791,8 +897,13 @@ export interface OperationConfig {
    * {@link RequestConfig.timeout} for the full rationale, which applies
    * identically here — including that it bounds a middleware which never
    * looks at the signal. A timeout produces an error with `kind: 'timeout'` and
-   * `status: 0`. `result.retry()` starts a fresh budget. Non-positive or
-   * omitted means no timeout.
+   * `status: 0`. `result.retry()` starts a fresh budget. Non-positive means no
+   * timeout, and stops the fallback to the client's `GraphQLBaseConfig.timeout`;
+   * omitted falls back to it (and to none if that is unset too).
+   *
+   * Under {@link OperationConfig.share} it also bounds the shared request
+   * itself, measured from when that request was sent rather than from when
+   * each caller joined, so no individual caller can extend or disable it.
    */
   timeout?: number
 }
@@ -820,6 +931,31 @@ export interface GraphQLBaseConfig {
   endpoint: string
 
   /**
+   * A deadline for every call this client makes, in milliseconds. No default.
+   *
+   * The most specific level wins: a per-call `timeout`, then the endpoint's
+   * (`RequestConfig.timeout` / `OperationConfig.timeout`), then this one. `0`
+   * or a negative value at any level means "no deadline" and stops the
+   * fallback, so `timeout: 0` on an endpoint opts it out of this default.
+   * Like every liaise timeout it covers the whole operation, retries included.
+   * Under `share`, it is also the shared request's deadline when the
+   * operation sets none, measured from when that request is sent.
+   */
+  timeout?: number
+
+  /**
+   * Log every call to the console: `true`, or `{ enabled, data }`. Off by
+   * default. Pass an environment flag to switch it per environment, e.g.
+   * `log: import.meta.env.DEV`. The logger is not a middleware: it wraps the
+   * whole call, outside all middleware and the timeout backstop, so each call
+   * logs once, with its final outcome — after retries, and at its deadline
+   * when a stuck middleware leaves the backstop to end it. A call whose setup
+   * fails before anything runs (variables that can't be serialised) logs
+   * nothing. A call that joined a shared request is tagged `, shared`.
+   */
+  log?: boolean | LogOptions
+
+  /**
    * Global middleware applied to every operation.
    * Runs first in the middleware chain (before per-operation and per-call middleware).
    */
@@ -845,4 +981,22 @@ export interface GraphQLBaseConfig {
    * callback is suppressed.
    */
   onError?: (error: ApiError) => void
+}
+
+/**
+ * Extra members on every generated method (`api.x`, `gql.x`, `gql.query.x`,
+ * `gql.mutation.x`), intersected with the call signature. Lives here, with the
+ * other shared types, so both clients import it without an import cycle.
+ */
+export type EndpointExtras = {
+  /**
+   * The headers this endpoint sends from configuration — client headers
+   * merged with the endpoint's (endpoint wins), lowercase names, as a fresh
+   * plain object on every call. Read-only: changing it changes nothing.
+   * Per-call headers, headers a middleware adds and the Content-Type liaise
+   * derives from the body are not included: they only exist once a call happens.
+   * An invalid configured header (a non-Latin-1 value, a name with a space)
+   * gives `{}` rather than a throw.
+   */
+  getHeaders(): Record<string, string>
 }

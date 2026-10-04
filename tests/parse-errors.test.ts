@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { createApi } from '../src/create-api.js'
 import { Request } from '../src/request.js'
+import { createGraphQL, Operation } from '../src/graphql.js'
 
 const api = () => createApi({
   baseUrl: '',
@@ -84,5 +85,71 @@ describe('a 5xx with an unparseable body is unaffected by this task', () => {
     })
     await a.g()
     expect((globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls.length).toBe(3)
+  })
+})
+
+// The one classification the exchange refactor changed on purpose. Both
+// clients used to check "is the signal aborted NOW" when a body failed to
+// decode, so a body that was read in full and THEN failed to parse was
+// reported as an abort if the signal happened to abort in between. Provenance
+// is now decided at the read (src/utils/exchange.ts): only a read that failed
+// while the signal handed to fetch was aborted is an abort. These pin that —
+// restoring the old `signal?.aborted` guard in either decode catch turns them
+// red.
+//
+// The stream enqueues the whole (malformed) body, closes, and aborts the
+// caller's signal in the same pull, so the read completes and the abort lands
+// before decoding runs. `highWaterMark: 0` keeps the stream from pulling until
+// the body is actually read. The backstop allows the chain a macrotask after
+// an abort, and the chain settles within microtasks, so the Result is core's.
+describe('a body read in full, then the signal aborts, then decoding fails', () => {
+  afterEach(() => vi.restoreAllMocks())
+
+  const malformedThenAbort = (ac: AbortController, status: number) =>
+    vi.fn(async () => new Response(
+      new ReadableStream({
+        pull(c) {
+          c.enqueue(new TextEncoder().encode('{bad'))
+          c.close()
+          ac.abort()
+        },
+      }, { highWaterMark: 0 }),
+      { status }
+    ))
+
+  it("REST 2xx: reports kind 'parse' with the real status and Response, not an abort", async () => {
+    const ac = new AbortController()
+    vi.stubGlobal('fetch', malformedThenAbort(ac, 200))
+    const r = await api().g(undefined, { signal: ac.signal })
+    expect(ac.signal.aborted).toBe(true)
+    expect(r.error?.kind).toBe('parse')
+    expect(r.error?.status).toBe(200)
+    expect(r.response).not.toBeNull()
+  })
+
+  it("REST non-2xx: reports kind 'http' with a null body, not an abort", async () => {
+    const ac = new AbortController()
+    vi.stubGlobal('fetch', malformedThenAbort(ac, 500))
+    const r = await api().g(undefined, { signal: ac.signal })
+    expect(ac.signal.aborted).toBe(true)
+    expect(r.error?.kind).toBe('http')
+    expect(r.error?.status).toBe(500)
+    expect(r.error?.body).toBeNull()
+  })
+
+  // graphql.ts's non-2xx catch carried the same guard; its 2xx parse try
+  // never did, so there is no GraphQL 2xx counterpart to pin.
+  it("GraphQL non-2xx: reports kind 'http' with a null body, not an abort", async () => {
+    const ac = new AbortController()
+    vi.stubGlobal('fetch', malformedThenAbort(ac, 500))
+    const client = createGraphQL({
+      endpoint: '/gql',
+      operations: { q: new Operation<Record<string, never>, unknown>({ operation: 'query { q }' }) },
+    })
+    const r = await client.q(undefined, { signal: ac.signal })
+    expect(ac.signal.aborted).toBe(true)
+    expect(r.error?.kind).toBe('http')
+    expect(r.error?.status).toBe(500)
+    expect(r.error?.body).toBeNull()
   })
 })

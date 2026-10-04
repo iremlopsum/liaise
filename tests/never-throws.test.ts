@@ -29,6 +29,25 @@ describe('a throwing middleware never rejects the caller', () => {
     expect((await api.g({ id: '1' })).error!.kind).toBe('middleware')
   })
 
+  // The share step runs inside core's try: building the key, the shared
+  // request's deadline and joining or sending all happen there, so anything
+  // they throw synchronously becomes this caller's Result like a fetch
+  // failure would. A BigInt endpoint timeout is the reachable trigger: a
+  // per-call timeout wins the caller's own budget, so setup never reads the
+  // endpoint's, and the first thing to reach Math.min with it is the shared
+  // request's deadline. Nothing is sent and nothing is left behind.
+  it('shared path returns a Result when the share step itself throws', async () => {
+    const api = createApi({
+      baseUrl: '',
+      requests: { g: new Request<{ id: string }, unknown>({ method: 'GET', path: '/g/:id', share: true, timeout: 10n as unknown as number }) },
+    })
+    const r = await api.g({ id: '1' }, { timeout: 1000 })
+    expect(r.error).not.toBeNull()
+    expect(r.error!.kind).toBe('network')
+    expect(r.error!.body).toBeInstanceOf(TypeError)
+    expect(globalThis.fetch).not.toHaveBeenCalled()
+  })
+
   // NOTE on this test's own history: the brief predicted this one "may
   // already pass before your change, because a synchronous throw from the
   // first middleware surfaces inside execute()'s existing try". That is true
@@ -99,10 +118,14 @@ describe('a throwing middleware never rejects the caller', () => {
 // via `ac.abort(reason)`, exactly as arbitrary as anything a middleware
 // throws — a revoked `Proxy`, a MobX/Vue reactive wrapper, or a class with a
 // lazy `get name()` all reach it. Worse than a rejection: under `share: true`
-// the throw happens inside `onAbort`, called synchronously from inside
-// `ac.abort()`'s own event dispatch, BEFORE `finish(result)` runs — so the
-// caller's promise never settles at all, and the throw escapes out of
-// `ac.abort()` itself into whatever consumer code called it.
+// (before 5.1.0) the throw happened inside the share site's abort listener,
+// called synchronously from inside `ac.abort()`'s own event dispatch, before
+// the caller had a Result — so the caller's promise never settled at all, and
+// the throw escaped out of `ac.abort()` itself into whatever consumer code
+// called it. Since 5.1.0 a sharer that gives up is released by
+// ShareTracker.run, which only rejects with the reason, and the reason is
+// classified in core's catch like any other caller's — the `share: true`
+// rows below pin that it still settles as 'abort' and never rejects.
 // ---------------------------------------------------------------------------
 describe("abortKind's .name read never rejects or hangs the caller", () => {
   afterEach(() => { vi.restoreAllMocks() })
@@ -123,29 +146,23 @@ describe("abortKind's .name read never rejects or hangs the caller", () => {
       baseUrl: '',
       requests: { g: new Request<{ id: string }, unknown>({ method: 'GET', path: '/g/:id', share: true }) },
     })
-    // A SECOND, patient sharer (no signal of its own) is load-bearing here:
-    // with only one sharer, that sharer's own release() would be the LAST
-    // one, synchronously aborting the shared controller with the tracker's
-    // own ABANDONED sentinel — a Symbol, immune to abortKind's `.name`
-    // read — which lets the shared operation's OWN (unrelated, unpoisoned)
-    // settlement path resolve this caller's promise anyway, masking the
-    // hang `onAbort` itself would otherwise cause. With a second sharer
-    // still holding a reference, this caller's release is NOT the last one,
-    // nothing else will ever settle the shared operation in this test, and
-    // `onAbort` throwing before `finish(result)` is the only thing standing
-    // between this promise and settling — exactly what this test needs to
-    // catch.
+    // A SECOND, patient sharer (no signal of its own) keeps the shared
+    // request alive, so this caller's give-up is not the last one and the
+    // round trip never settles in this test: the only way this caller can get
+    // a Result is its own release path — ShareTracker.run rejecting with the
+    // hostile reason, and core's catch classifying it (abortKind's guarded
+    // `.name` read).
     const ac = new AbortController()
     const p = api.g({ id: '1' }, { signal: ac.signal })
     const patient = api.g({ id: '1' })
     await Promise.resolve()
     ac.abort(hostileReason())
 
-    // A race against a short timer, not just `await p`: if `onAbort` throws
-    // before `finish(result)`, the promise never settles at all, and a bare
-    // `await p` would only ever show up as the *default* 5s test timeout —
-    // indistinguishable from a slow assertion. This makes "never settles" a
-    // fast, explicit failure instead.
+    // A race against a short timer, not just `await p`: if the release path
+    // ever left this caller without a Result, a bare `await p` would only
+    // ever show up as the *default* 5s test timeout — indistinguishable from
+    // a slow assertion. This makes "never settles" a fast, explicit failure
+    // instead.
     const outcome = await Promise.race([
       p.then(r => ({ settled: true as const, r })),
       new Promise<{ settled: false }>(resolve => setTimeout(() => resolve({ settled: false }), 200)),
@@ -218,12 +235,12 @@ describe("abortKind's .name read never rejects or hangs the caller", () => {
   })
 })
 
-// GraphQL never coalesces (createGraphQL has no `share` concept — see the
-// comment in graphql.ts's execute()), so there is no shared-path variant
-// here, only the two create-api.ts also has: an async throw and a
-// synchronous throw. `graphql.ts` has its own local `buildFailedResult`
-// equivalent and its own composed(context) call site, so this is a separate
-// discriminating pin, not a duplicate of the REST suite above.
+// The REST suite's rows, on GraphQL's own pipeline: an async throw, a
+// synchronous throw, and — since 5.1.0, when operations gained `share` — the
+// two shared-path rows. `graphql.ts` has its own local `buildFailedResult`
+// equivalent, its own composed(context) call site and its own share step in
+// core, so this is a separate discriminating pin, not a duplicate of the REST
+// suite above.
 describe('a throwing middleware never rejects a GraphQL caller', () => {
   beforeEach(() => { vi.stubGlobal('fetch', vi.fn(async () => new Response('{"data":{}}', { status: 200 }))) })
   afterEach(() => { vi.restoreAllMocks() })
@@ -248,6 +265,32 @@ describe('a throwing middleware never rejects a GraphQL caller', () => {
       operations: { g: new Operation<Record<string, never>, unknown>({ operation: 'query { g }' }) },
     })
     expect((await api.g()).error!.kind).toBe('middleware')
+  })
+
+  it('a shared operation returns a Result', async () => {
+    const api = createGraphQL({
+      endpoint: '/graphql',
+      middleware: [boom],
+      operations: { g: new Operation<{ id: string }, unknown>({ operation: 'query G($id: String) { g(id: $id) }', share: true }) },
+    })
+    expect((await api.g({ id: '1' })).error!.kind).toBe('middleware')
+  })
+
+  // REST's "shared path returns a Result when the share step itself throws",
+  // on GraphQL's share step: building the key, the shared request's deadline
+  // and joining or sending all run inside core's try. A BigInt operation
+  // timeout behind a per-call timeout reaches nothing in setup, and the first
+  // thing to reach Math.min with it is the shared request's deadline.
+  it('a shared operation returns a Result when the share step itself throws', async () => {
+    const api = createGraphQL({
+      endpoint: '/graphql',
+      operations: { g: new Operation<{ id: string }, unknown>({ operation: 'query G($id: String) { g(id: $id) }', share: true, timeout: 10n as unknown as number }) },
+    })
+    const r = await api.g({ id: '1' }, { timeout: 1000 })
+    expect(r.error).not.toBeNull()
+    expect(r.error!.kind).toBe('network')
+    expect(r.error!.body).toBeInstanceOf(TypeError)
+    expect(globalThis.fetch).not.toHaveBeenCalled()
   })
 
   it('reports the middleware failure to onError exactly once', async () => {
@@ -285,8 +328,7 @@ describe('a throwing middleware never rejects a GraphQL caller', () => {
 
   // Twin of the REST suite's "abortKind's .name read" tests above —
   // graphql.ts's own `buildFailedResult` call site feeds `abortKind` too.
-  // GraphQL has no `share` concept, so only the unshared-rethrow shape
-  // applies here.
+  // This is the unshared-rethrow shape; the two `share: true` shapes follow.
   it("a middleware rethrowing signal.reason with a hostile .name getter never rejects", async () => {
     const hostileReason: { name: string } = {} as { name: string }
     Object.defineProperty(hostileReason, 'name', { get() { throw new TypeError('hostile name getter') } })
@@ -306,5 +348,76 @@ describe('a throwing middleware never rejects a GraphQL caller', () => {
     const r = await p
     expect(r.error).not.toBeNull()
     expect(r.error!.kind).toBe('abort')
+  })
+
+  // The REST suite's two `share: true` rows, on GraphQL's share step: a caller
+  // that gives up while waiting on a shared operation is released by
+  // ShareTracker.run, which rejects with the reason, and core's catch
+  // classifies it through abortKind's guarded `.name` read.
+  const hostile = (): { name: string } => {
+    const obj = {}
+    Object.defineProperty(obj, 'name', { get() { throw new TypeError('hostile name getter') } })
+    return obj as { name: string }
+  }
+  const sharedG = () => createGraphQL({
+    endpoint: '/graphql',
+    operations: { g: new Operation<{ id: string }, unknown>({ operation: 'query G($id: String) { g(id: $id) }', share: true }) },
+  })
+  const hangs = () => vi.fn((_u: string, init: RequestInit) => new Promise<Response>((_res, rej) => {
+    const s = init.signal as AbortSignal | undefined
+    if (s?.aborted) { rej(s.reason); return }
+    s?.addEventListener('abort', () => rej(s.reason))
+  }))
+
+  it('share: true, aborted in flight — the promise actually SETTLES (not merely: does not reject)', async () => {
+    vi.stubGlobal('fetch', hangs())
+    const api = sharedG()
+    // A second, patient caller keeps the shared request alive, so this
+    // caller's give-up is not the last one: its own release is the only way
+    // it gets a Result before the backstop's grace.
+    const ac = new AbortController()
+    const p = api.g({ id: '1' }, { signal: ac.signal })
+    const patient = api.g({ id: '1' })
+    await Promise.resolve()
+    ac.abort(hostile())
+    const outcome = await Promise.race([
+      p.then(r => ({ settled: true as const, r })),
+      new Promise<{ settled: false }>(resolve => setTimeout(() => resolve({ settled: false }), 200)),
+    ])
+    expect(outcome.settled).toBe(true)
+    if (outcome.settled) {
+      expect(outcome.r.error).not.toBeNull()
+      expect(outcome.r.error!.kind).toBe('abort')
+    }
+    patient.catch(() => {})
+  })
+
+  it('share: true, already aborted at call time, never rejects', async () => {
+    vi.stubGlobal('fetch', hangs())
+    const ac = new AbortController()
+    ac.abort(hostile())
+    const r = await sharedG().g({ id: '1' }, { signal: ac.signal })
+    expect(r.error).not.toBeNull()
+    expect(r.error!.kind).toBe('abort')
+  })
+})
+
+describe('getHeaders never throws', () => {
+  it('REST: an invalid configured header gives an object', () => {
+    const api = createApi({
+      baseUrl: '', headers: { 'x-bad': '€' },
+      requests: { g: new Request<Record<string, never>, unknown>({ method: 'GET', path: '/g' }) },
+    })
+    expect(() => api.g.getHeaders()).not.toThrow()
+    expect(api.g.getHeaders()).toEqual({})
+  })
+
+  it('GraphQL: an invalid configured header gives an object', () => {
+    const gql = createGraphQL({
+      endpoint: '/graphql', headers: { 'x-bad': '€' },
+      operations: { q: new Operation<Record<string, never>, unknown>({ operation: 'query { a }' }) },
+    })
+    expect(() => gql.q.getHeaders()).not.toThrow()
+    expect(gql.q.getHeaders()).toEqual({})
   })
 })

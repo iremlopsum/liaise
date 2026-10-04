@@ -89,6 +89,13 @@ export function startServer(): Promise<TestServer> {
           const raw = await readRaw(req)
           sendJson(res, 200, { bytes: [...raw], contentType: req.headers['content-type'] ?? null })
 
+        } else if (method === 'GET' && pathname === '/whoami') {
+          // Waits so concurrent calls overlap, then reports who the request
+          // says it is — what lets a share test prove each user got their own
+          // answer, not just that the call count was right.
+          await new Promise(r => setTimeout(r, 30))
+          sendJson(res, 200, { authorization: req.headers.authorization ?? null })
+
         } else if (method === 'GET' && pathname === '/headers') {
           sendJson(res, 200, { headers: req.headers })
 
@@ -105,10 +112,11 @@ export function startServer(): Promise<TestServer> {
           // Sends real headers (a genuine 200), then a partial, unparsable
           // chunk of body, then pauses well past any test's abort window
           // before finishing. This is what lets a test abort mid-body-read —
-          // after the Response exists, before parseResponse's network read
-          // (response.text()) has anything more to consume — the exact
-          // window where an abort must not be misreported as a parse
-          // failure on a server that answered fine.
+          // after the Response exists, before the network read in
+          // `sendExchange` (src/utils/exchange.ts, response.text()) has
+          // anything more to consume — the exact window where an abort must
+          // not be misreported as a parse failure on a server that answered
+          // fine.
           res.writeHead(200, { 'Content-Type': 'application/json' })
           res.write('{"partial":true,')
           setTimeout(() => { if (!res.writableEnded) res.end('"done":true}') }, 2000)
@@ -117,8 +125,8 @@ export function startServer(): Promise<TestServer> {
           // Same shape as /slow-body, but a genuine error status (a gateway
           // returning a slow multi-chunk 502/503 page is the realistic
           // case) — this is what lets a test abort while an ERROR body is
-          // still downloading, the branch parseResponse's non-2xx path
-          // shares with the success path.
+          // still downloading: `sendExchange` reads a non-2xx body with the
+          // same code, and the same abort check, as a success body.
           res.writeHead(503, { 'Content-Type': 'application/json' })
           res.write('{"partial":true,')
           setTimeout(() => { if (!res.writableEnded) res.end('"done":true}') }, 2000)
@@ -148,6 +156,10 @@ export function startServer(): Promise<TestServer> {
             sendJson(res, 200, { data: { hello: 'world' } })
           } else if (query.includes('gqlUser')) {
             sendJson(res, 200, { data: { user: { id: variables.id, name: `User ${variables.id}` } } })
+          } else if (query.includes('gqlSlow')) {
+            // Delayed so concurrent identical operations overlap in flight.
+            await new Promise(r => setTimeout(r, 30))
+            sendJson(res, 200, { data: { slow: { id: variables.id ?? null } } })
           } else if (query.includes('gqlError')) {
             sendJson(res, 200, { errors: [{ message: 'Something went wrong' }] })
           } else if (query.includes('gqlMutation')) {

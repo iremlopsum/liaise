@@ -1,13 +1,16 @@
 import { describe, it, expectTypeOf } from 'vitest'
 import { createApi } from '../src/create-api.js'
 import { Request } from '../src/request.js'
-import type { MiddlewareContext, CallOptions, RequestConfig } from '../src/types.js'
+import type { MiddlewareContext, CallOptions, RequestConfig, ApiConfig, GraphQLBaseConfig } from '../src/types.js'
 import type { ApiErrorKind } from '../src/types.js'
 import { successResult, errorResult } from '../src/testing.js'
 import type { ApiError } from '../src/types.js'
 import type { StandardSchemaV1 } from '../src/types.js'
 import type { PathParams } from '../src/define-request.js'
 import { defineRequest } from '../src/define-request.js'
+import { logMiddleware } from '../src/built-in-middleware.js'
+import { paginate } from '../src/paginate.js'
+import { createGraphQL, Operation, gql } from '../src/graphql.js'
 
 interface User { id: string; name: string }
 
@@ -462,5 +465,49 @@ describe('defineRequest — schema-inferred response types', () => {
 
     // @ts-expect-error  the empty-body guard still fires
     defineRequest<User>()({ method: 'DELETE', path: '/u', responseType: 'none' })
+  })
+})
+
+describe('client-level timeout (5.1.0)', () => {
+  it('is an optional number on both client configs', () => {
+    expectTypeOf<ApiConfig<{}>['timeout']>().toEqualTypeOf<number | undefined>()
+    expectTypeOf<GraphQLBaseConfig['timeout']>().toEqualTypeOf<number | undefined>()
+  })
+})
+
+describe('log option (5.1.0)', () => {
+  it('accepts true or options, rejects anything else; logMiddleware takes options', () => {
+    createApi({ baseUrl: '/api', requests: {}, log: true })
+    createApi({ baseUrl: '/api', requests: {}, log: { enabled: true, data: true } })
+    // @ts-expect-error  log is a boolean or LogOptions
+    createApi({ baseUrl: '/api', requests: {}, log: 'yes' })
+    logMiddleware({ data: true })
+    logMiddleware({ enabled: false })
+  })
+
+  it('logMiddleware still goes in a middleware list bare, and called', () => {
+    createApi({ baseUrl: '/api', requests: {}, middleware: [logMiddleware] })
+    createApi({ baseUrl: '/api', requests: {}, middleware: [logMiddleware({ data: true })] })
+  })
+})
+
+describe('getHeaders (5.1.0)', () => {
+  it('is on every method and returns a plain string record', () => {
+    expectTypeOf(api.getUser.getHeaders()).toEqualTypeOf<Record<string, string>>()
+    expectTypeOf(api.health.getHeaders).toEqualTypeOf<() => Record<string, string>>()
+  })
+
+  it('does not break paginate, nor calling the method', () => {
+    paginate(api.getUser, { id: '1' }, { next: () => undefined })
+    expectTypeOf(api.getUser({ id: '1' })).resolves.toHaveProperty('data')
+  })
+
+  it('is on every GraphQL method too, flat and split', () => {
+    const getX = new Operation<Record<string, never>, { x: number }>({ operation: gql`query { x }` })
+    const flat = createGraphQL({ endpoint: '/graphql', operations: { getX } })
+    expectTypeOf(flat.getX.getHeaders()).toEqualTypeOf<Record<string, string>>()
+    const split = createGraphQL({ endpoint: '/graphql', queries: { getX }, mutations: { setX: getX } })
+    expectTypeOf(split.query.getX.getHeaders()).toEqualTypeOf<Record<string, string>>()
+    expectTypeOf(split.mutation.setX.getHeaders()).toEqualTypeOf<Record<string, string>>()
   })
 })

@@ -6,7 +6,7 @@
 
 Type-safe REST and GraphQL on plain fetch. Never throws. Zero dependencies. Works with any framework.
 
-[![npm](https://img.shields.io/npm/v/liaise)](https://www.npmjs.com/package/liaise) [![CI](https://github.com/iremlopsum/liaise/actions/workflows/ci.yml/badge.svg)](https://github.com/iremlopsum/liaise/actions/workflows/ci.yml) ![5.8 kB gzipped](https://img.shields.io/badge/gzipped-5.8%20kB-blue) ![MIT](https://img.shields.io/badge/license-MIT-blue)
+[![npm](https://img.shields.io/npm/v/liaise)](https://www.npmjs.com/package/liaise) [![CI](https://github.com/iremlopsum/liaise/actions/workflows/ci.yml/badge.svg)](https://github.com/iremlopsum/liaise/actions/workflows/ci.yml) ![6.2 kB gzipped](https://img.shields.io/badge/gzipped-6.2%20kB-blue) ![MIT](https://img.shields.io/badge/license-MIT-blue)
 
 ```bash
 npm install liaise
@@ -54,6 +54,7 @@ Formerly published as `@iremlopsum/apify`; switching takes two steps, see [MIGRA
   - [Endpoint options](#endpoint-options)
   - [Operation options](#operation-options)
   - [CallOptions](#calloptions)
+  - [getHeaders()](#getheaders)
   - [Result and ApiError](#result-and-apierror)
   - [MiddlewareContext](#middlewarecontext)
   - [Built-in middleware options](#built-in-middleware-options)
@@ -193,13 +194,13 @@ Any step can fail, and the failure lands in `error` instead of being thrown.
 
 ### Three levels of settings
 
-You can write a setting in three places: on the client, on the endpoint, or on one call. For headers, the most specific one wins. For middleware, every level runs, the client's first.
+You can write a setting in three places: on the client, on the endpoint, or on one call. For headers and `timeout`, the most specific one wins. For middleware, every level runs, the client's first.
 
-| Level | Where you write it | `headers` | `middleware` |
-| ----- | ------------------ | --------- | ------------ |
-| Client | `createApi({ headers, middleware })` | Sent with every call | Runs first, around everything else |
-| Endpoint | `defineRequest<T>()({ headers, middleware })` | Replaces the client's value for the same header | Runs second |
-| Call | `api.getUser(params, { headers, middleware })` | Replaces the client's and the endpoint's value for the same header | Runs last, closest to `fetch` |
+| Level | Where you write it | `headers` | `middleware` | `timeout` |
+| ----- | ------------------ | --------- | ------------ | --------- |
+| Client | `createApi({ headers, middleware, timeout })` | Sent with every call | Runs first, around everything else | Applies to every call |
+| Endpoint | `defineRequest<T>()({ headers, middleware, timeout })` | Replaces the client's value for the same header | Runs second | Replaces the client's |
+| Call | `api.getUser(params, { headers, middleware, timeout })` | Replaces the client's and the endpoint's value for the same header | Runs last, closest to `fetch` | Replaces the endpoint's and the client's |
 
 Headers merge by name, so setting one header on a call keeps every other header from the client and the endpoint. A `Content-Type` you set at any level replaces the one liaise picks from the body.
 
@@ -222,7 +223,13 @@ const api = createApi({
 
 await api.getReport() // sends x-api-version: 2
 await api.getReport({}, { headers: { 'x-api-version': '3' } }) // sends x-api-version: 3
+
+api.getReport.getHeaders() // { 'x-api-version': '2' }
 ```
+
+[`getHeaders()`](#getheaders) shows the headers an endpoint sends from the client and the endpoint, before any call adds its own.
+
+`timeout: 0` at the most specific level means no deadline ([details](#set-a-deadline-with-timeout)).
 
 ## Guide
 
@@ -394,7 +401,7 @@ const api = createApi({
 
 `logToTracker` stands for your error tracker, such as Sentry.
 
-- It runs once per call, after all your middleware has finished. A call that a retry middleware rescues from a 500 never reaches it.
+- It runs once per call, after all your middleware has finished. A call that a retry middleware rescues from a 500 never reaches it. When calls [share](#sharing-identical-requests) one failed request, it runs once for all of them.
 - It isn't called for `'abort'`, because a cancellation isn't a failure. A `'timeout'` is reported, because it's a deadline you missed.
 - It only watches. The caller gets the same `Result` either way.
 
@@ -641,7 +648,7 @@ A cancellation you asked for isn't reported to [`onError`](#reporting-errors-wit
 
 #### Set a deadline with timeout
 
-`timeout` is in milliseconds, and you set it on the endpoint or on one call:
+`timeout` is in milliseconds. You set it on the client, on the endpoint or on one call:
 
 ```ts
 import { createApi, defineRequest } from 'liaise'
@@ -655,6 +662,7 @@ const api = createApi({
   baseUrl: 'https://api.example.com',
   requests: { getReport },
   middleware: [retryMiddleware(3)],
+  timeout: 10_000, // for every endpoint that sets none
 })
 
 const { error } = await api.getReport()
@@ -662,10 +670,10 @@ const { error } = await api.getReport()
 ```
 
 - **`timeout` is one deadline for the whole call.** It covers every middleware, every retry and every wait between retries. `timeout: 3000` with three retries still answers within three seconds.
-- **A call's `timeout` replaces the endpoint's.** `timeout: 0` on a call turns the endpoint's deadline off. Zero, a negative number or no `timeout` at all means no deadline, which is the default.
+- **The most specific `timeout` wins.** A call's replaces the endpoint's, and the endpoint's replaces the client's. Zero or a negative number at the winning level means no deadline, so `timeout: 0` on an endpoint opts it out of the client's, and on a call turns both off. With no `timeout` anywhere there is no deadline, which is the default.
 - **`result.retry()` starts a fresh deadline.** The retried call isn't charged for time the first one used.
 - If you want a separate limit for each attempt instead, see [Give each attempt its own timeout](#give-each-attempt-its-own-timeout).
-- Under [`share`](#sharing-identical-requests), the endpoint's `timeout` belongs to the one shared request, and a caller can't extend it.
+- Under [`share`](#sharing-identical-requests), the endpoint's or the client's `timeout` also bounds the one shared request ([details](#share-key-and-refcount)).
 
 #### Drop stale calls with dedupe
 
@@ -697,7 +705,9 @@ All three still end the call when a middleware is stuck on work of its own that 
 
 ### Sharing identical requests
 
-Several parts of an app often ask for the same thing at the same moment. Five components load the current user, or five calls get a 401 and each one refreshes the token. `share: true` sends one request and gives every caller its answer.
+Several parts of an app often ask for the same thing at the same moment. Five components load the current user, or five calls get a 401 and each one refreshes the token.
+
+`share: true` merges calls that would send the identical request, with the same URL, method, headers and body, into one network request. Each call still runs its own middleware and gets its own `Result`.
 
 ```ts
 import { createApi, defineRequest } from 'liaise'
@@ -712,20 +722,26 @@ const getProduct = defineRequest<Product>()({
 
 const api = createApi({ baseUrl: 'https://api.example.com', requests: { getProduct } })
 
-// One network request. Both callers get the same response.
+// One network request. Each caller gets its own Result from it.
 const [a, b] = await Promise.all([
   api.getProduct({ id: '42' }),
   api.getProduct({ id: '42' }),
 ])
 ```
 
+If two requests are the same byte for byte, the server can't tell them apart either, so sharing them is safe. Apart from tracing headers, if anything differs, they never share.
+
+- **The request is compared after all your middleware has run.** A header your auth middleware adds is part of it, so calls made as different users don't share. [On a server](#on-a-server) says what this relies on.
+- **The URL and the body are compared as sent.** `?a=1&b=2` and `?b=2&a=1` don't share, and neither do two JSON bodies with the same keys in a different order. Params written in the same order always match.
+- **Per-call `headers` and `middleware` are judged by what they change.** Calls with identical per-call headers share, and a per-call middleware that changes nothing doesn't stop sharing.
+- **Tracing headers aren't compared**, so a middleware that stamps a request ID on every call doesn't stop sharing. The shared request goes out with the first caller's tracing headers. [Share key and refcount](#share-key-and-refcount) lists them.
+- **An upload never shares.** A call whose body is `FormData`, a `Blob`, an `ArrayBuffer`, a typed array, a `DataView` or a `ReadableStream` sends its own request.
+- **Each caller has its own `data` for JSON and text.** A middleware that edits `data` changes only its own caller's copy ([details](#share-key-and-refcount)).
+- **[`onError`](#reporting-errors-with-onerror) hears about a failed shared request once**, however many callers get the error. An error that a caller's own middleware makes from it is reported separately.
+- **A call that arrives after the shared request has settled sends a new one.** Nothing is cached. For that, use [`cacheMiddleware`](#cache-repeated-reads).
+- **Think before you set `share` on a write.** Two identical writes at the same moment become one, so adding the same item to a cart twice at once adds it once. That suits a refresh-style call, such as the [token refresh](#add-an-auth-header-and-refresh-the-token-on-a-401), and rarely other writes.
 - **`share` joins the call already running. [`dedupe`](#drop-stale-calls-with-dedupe) cancels it.** Setting both on one endpoint throws when you create the client, so you find the mistake straight away.
-- **Identical means the same endpoint and the same params, compared by content.** Key order doesn't matter, and two `Date`s with the same time match. Different params or a different endpoint never share. [Share key and refcount](#share-key-and-refcount) has the full rules.
-- **A per-call `headers` or `middleware` turns sharing off for that call.** Either one can change what is requested, so that call gets a request of its own.
-- **Params that can't be compared safely, such as a `Blob` or a circular structure, turn sharing off** ([full list](#share-key-and-refcount)). That call gets its own request.
-- **A `Date`, `Map`, `Set`, typed array or string param shares normally.**
-- **A per-call `signal` or `timeout` only lets that caller leave.** The caller that gives up gets `kind: 'abort'` or `'timeout'`, reported to [`onError`](#reporting-errors-with-onerror) as an unshared call would be. The request keeps running for the others, and is cancelled once every caller has given up.
-- **The endpoint's own `timeout` bounds the shared request for everyone.** It counts from when the request started. A caller that joins late can't extend it, and `timeout: 0` on one call can't turn it off.
+- **A per-call `signal` or `timeout` only lets that caller leave.** The caller that gives up gets `kind: 'abort'` or `'timeout'`. The request keeps running for the others, and is cancelled once every caller has given up.
 
 ```ts
 const impatient = api.getProduct({ id: '42' }, { timeout: 20 }) // gives up quickly
@@ -734,21 +750,23 @@ const patient = api.getProduct({ id: '42' })                    // keeps waiting
 // impatient's timeout doesn't cancel the shared request, so patient still gets the response.
 ```
 
-Two rarer cases have their own notes: [`retry()` on a shared result](#retry-on-a-shared-result) and [middleware that replaces the signal](#signal-replacing-middleware).
+How the shared request's own deadline, its timeouts and retries work is under [Share key and refcount](#share-key-and-refcount). A middleware that replaces the signal has its own note, under [Signal-replacing middleware](#signal-replacing-middleware).
 
 #### On a server
 
-Sharing is decided before middleware runs. A header that a middleware adds, such as the current user's token, is not part of the match. With one client serving every user, one user's call can join another user's call and receive that user's response.
+One client can serve every user. The user's token or cookie is part of what is sent, so one user's call never joins another's. [One /me per page view on the server](#one-me-per-page-view-on-the-server) shows the setup.
 
-Create one client per incoming request, as in [One /me per page view on the server](#one-me-per-page-view-on-the-server). Otherwise, don't set `share` on an endpoint whose answer depends on who is asking.
+The comparison sees only the headers in `ctx.request.headers`. If something outside liaise adds the user's identity, such as a patched global `fetch` or instrumentation that reads request context, liaise can't see it, and `share` is unsafe in that setup.
 
 ### Retries, caching and logging
 
-Some failures go away when you try again. Some reads repeat often enough to keep. And while you build, you want to see every call. liaise ships a middleware for each, in a separate entry point:
+Some failures go away when you try again. Some reads repeat often enough to keep. And while you build, you want to see every call. Retries and caching are middleware, imported from a separate entry point:
 
 ```ts
-import { retryMiddleware, cacheMiddleware, logMiddleware } from 'liaise/middleware'
+import { retryMiddleware, cacheMiddleware } from 'liaise/middleware'
 ```
+
+Logging is the client's `log` option ([Log every call](#log-every-call)).
 
 #### Retry failed calls
 
@@ -822,7 +840,19 @@ const { data } = await api.getUser({ id: '42' }, { skipMiddleware: [getUserCache
 
 #### Log every call
 
-`logMiddleware` prints each call's start and end to the console, with its duration:
+`log: true` on the client prints each call's start and end to the console, with its duration. Logging is off by default.
+
+```ts
+import { createApi, defineRequest } from 'liaise'
+
+const getItems = defineRequest<{ id: string }[]>()({ method: 'GET', path: '/items' })
+
+const api = createApi({
+  baseUrl: '/api',
+  requests: { getItems },
+  log: import.meta.env.DEV, // on in development only (Vite); in Node: process.env.NODE_ENV !== 'production'
+})
+```
 
 ```text
 [liaise] → GET getItems /api/items
@@ -832,16 +862,23 @@ const { data } = await api.getUser({ id: '42' }, { skipMiddleware: [getUserCache
 [liaise] ← createUser ERROR 422 (89ms)
 ```
 
-```ts
-import { createApi, defineRequest } from 'liaise'
-import { logMiddleware } from 'liaise/middleware'
+- **Each call logs once, with its final outcome.** The logger runs outside all your middleware, so a call that `retryMiddleware` retries still logs one pair of lines. A call held past its `timeout` by a stuck middleware logs its end at the deadline, when the [timeout backstop](#timeout-backstop) ends it. A call whose setup fails, such as one with a path param liaise refuses before sending, logs nothing.
+- **`log: { data: true }` also prints each call's data, or its `error.body` on failure** ([Log options](#log-options)). `data` is off by default, because responses often hold personal data and tokens, and a long list makes the console slow.
+- **A call that joined a [shared](#sharing-identical-requests) request ends with `, shared`**, as in `[liaise] ← getUser OK (138ms, shared)`. Its answer came from a request another call sent.
+- **To log one endpoint or one call, use `logMiddleware`** in that level's `middleware`. It takes the same options ([Log options](#log-options)):
 
-const getItems = defineRequest<{ id: string }[]>()({ method: 'GET', path: '/items' })
+  ```ts
+  import { defineRequest } from 'liaise'
+  import { logMiddleware } from 'liaise/middleware'
 
-const api = createApi({ baseUrl: '/api', requests: { getItems }, middleware: [logMiddleware] })
-```
+  const getItems = defineRequest<{ id: string }[]>()({
+    method: 'GET',
+    path: '/items',
+    middleware: [logMiddleware({ data: true })], // or just [logMiddleware]
+  })
+  ```
 
-It is meant for development. In production, [write a middleware](#writing-middleware) that sends the same facts to your monitoring.
+Logging is meant for development. In production, [write a middleware](#writing-middleware) that sends the same facts to your monitoring.
 
 ### Writing middleware
 
@@ -920,7 +957,7 @@ liaise compares by reference (`===`). Store what a factory such as `retryMiddlew
 
 #### Signals in middleware
 
-`ctx.request.signal` combines the caller's `signal` with the call's `timeout`, and is `undefined` when there is neither. liaise reads it when it calls `fetch`, so a middleware can replace it. [Give each attempt its own timeout](#give-each-attempt-its-own-timeout) does this, and says what happens to a caller's cancel. How a replaced signal works with `share` and `dedupe` is under [Signal-replacing middleware](#signal-replacing-middleware).
+`ctx.request.signal` combines the caller's `signal` with the call's deadline, and is `undefined` when there is neither. liaise reads it when it calls `fetch`, so a middleware can replace it. [Give each attempt its own timeout](#give-each-attempt-its-own-timeout) does this, and says what happens to a caller's cancel. How a replaced signal works with `share` and `dedupe` is under [Signal-replacing middleware](#signal-replacing-middleware).
 
 **Pass `ctx.request.signal` on to async work your middleware does itself**, such as a token refresh, a lookup or a queue. liaise won't wait for that work past the deadline or the caller's cancel ([Timeout backstop](#timeout-backstop)). A promise can't be stopped from outside, so passing the signal is the only way to end the work. Without it, the work keeps running and its result is thrown away.
 
@@ -1094,7 +1131,10 @@ Most of what the guide says about `createApi` holds for `createGraphQL`.
 - **`onError`** goes on `createGraphQL` and works as in [Reporting errors with onError](#reporting-errors-with-onerror).
 - **`retry()`** is on every `Result`.
 - **`dedupe`** goes on the `Operation`, as in [Drop stale calls with dedupe](#drop-stale-calls-with-dedupe).
-- **`timeout`** goes on the `Operation` or the call. It is one deadline for the whole call, retries included.
+- **`share`** goes on the `Operation`, as in [Sharing identical requests](#sharing-identical-requests). Variables must match exactly, key order included. On a mutation, the note there about writes applies.
+- **`timeout`** goes on `createGraphQL`, the `Operation` or the call, and the most specific one wins. It is one deadline for the whole call, retries included ([Set a deadline with timeout](#set-a-deadline-with-timeout)).
+- **`log`** goes on `createGraphQL`, as in [Log every call](#log-every-call). Each line names the operation, as in `[liaise] → POST getCategory https://api.example.com/graphql`.
+- **`getHeaders()`** is on every operation ([getHeaders()](#getheaders)).
 - **`schema`** goes on the `Operation` and validates the response's `data`. The response type stays explicit ([Validating responses](#validating-responses)).
 - **`signal` and `skipMiddleware`** go on the call.
 
@@ -1103,7 +1143,6 @@ Most of what the guide says about `createApi` holds for `createGraphQL`.
 - **`endpoint`** is the full URL of the GraphQL endpoint. It takes the place of `baseUrl`.
 - **Variables always go in the JSON body.** There are no path params, no query strings and no `bodyAs`.
 - **Every operation is a `POST`**, with `Content-Type: application/json` unless you set your own.
-- **There is no `share`.** An `Operation` can't join identical calls.
 - **There is no `responseType`.** The response is always read as JSON.
 
 ### Testing your code
@@ -1329,27 +1368,21 @@ import { createApi, defineRequest } from 'liaise'
 
 const me = defineRequest<User>()({ method: 'GET', path: '/me', share: true })
 
-// One client per incoming request: that page's loaders share one /me call,
-// and one user's call can never join another user's.
-function apiFor(req: IncomingRequest) {
-  return createApi({
-    baseUrl: 'https://users.internal',
-    headers: { cookie: req.headers.cookie ?? '' },
-    requests: { me },
-  })
-}
+// One client for the whole server. Sharing compares what is actually sent,
+// so one user's call never joins another's.
+const api = createApi({ baseUrl: 'https://users.internal', requests: { me } })
 
 async function renderPage(req: IncomingRequest) {
-  const api = apiFor(req)
+  const asUser = { headers: { cookie: req.headers.cookie ?? '' } }
   const [header, cart] = await Promise.all([
-    api.me().then(r => r.data?.name),   // header loader
-    api.me().then(r => r.data?.cartId), // cart loader
+    api.me({}, asUser).then(r => r.data?.name),   // header loader
+    api.me({}, asUser).then(r => r.data?.cartId), // cart loader
   ])
   return { header, cart }
 }
 ```
 
-The client is created per request so that one user's call can never join another's; see [On a server](#on-a-server). Inside React Server Components, React's [`cache()`](https://react.dev/reference/react/cache) does this too.
+Each loader sends the user's cookie as a per-call header. Calls with the same cookie share one request, and calls with different cookies never do ([On a server](#on-a-server)). Inside React Server Components, React's [`cache()`](https://react.dev/reference/react/cache) gives one /me per page view too.
 
 ### Retry a flaky backend within one deadline
 
@@ -1494,7 +1527,7 @@ Measured on 4 October 2026 against axios 1.20.0, ky 2.1.0 and ofetch 1.5.1. Othe
 | --- | :-- | :-- | :-- | :-- | :-- |
 | Server answers 500 | throws Error* | throws AxiosError | throws HTTPError | throws FetchError | error result (http) |
 | Server unreachable | throws TypeError* | throws AxiosError (name: Error) | throws NetworkError | throws FetchError | error result (network) |
-| Server never answers | throws TimeoutError, 3002 ms* | throws AxiosError, 3005 ms | throws TimeoutError, 3005 ms | throws FetchError, 3003 ms | error result (timeout), 3003 ms |
+| Server never answers | throws TimeoutError, 3002 ms* | throws AxiosError, 3006 ms | throws TimeoutError, 3005 ms | throws FetchError, 3004 ms | error result (timeout), 3004 ms |
 | 200 with broken JSON | throws SyntaxError* | throws AxiosError (name: SyntaxError) | throws SyntaxError | throws SyntaxError | error result (parse) |
 | 204 with no body, on a JSON call | resolves with undefined* | resolves with "" | resolves with undefined | resolves with undefined | resolves with undefined |
 | Search as you type: which results stay on screen | shows "rea"* | shows "rea"* | shows "rea"* | shows "rea"* | shows "rea" |
@@ -1513,12 +1546,12 @@ Out of the box, liaise has no timeout (only ky has one by default) and treats a 
 | axios | 19.1 | 17.3 |
 | ky | 9.6 | 8.5 |
 | ofetch | 4.0 | 3.6 |
-| liaise | 5.8 | 5.2 |
-| liaise + retryMiddleware | 6.3 | 5.7 |
+| liaise | 6.3 | 5.7 |
+| liaise + retryMiddleware | 6.8 | 6.2 |
 
 fetch is built into the runtime; its row is the call site only, the floor rather than a library.
 
-Request overhead on localhost, sequential (median requests per second): fetch 16,797, axios 13,691, ky 13,742, ofetch 16,230, liaise 16,414.
+Request overhead on localhost, sequential (median requests per second): fetch 17,075, axios 13,972, ky 14,602, ofetch 16,915, liaise 16,912.
 
 Out-of-the-box results, request overhead in full and the notes: [compare/results.md](https://github.com/iremlopsum/liaise/blob/main/compare/results.md).
 
@@ -1528,7 +1561,7 @@ With enough of your own code, every library gets the right result in almost ever
 
 ky is the closest alternative. Apart from throwing instead of returning errors, it differs from liaise in two rows of the table. Its search as you type needs code, and it sends the undefined path param. Out of the box, ky is the only one that times out, and it retries, as ofetch does. In size, liaise is larger than ofetch and smaller than ky and axios.
 
-In request overhead, liaise ties fetch and ofetch. axios and ky handle about 16% fewer requests per second than liaise. Overhead is measured in microseconds; on a real network each request takes milliseconds.
+In request overhead, liaise ties fetch and ofetch. axios handles about 17% and ky about 14% fewer requests per second than liaise. Overhead is measured in microseconds; on a real network each request takes milliseconds.
 
 ### Where it runs
 
@@ -1554,7 +1587,7 @@ Every dependency of liaise would also be a dependency of your app, with more to 
 
 ### Middleware over interceptors
 
-Separate request and response interceptors split one job in two. State both halves need rides on the request config, and resending means calling the client again from inside a hook. A middleware wraps the whole call, so one function can set a header, read the result, retry, or answer from a cache. The built-in retry, cache and log are ordinary middleware, so anything they do, yours can do too.
+Separate request and response interceptors split one job in two. State both halves need rides on the request config, and resending means calling the client again from inside a hook. A middleware wraps the whole call, so one function can set a header, read the result, retry, or answer from a cache. The built-in `retryMiddleware`, `cacheMiddleware` and `logMiddleware` are ordinary middleware, so anything they do, yours can do too.
 
 ### Types by inference
 
@@ -1582,7 +1615,9 @@ Every option, type and export, read from the source. The guide explains when to 
 | `requests` | an object of endpoints | required | Each key becomes a method on the client, such as `api.getUser`. |
 | `middleware` | `Middleware[]` | — | Runs on every call, before endpoint and call middleware. |
 | `headers` | `HeadersInit` | — | Sent with every call. An endpoint or a call can replace a header ([three levels](#three-levels-of-settings)). |
-| `onError` | `(error: ApiError) => void` | — | Called once per failed call, after all middleware. Never for `'abort'` ([details](#reporting-errors-with-onerror)). |
+| `timeout` | `number` (ms) | no deadline | A deadline for every call. An endpoint or a call can set its own, and `0` there turns it off ([details](#set-a-deadline-with-timeout)). |
+| `log` | `boolean \| LogOptions` | off | Logs every call to the console ([Log every call](#log-every-call), [options](#log-options)). |
+| `onError` | `(error: ApiError) => void` | — | Called once per failed call, after all middleware. Calls that share one failed request count as one. Never for `'abort'` ([details](#reporting-errors-with-onerror)). |
 
 ### createGraphQL options
 
@@ -1593,7 +1628,9 @@ Every option, type and export, read from the source. The guide explains when to 
 | `endpoint` | `string` | required | The full URL of the GraphQL endpoint. |
 | `middleware` | `Middleware[]` | — | Runs on every operation, before operation and call middleware. |
 | `headers` | `HeadersInit` | — | Sent with every operation. An operation or a call can replace a header. |
-| `onError` | `(error: ApiError) => void` | — | Called once per failed call, GraphQL errors included. Never for `'abort'`. |
+| `timeout` | `number` (ms) | no deadline | A deadline for every operation. An operation or a call can set its own, and `0` there turns it off. |
+| `log` | `boolean \| LogOptions` | off | Logs every call to the console ([Log every call](#log-every-call), [options](#log-options)). |
+| `onError` | `(error: ApiError) => void` | — | Called once per failed call, GraphQL errors included. Calls that share one failed request count as one. Never for `'abort'`. |
 
 ### Endpoint options
 
@@ -1608,9 +1645,9 @@ Every option, type and export, read from the source. The guide explains when to 
 | `responseType` | `'json' \| 'text' \| 'blob' \| 'arrayBuffer' \| 'formData' \| 'none'` | `'json'` | How the response body is read ([Reading responses](#reading-responses)). |
 | `schema` | `StandardSchemaV1` | — | Checks a 2xx body, and `data` becomes the schema's output ([Validating responses](#validating-responses)). |
 | `dedupe` | `boolean` | `false` | A new call cancels the one still running ([details](#drop-stale-calls-with-dedupe)). |
-| `share` | `boolean` | `false` | Identical calls join one request ([details](#sharing-identical-requests)). Can't be combined with `dedupe`. |
+| `share` | `boolean` | `false` | Calls that would send the identical request share one network request ([details](#sharing-identical-requests)). Can't be combined with `dedupe`. |
 | `bodyAs` | `'query' \| 'body'` | `'query'` for `GET` and `DELETE`, `'body'` for the rest | Where the params that aren't in the path go. |
-| `timeout` | `number` (ms) | no deadline | One deadline for the whole call, retries included ([details](#set-a-deadline-with-timeout)). |
+| `timeout` | `number` (ms) | the client's `timeout` | One deadline for the whole call, retries included. Replaces the client's, and `0` turns it off ([details](#set-a-deadline-with-timeout)). |
 
 ### Operation options
 
@@ -1622,8 +1659,9 @@ Every option, type and export, read from the source. The guide explains when to 
 | `middleware` | `Middleware[]` | — | Runs on every call to this operation, after client middleware. |
 | `headers` | `HeadersInit` | — | Sent with every call to this operation. Replaces the client's value for the same header. |
 | `dedupe` | `boolean` | `false` | A new call cancels the one still running. |
+| `share` | `boolean` | `false` | Calls that would send the identical request share one network request ([details](#sharing-identical-requests)). Variables must match exactly, key order included. Can't be combined with `dedupe`. |
 | `schema` | `StandardSchemaV1` | — | Checks the response's `data`. The response type stays explicit ([Validating responses](#validating-responses)). |
-| `timeout` | `number` (ms) | no deadline | One deadline for the whole call, retries included. |
+| `timeout` | `number` (ms) | the client's `timeout` | One deadline for the whole call, retries included. Replaces the client's, and `0` turns it off. |
 
 ### CallOptions
 
@@ -1631,13 +1669,40 @@ The second argument of every call, as in `api.getUser(params, options)`. [`pagin
 
 | Option | Type | Default | What it does |
 | ------ | ---- | ------- | ------------ |
-| `middleware` | `Middleware[]` | — | Runs after the client's and the endpoint's middleware. Turns off `share` for this call. |
+| `middleware` | `Middleware[]` | — | Runs after the client's and the endpoint's middleware. Under `share`, what it changes in the request is part of what is compared. |
 | `skipMiddleware` | `Middleware[]` | — | Middleware to leave out of this call, matched by reference ([details](#skipping-a-middleware-for-one-call)). |
-| `headers` | `HeadersInit` | — | Replaces the client's and the endpoint's value for the same header. Turns off `share` for this call. |
+| `headers` | `HeadersInit` | — | Replaces the client's and the endpoint's value for the same header. Under `share` they are part of what is compared, so identical per-call headers share. |
 | `signal` | `AbortSignal` | — | Cancels the call, which ends with `kind: 'abort'` ([details](#cancel-with-a-signal)). |
-| `timeout` | `number` (ms) | the endpoint's `timeout` | Replaces the endpoint's deadline for this call. `0` turns it off. Under `share`, it bounds only this caller's wait ([details](#sharing-identical-requests)). |
+| `timeout` | `number` (ms) | the endpoint's `timeout`, else the client's | Replaces the endpoint's and the client's deadline for this call. `0` turns it off. Under `share`, it bounds only this caller's wait ([details](#sharing-identical-requests)). |
 
 A fractional `timeout` is rounded down to whole milliseconds, with a minimum of 1 ms. A value above the timer limit of 2³¹ − 1 ms is capped there. Zero or a negative number means no deadline.
+
+### getHeaders()
+
+Every method on a client has `getHeaders()`, which returns the headers its endpoint sends from configuration. Those are the client's headers merged with the endpoint's, with the endpoint's winning, and every name is lowercase.
+
+```ts
+import { createApi, defineRequest } from 'liaise'
+
+const api = createApi({
+  baseUrl: 'https://api.example.com',
+  headers: { 'X-Api-Version': '1', 'X-Client': 'web' },
+  requests: {
+    getUser: defineRequest<{ id: string }>()({
+      method: 'GET',
+      path: '/users/:id',
+      headers: { 'X-Api-Version': '2' },
+    }),
+  },
+})
+
+api.getUser.getHeaders() // { 'x-api-version': '2', 'x-client': 'web' }
+```
+
+- **It leaves out per-call headers, headers a middleware sets, and the `Content-Type` liaise picks from the body.** Those exist only once a call happens.
+- **It returns a new plain object each time.** Changing it changes nothing.
+- **An invalid configured header gives `{}`.** A value with a character outside Latin-1, or a name with a space, would make a `Headers` object throw, and `getHeaders()` never throws.
+- **GraphQL operations have it too**, including `graphql.query.getCategory.getHeaders()` and `graphql.mutation.updateCategory.getHeaders()` on a client split into queries and mutations.
 
 ### Result and ApiError
 
@@ -1701,7 +1766,7 @@ The first argument of every middleware, `ctx`:
 | `request.params` | `unknown` | The params as the caller passed them. |
 | `request.headers` | `Headers` | The merged headers. A middleware can add, change or remove them. |
 | `request.body` | `unknown` | The serialized body, or `null` when there is none. |
-| `request.signal` | `AbortSignal \| undefined` | The signal `fetch` receives. A middleware can replace it ([Signals in middleware](#signals-in-middleware)). |
+| `request.signal` | `AbortSignal \| undefined` | The signal `fetch` receives. Under `share` it is the signal this caller waits on, because the shared request has its own. A middleware can replace it ([Signals in middleware](#signals-in-middleware)). |
 | `requestName` | `string` | The endpoint's key, such as `'getUser'`. |
 
 How a replaced signal works with `share` and `dedupe` is under [Signal-replacing middleware](#signal-replacing-middleware).
@@ -1744,17 +1809,25 @@ How a replaced signal works with `share` and `dedupe` is under [Signal-replacing
 
 What goes into the key is under [Cache key](#cache-key).
 
-#### Log output
+#### Log options
 
-`logMiddleware` logs one line when a call starts and one when it ends:
+The `log` option of both clients takes a boolean or a `LogOptions`, and `logMiddleware(options)` takes a `LogOptions`. `log: true` and a bare `logMiddleware` mean `{ enabled: true, data: false }`.
+
+| Option | Type | Default | What it does |
+| ------ | ---- | ------- | ------------ |
+| `enabled` | `boolean` | `true` | Turns logging on or off. With `false`, `log` does nothing and costs nothing, and `logMiddleware` passes every call straight through. |
+| `data` | `boolean` | `false` | Also prints each call's data, or its `error.body` on failure. An object or array goes to `console.table`, anything else to `console.log`, which is also used where `console.table` is missing. |
+
+Each call logs one line when it starts and one when it ends:
 
 ```text
 [liaise] → <method> <endpoint> <url>
 [liaise] ← <endpoint> OK (<ms>ms)
 [liaise] ← <endpoint> ERROR <status> (<ms>ms)
+[liaise] ← <endpoint> OK (<ms>ms, shared)
 ```
 
-The time covers everything that runs inside it: the middleware after it and the request. An error with no response logs status `0`.
+The time covers everything that runs inside the logger. For `log` that is the whole call, and for `logMiddleware` it is the middleware after it and the request. An error with no response logs status `0`. A console that throws never fails the call.
 
 ### liaise/testing
 
@@ -1780,7 +1853,7 @@ How the stub behaves, beyond [Testing your code](#testing-your-code):
 
 ### Exports
 
-Each entry point is a separate import, and your bundler leaves out what you don't import. Gzipped, as measured by `npm run size`: about 5.8 kB for a REST-only import, 6.9 kB for the whole core entry, and 8.0 kB with all the middleware.
+Each entry point is a separate import, and your bundler leaves out what you don't import. Gzipped, as measured by `npm run size`: about 6.2 kB for a REST-only import, 7.5 kB for the whole core entry, and 9.2 kB with all the middleware.
 
 **`liaise`**
 
@@ -1799,6 +1872,7 @@ Each entry point is a separate import, and your bundler leaves out what you don'
 | `CallOptions` | type | The second argument of a call. |
 | `PaginateOptions` | type | `next`, `maxPages`, and any `CallOptions`. |
 | `ApiConfig`, `RequestConfig` | type | The configs of `createApi` and an endpoint. |
+| `LogOptions` | type | The options of `log` and `logMiddleware(options)` ([Log options](#log-options)). |
 | `GraphQLBaseConfig`, `OperationConfig` | type | The configs of `createGraphQL` and an `Operation`. |
 | `GraphQLError` | type | One entry of a GraphQL `errors` array. |
 | `Middleware`, `MiddlewareContext`, `MiddlewareNext` | type | A middleware, its `ctx`, and its `next`. |
@@ -1810,9 +1884,10 @@ Each entry point is a separate import, and your bundler leaves out what you don'
 | ------ | ---- | ---------- |
 | `retryMiddleware` | function | Returns a middleware that retries failed calls ([RetryOptions](#retryoptions)). |
 | `cacheMiddleware` | function | Returns a middleware that caches successes in memory ([Cache options](#cache-options)). |
-| `logMiddleware` | middleware | Logs each call to the console ([Log output](#log-output)). |
+| `logMiddleware` | middleware | Logs each call to the console. Use it as it is, or call it with options ([Log options](#log-options)). |
 | `RetryOptions`, `RetryInfo` | type | The options of `retryMiddleware`, and the argument to `onRetry`. |
 | `CacheMiddleware` | type | What `cacheMiddleware()` returns, a `Middleware` with `clear()`. |
+| `LogMiddleware` | type | The type of `logMiddleware`, a `Middleware` you can also call with `LogOptions`. |
 
 **`liaise/testing`** exports are listed under [liaise/testing](#liaisetesting).
 
@@ -1826,13 +1901,9 @@ Edge cases the guide links to.
 
 The query string is sorted by name before it goes in the key, so `?a=1&b=2` and `?b=2&a=1` are one entry. It is sorted by the raw, undecoded name, and repeated names keep their order. A query param that a middleware adds before the cache, such as `?lang=de`, is part of the key.
 
-Params are keyed by content, by the same rules as [`share`](#share-key-and-refcount). Params that `share` can't compare are never cached and never served from the cache. Each `cacheMiddleware()` call makes its own store, so two stores never share entries.
+Params are keyed by content. Object keys are sorted, and an `undefined` member is dropped, so `{ a: undefined }` and `{}` match. A value with a `toJSON` method is keyed by what it returns, so a `Date` is its ISO string. A `Map`, `Set` or typed array is keyed by its entries.
 
-#### Share key and refcount
-
-Two calls share when they go to the same endpoint and their params have the same key. The key is built from content. Object keys are sorted, and an `undefined` member is dropped, so `{ a: undefined }` and `{}` match. A value with a `toJSON` method is keyed by what it returns, so a `Date` is its ISO string. A `Map`, `Set` or typed array is keyed by its entries.
-
-A call can't share when its params hold any of these, at any depth:
+A call is never cached, and never served from the cache, when its params hold any of these, at any depth:
 
 - a BigInt
 - a function or a symbol
@@ -1841,21 +1912,38 @@ A call can't share when its params hold any of these, at any depth:
 - a circular structure
 - an object with no enumerable keys that isn't a plain object, such as an `Error`, a `Promise`, or a class instance that keeps its state in private fields
 
-Per-call `headers: {}` and `middleware: []` are empty, so they don't turn sharing off. Only a header or a middleware that is actually there does.
+Each `cacheMiddleware()` call makes its own store, so two stores never share entries.
 
-Each caller holds a place in the shared request, counted by a refcount. A caller whose own `signal` or `timeout` fires gives up its place. What happens when every caller has given up, and what the caller who leaves receives, is under [Sharing identical requests](#sharing-identical-requests).
+#### Share key and refcount
 
-The endpoint's `timeout` counts from when the shared request started. If each new caller restarted it, a steady stream of callers could keep one request open forever.
+Under `share`, two calls join one request when all of these match. They are read as the request is about to be sent, after every middleware has run.
 
-#### `retry()` on a shared result
+- The endpoint's name. Two endpoints can hit one URL with a different `responseType` or schema.
+- The method and the full URL, query string included, exactly as sent.
+- Every header, by lowercase name, except the tracing headers below.
+- The body, when it is absent, a string (every JSON body is one) or `URLSearchParams`. Any other body has no key, so that call sends its own request.
 
-Every caller that waits to the end gets the same `Result` object. Its `retry()` uses the per-call options of the caller that started the shared request (its headers, signal and timeout), whoever calls it. A retry is never shared. It sends a request of its own.
+The URL is read as written. A `baseUrl` without a leading slash is resolved by the browser when the request is sent, so give a `share` endpoint an absolute or root-relative `baseUrl`.
+
+The tracing headers are `traceparent`, `tracestate`, `baggage`, `sentry-trace`, `x-request-id` and `x-correlation-id`. They identify a request for tracing and don't change the answer. `baggage` can carry tenant or user IDs, and two calls that differ only there still share. Auth headers and cookies always stay in the key.
+
+The response is read once, and each caller decodes its own copy, so each has its own `data` for JSON and text. A `Blob`, `ArrayBuffer` or `FormData` result is handed to every caller as the same object, because copying it would cost the bytes `share` saves.
+
+Each caller holds a place in the shared request, counted by a refcount. A caller whose own `signal` or deadline fires gives up its place and stops waiting. When the last caller gives up, the request is aborted. Nobody is left to receive that abort, so it is never reported.
+
+The shared request's deadline is the endpoint's `timeout`, or the client's when the endpoint has none, counted from when the request was sent. A caller that joins late can't extend it, and `timeout: 0` on one call can't turn it off. If each new caller restarted it, a steady stream of callers could keep one request open forever.
+
+Every caller that runs out of the endpoint's or the client's `timeout` while it waits counts as one failure, and `onError` hears about it once. If the shared request then fails another way for callers still waiting, such as with a 500, that failure is reported too. A per-call `timeout` is its caller's own, and is reported on its own.
+
+A retry from `retryMiddleware` is a new attempt. It joins an identical attempt in flight at that moment, and otherwise sends its own. Nothing is kept between attempts. Each caller's `result.retry()` runs that caller's own call again, with its own options.
 
 #### Signal-replacing middleware
 
-A middleware can replace `ctx.request.signal`, as [Give each attempt its own timeout](#give-each-attempt-its-own-timeout) shows. Under `share`, liaise merges the signal that tracks the callers back in before `fetch`. The shared request is still cancelled once every caller has given up.
+A middleware can replace `ctx.request.signal`, as [Give each attempt its own timeout](#give-each-attempt-its-own-timeout) shows.
 
-Under `dedupe`, liaise merges the dedupe signal into yours the same way, so the request ends when either one fires. The dedupe signal is added when `fetch` is called. A middleware that reads `ctx.request.signal` before `next()` sees only the caller's signal and the deadline.
+Under `share`, the shared request is sent with a signal of its own. It fires only when every caller has given up or the shared deadline passes. A caller's own signal or deadline, and a signal its middleware installed, each release only that caller, whichever fires first. So a replaced signal that never fires can't keep a caller waiting past its own cancel.
+
+Under `dedupe`, liaise merges the dedupe signal into yours, so the request ends when either one fires. The dedupe signal is added when `fetch` is called. A middleware that reads `ctx.request.signal` before `next()` sees only the caller's signal and the deadline.
 
 #### Timeout backstop
 
@@ -1900,7 +1988,7 @@ await api.search({ q: 'hello' })
 
 A key that appears in both is sent twice. A call param named `api-version` gives `?api-version=2&api-version=3`, and the server decides which one counts. Headers merge by name, but query params can't, because an array param is already sent as repeated keys (`tags=a&tags=b`). To change a base param on each call, set it in a middleware.
 
-The full URL, base query included, appears in `ctx.request.url`, `error.request.url` and `logMiddleware`'s output, so anything that logs or reports it sends that query too. Put a secret in a header instead.
+The full URL, base query included, appears in `ctx.request.url`, `error.request.url` and the [log](#log-every-call) output, so anything that logs or reports it sends that query too. Put a secret in a header instead.
 
 #### URL fragments
 

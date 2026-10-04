@@ -7,6 +7,52 @@ For the full record of what changed in each release, see [CHANGELOG.md](./CHANGE
 
 ---
 
+## Upgrading to 5.1.0
+
+No code changes needed to run. A hand-built stand-in typed as `typeof api` or `typeof gql`
+(an object literal of `vi.fn()`s, say) no longer compiles, because every method now has
+`getHeaders`; give it `getHeaders: () => ({})`. Upgrade soon if you use `share` on a server
+with middleware that adds per-user credentials: before 5.1.0 one user's response could
+reach another. Twelve behaviours changed under `share`; check this if…
+
+1. **…a middleware has a side effect.** It now runs for every caller that joins a shared
+   request, so a counter or an audit write counts N, not 1.
+2. **…you read `logMiddleware` output on a shared endpoint.** It prints a line pair per
+   caller, tagged `, shared`.
+3. **…you passed identical per-call `headers` or `middleware` and expected no sharing.**
+   Those calls now share when everything else they send matches. Per-call headers that differ still do not.
+4. **…you call `result.retry()` on a shared result.** It uses the caller's own options,
+   not the first caller's.
+5. **…code relied on two sharers getting the same object.** JSON and text data are now a
+   copy per caller, so `a === b` is false. A `Blob`, `ArrayBuffer` or `FormData` is still
+   one object.
+6. **…per-call headers differ only in a tracing header** (`traceparent`, `tracestate`,
+   `baggage`, `sentry-trace`, `x-request-id`, `x-correlation-id`). Those calls now share
+   and send the first caller's values.
+7. **…you passed a `BigInt`, an object with hidden state, a nested `Map` or `Set`, or
+   `FormData` as params.** They used to decline sharing and are now compared as sent:
+   identical bytes share. A `FormData`, `Blob`, `ArrayBuffer`, typed array, `DataView` or
+   stream body never shares.
+8. **…a JSON body or GraphQL variables arrive with keys in varying order.** Different key
+   order is different bytes and no longer shares.
+9. **…you count `onError` calls on a shared endpoint.** It runs once per failed shared
+   request; a hung one (endpoint or client deadline) reports once, a later different
+   failure reports too, and a per-call timeout or abort is the caller's own.
+10. **…a middleware can hang under `share`.** Each caller runs its own pipeline, so it
+    reports once per caller.
+11. **…you mix per-call and endpoint `timeout` under `share`.** A per-call timeout bounds
+    that caller's own pipeline and beats the endpoint's for that caller; the endpoint or
+    client timeout bounds the shared request from when it was sent.
+12. **…a middleware replaces `ctx.request.signal` under `share`.** The caller's own signal
+    and the installed one each release only that caller; the shared request listens only
+    to its refcount and its own deadline.
+
+One more change outside `share`: a response body that arrived whole but failed to parse
+after the signal aborted is now `kind: 'parse'` (2xx) or `kind: 'http'` with `body: null`
+(non-2xx), not `'abort'`.
+
+---
+
 ## Upgrading to 5.0.3
 
 No action needed. Documentation only, plus corrected type comments in `src/types.ts`.
