@@ -47,10 +47,20 @@ Formerly published as `@iremlopsum/apify`; switching takes two steps, see [MIGRA
   - [When it fits, and when it doesn't](#when-it-fits-and-when-it-doesnt)
   - [How it compares](#how-it-compares)
   - [Where it runs](#where-it-runs)
-- [Philosophy](#philosophy)
-- [API Reference](#api-reference)
-- [Contributing](#contributing)
-- [License](#license)
+- [Design principles](#design-principles)
+- [Reference](#reference)
+  - [createApi options](#createapi-options)
+  - [createGraphQL options](#creategraphql-options)
+  - [Endpoint options](#endpoint-options)
+  - [Operation options](#operation-options)
+  - [CallOptions](#calloptions)
+  - [Result and ApiError](#result-and-apierror)
+  - [MiddlewareContext](#middlewarecontext)
+  - [Built-in middleware options](#built-in-middleware-options)
+  - [liaise/testing](#liaisetesting)
+  - [Exports](#exports)
+  - [Behaviour in detail](#behaviour-in-detail)
+- [Upgrading, contributing, licence](#upgrading-contributing-licence)
 
 ## The problem it solves
 
@@ -171,7 +181,7 @@ liaise has four pieces, and every call takes the same path through them. Middlew
 | Call | `api.getUser(params, options)`, where `options` can set `signal`, `timeout`, `headers` or `middleware` for this call only. |
 | `Result` | `{ data, error, response, retry }`, which is what every call returns. `data` and `error` are never both set. `retry()` runs the same call again. |
 
-Types flow from the endpoint definition through `createApi` to every call, so you never annotate a call. When you need a type by name, it is listed under [Type exports](#type-exports).
+Types flow from the endpoint definition through `createApi` to every call, so you never annotate a call. When you need a type by name, it is listed under [Exports](#exports).
 
 ### The path of one call
 
@@ -212,20 +222,6 @@ const api = createApi({
 
 await api.getReport() // sends x-api-version: 2
 await api.getReport({}, { headers: { 'x-api-version': '3' } }) // sends x-api-version: 3
-```
-
-### Type exports
-
-```ts
-import type {
-  Result,
-  CallOptions,
-  Middleware,
-  MiddlewareContext,
-  MiddlewareNext,
-  RequestConfig,
-  ApiConfig
-} from 'liaise'
 ```
 
 ## Guide
@@ -366,7 +362,7 @@ async function loadUser(id: string) {
 - **Branch on `error.kind`.** Four kinds share `status: 0`, and each needs different handling.
 - **A non-2xx response is always `'http'`**, even when its body doesn't parse. liaise checks the status before it reads the body, so a 500 with broken JSON is still a 500, and [`retryMiddleware`](#retries-caching-and-logging) still retries it.
 - **`response` is for the status and headers.** liaise has already read its body to produce `data` or `error.body`, so `response.json()` throws "Body has already been read". A `Response` you build yourself for `successResult()` in tests keeps its body.
-- Every field of `error` is listed under [`ApiError`](#apierror).
+- Every field of `error` is listed under [`ApiError`](#result-and-apierror).
 
 #### Trying again with retry()
 
@@ -726,7 +722,7 @@ const [a, b] = await Promise.all([
 - **`share` joins the call already running. [`dedupe`](#drop-stale-calls-with-dedupe) cancels it.** Setting both on one endpoint throws when you create the client, so you find the mistake straight away.
 - **Identical means the same endpoint and the same params, compared by content.** Key order doesn't matter, and two `Date`s with the same time match. Different params or a different endpoint never share. [Share key and refcount](#share-key-and-refcount) has the full rules.
 - **A per-call `headers` or `middleware` turns sharing off for that call.** Either one can change what is requested, so that call gets a request of its own.
-- **Params that can't be compared safely turn sharing off too.** These are a BigInt, an `ArrayBuffer`, `Blob`, `FormData` or `URLSearchParams`, a circular structure, and an object with no enumerable state, such as an `Error` or a class instance that keeps its state in private fields, at any depth. Two different values of those kinds could look the same, so that call gets its own request.
+- **Params that can't be compared safely turn sharing off too.** These include a BigInt, an `ArrayBuffer`, `Blob`, `FormData` or `URLSearchParams`, a circular structure, and an object with no enumerable state, such as an `Error` or a class instance that keeps its state in private fields, at any depth. Two different values of those kinds could look the same, so that call gets its own request.
 - **A `Date`, `Map`, `Set`, typed array or string param shares normally.**
 - **A per-call `signal` or `timeout` only lets that caller leave.** The caller that gives up gets `kind: 'abort'` or `'timeout'`, reported to [`onError`](#reporting-errors-with-onerror) as an unshared call would be. The request keeps running for the others, and is cancelled once every caller has given up.
 - **The endpoint's own `timeout` bounds the shared request for everyone.** It counts from when the request started. A caller that joins late can't extend it, and `timeout: 0` on one call can't turn it off.
@@ -1025,7 +1021,7 @@ for await (const page of paginate(api.listItems, { limit: 50 }, {
 - **Return `undefined` or `null` to stop.**
 - **An error page ends the walk.** You get the error page, and then the loop ends, because there is no data to read the next cursor from. You see what failed. The loop never stops quietly.
 - **`maxPages` has no default.** Set it if you want a ceiling, as in `paginate(api.listItems, { limit: 50 }, { next, maxPages: 100 })`. liaise doesn't pick a number, because a silent cut-off at an arbitrary page looks exactly like reaching the last one.
-- **Every other option applies to every page.** Any of the [`CallOptions`](#reference-in-progress), such as `signal`, `timeout` or `headers`, goes with each request, so one signal cancels the whole walk.
+- **Every other option applies to every page.** Any of the [`CallOptions`](#calloptions), such as `signal`, `timeout` or `headers`, goes with each request, so one signal cancels the whole walk.
 - **`paginate` yields pages.** Read the items from each page yourself. Flattening them would mean guessing which field holds the array.
 
 ### GraphQL
@@ -1196,7 +1192,7 @@ vi.spyOn(api, 'getUser').mockResolvedValue(successResult({ id: '42', name: 'Ada'
 vi.spyOn(api, 'getUser').mockResolvedValue(errorResult(404, { message: 'not found' }))
 ```
 
-More of the stub's behaviour, such as how it handles a signal, is under [liaise/testing behaviours](#liaisetesting-behaviours).
+More of the stub's behaviour, such as how it handles a signal, is under [liaise/testing](#liaisetesting).
 
 ## Recipes
 
@@ -1560,7 +1556,7 @@ With enough of your own code, every library gets the right result in almost ever
 
 ky is the closest alternative. Apart from throwing instead of returning errors, it differs from liaise in two rows of the table. Its search as you type needs code, and it sends the undefined path param. Out of the box, ky is the only one that times out, and it retries, as ofetch does. In size, liaise is larger than ofetch and smaller than ky and axios.
 
-In request overhead, liaise ties fetch and ofetch. axios and ky handle about 17% fewer requests per second than liaise. Overhead is measured in microseconds; on a real network each request takes milliseconds.
+In request overhead, liaise ties fetch and ofetch. axios and ky handle about 16% fewer requests per second than liaise. Overhead is measured in microseconds; on a real network each request takes milliseconds.
 
 ### Where it runs
 
@@ -1574,105 +1570,110 @@ On React Native, where `AbortSignal.timeout` is missing, `timeout` falls back to
 
 No hooks, no framework code: a client is a plain object of functions returning promises. It works in React, Vue, Svelte, Solid, Angular, server loaders, workers and scripts. The [recipes](#recipes) show it with TanStack Query, React and a store.
 
-## Philosophy
+## Design principles
 
 ### Never throws
 
-Every API call returns a `Result<T>`. HTTP errors, network failures, parse errors, and even synchronous exceptions during request setup are all captured and returned as structured `{ data, error, response, retry }` objects. No try/catch required at call sites.
+A thrown error doesn't show up in a function's type, so nothing reminds you to catch it, and one missed `try` breaks the page. A returned error is part of the type. TypeScript makes you check `error` before you can read `data`, and every failure arrives in the same shape.
 
 ### Zero dependencies
 
-The library uses only the standard `fetch` API and built-in web platform types (`Headers`, `AbortController`, `FormData`, `URLSearchParams`, `Blob`, `ArrayBuffer`). There is nothing to install, audit, or bundle beyond the library itself.
+Every dependency of liaise would also be a dependency of your app, with more to download, audit and update. liaise uses only what the runtime already has: `fetch`, `Headers`, `AbortController` and the other web types. Validators plug in through Standard Schema, which is only an interface, so schema support adds no package either. The size of each entry point is under [Exports](#exports).
 
 ### Middleware over interceptors
 
-Instead of separate `onRequest`/`onResponse` interceptor hooks, the library uses a composable onion model where each middleware wraps the next. This means a single function can modify the request, inspect the response, retry on failure, or short-circuit entirely. Three layers (global, per-request, per-call) plus `skipMiddleware` give fine-grained control without configuration complexity.
+Separate request and response interceptors split one job in two, and the halves can't share state or send the call again. A middleware wraps the whole call, so one function can set a header, read the result, retry, or answer from a cache. The built-in retry, cache and log are ordinary middleware, so anything they do, yours can do too.
 
-### Typed dot-access
+### Types by inference
 
-Type safety comes from inference, not annotation. Define `Request<TParams, TResponse>` once, and `createApi` infers everything downstream. The call site (`api.getUser(...)`) is fully typed with zero extra work.
+Types you write at each call site drift away from the endpoint they describe. In liaise you write the types once, on the endpoint, and the path supplies the path params. `createApi` carries them to every call, so a renamed param or a changed response is a compile error where it is used.
 
-### Runtime-agnostic
+### Any runtime
 
-No assumptions about Node.js, browsers, or any specific runtime. If your environment has `fetch`, the library works. [Where it runs](#where-it-runs) lists what is tested.
+liaise needs only `fetch` and the standard web types, so one client works in a browser, on a server, in a worker or in a script. Code that moves between them needs no second client and no adapter. [Where it runs](#where-it-runs) lists what CI tests.
 
-### Framework-agnostic
+### Any framework
 
-The library has no opinion about your UI framework, or whether you have one. A client is a plain object of functions that return promises, so the same definitions work in React, Vue, Svelte, Solid or Angular, in server loaders and actions, in workers, scripts and CLIs — and keep working when you change frameworks. It also means there are no hooks out of the box: pair it with the state or query library you already use (TanStack Query, SWR, Pinia, a store of your own). Those libraries expect a failed request to throw, so the query function is the place to turn a `Result`'s `error` into a throw — at the edge of your code, not inside this library.
+A client is a plain object of functions that return promises. That fits every UI framework, and code with no framework at all, and there is nothing to rewrite when you switch. Query libraries expect a failed call to throw, so you convert at that one edge, as the [TanStack Query recipe](#use-with-tanstack-query) does.
 
-## API Reference
+## Reference
 
-### Core (`liaise`)
+Every option, type and export, read from the source. The guide explains when to use each one.
 
-| Export          | Kind     | Description                                                        |
-| --------------- | -------- | ------------------------------------------------------------------ |
-| `createApi`     | function | Creates a typed API client from a config of Request definitions    |
-| `Request`       | class    | Typed endpoint definition -- one instance per endpoint             |
-| `defineRequest` | function | Typed factory — infers path params from the `path` literal, and enforces `responseType: 'none'`. |
-| `paginate` | function | Walks a paginated endpoint, yielding one `Result` per page. |
-| `PaginateOptions` | type | `next`, `maxPages`, and any `CallOptions`. |
-| `StandardSchemaV1` | type | The Standard Schema contract — for typing a helper that takes a validator. |
-| `InferOutput`      | type | The type a schema produces on success. |
-| `StandardIssue`    | type | One validation failure -- the shape of each entry in `error.body` when a schema refuses. |
-| `ApiError`      | class    | Structured error with status, kind, body, headers, and request metadata |
-| `ApiErrorKind`  | type     | `'http' \| 'network' \| 'abort' \| 'timeout' \| 'parse' \| 'middleware'` -- discriminates `ApiError.kind` |
-| `RequestConfig` | type     | Config object for the `Request` constructor                        |
-| `ApiConfig`     | type     | Config object for `createApi`                                      |
-| `CallOptions`   | type     | Per-call overrides (`middleware`, `skipMiddleware`, `headers`, `signal`, `timeout`) |
-| `Result`        | type     | Discriminated union of every API call's outcome: `SuccessResult<T> \| ErrorResult<T>` |
-| `SuccessResult` | type     | The success branch of `Result`: `{ data: T, error: null, response: Response, retry }` |
-| `ErrorResult`   | type     | The error branch of `Result`: `{ data: null, error: ApiError, response: Response \| null, retry }` |
-| `Middleware`    | type     | Middleware function signature: `(ctx, next) => Promise<Result>`    |
-| `MiddlewareContext` | type | Request context passed to middleware                               |
-| `MiddlewareNext` | type    | The `next` function passed to middleware                           |
-| `createGraphQL`     | function | Creates a typed GraphQL client from a config of Operation definitions  |
-| `Operation`         | class    | Typed operation definition -- one instance per GraphQL operation       |
-| `gql`               | const    | Tagged template literal for GraphQL documents (editor tooling support) |
-| `OperationConfig`   | type     | Config object for the `Operation` constructor                          |
-| `GraphQLBaseConfig` | type     | Config object for `createGraphQL`                                      |
-| `GraphQLError`      | type     | Shape of a single GraphQL error from `{ errors: [...] }`              |
+### createApi options
 
-### Built-in middleware (`liaise/middleware`)
+`createApi(config)` takes an `ApiConfig`.
 
-| Export            | Kind     | Description                                                   |
-| ----------------- | -------- | ------------------------------------------------------------- |
-| `retryMiddleware` | function | Factory that returns middleware retrying on 5xx by default, with a configurable backoff policy |
-| `RetryOptions`    | type     | Options object accepted by `retryMiddleware` (`max`, `delay`, `baseDelay`, `maxDelay`, `jitter`, `respectRetryAfter`, `retryOn`, `onRetry`) |
-| `RetryInfo`       | type     | Shape of the argument passed to `RetryOptions.onRetry`         |
-| `logMiddleware`   | const    | Middleware that logs request lifecycle to the console          |
-| `cacheMiddleware` | function | Factory that returns a per-request in-memory cache with `clear()` |
-| `CacheMiddleware` | type     | Return type of `cacheMiddleware()` -- a `Middleware` with an attached `clear()` |
+| Option | Type | Default | What it does |
+| ------ | ---- | ------- | ------------ |
+| `baseUrl` | `string` | required | Goes in front of every endpoint's path. It may carry a query string ([details](#baseurl-query-merging)). |
+| `requests` | an object of endpoints | required | Each key becomes a method on the client, such as `api.getUser`. |
+| `middleware` | `Middleware[]` | — | Runs on every call, before endpoint and call middleware. |
+| `headers` | `HeadersInit` | — | Sent with every call. An endpoint or a call can replace a header ([three levels](#three-levels-of-settings)). |
+| `onError` | `(error: ApiError) => void` | — | Called once per failed call, after all middleware. Never for `'abort'` ([details](#reporting-errors-with-onerror)). |
 
-### Testing (`liaise/testing`)
+### createGraphQL options
 
-| Export          | Kind     | Description                                                        |
-| --------------- | -------- | ------------------------------------------------------------------ |
-| `mockFetch`     | function | Builds a route-matching `fetch` stub, with `install()`/`restore()`, call recording, and response sequencing |
-| `jsonResponse`  | function | Builds a `Response` with a JSON body and a `content-type` header, for use as a route value |
-| `successResult` | function | Builds a well-formed success `Result<T>` directly, for stubbing at the `Result` level |
-| `errorResult`   | function | Builds a well-formed error `Result<T>` with a given HTTP status, for stubbing at the `Result` level |
-| `RouteContext`  | type     | `{ params, request }` passed to a route handler function          |
-| `RouteHandler`  | type     | `(ctx: RouteContext) => Response \| Promise<Response>` -- a route value that computes its response |
-| `RouteValue`    | type     | `Response \| RouteHandler \| Array<Response \| RouteHandler>` -- anything a route key can map to |
-| `RecordedCall`  | type     | `{ method, url, headers, body }` -- shape of each entry in `mock.calls` |
+`createGraphQL(config)` takes a `GraphQLBaseConfig`, plus either `operations` or `queries` and `mutations` ([Queries and mutations](#queries-and-mutations)).
 
-## Contributing
+| Option | Type | Default | What it does |
+| ------ | ---- | ------- | ------------ |
+| `endpoint` | `string` | required | The full URL of the GraphQL endpoint. |
+| `middleware` | `Middleware[]` | — | Runs on every operation, before operation and call middleware. |
+| `headers` | `HeadersInit` | — | Sent with every operation. An operation or a call can replace a header. |
+| `onError` | `(error: ApiError) => void` | — | Called once per failed call, GraphQL errors included. Never for `'abort'`. |
 
-Bug reports, fixes and ideas are welcome. See [CONTRIBUTING.md](./CONTRIBUTING.md) for how to report a bug, run the tests, and the few rules a pull request is checked against.
+### Endpoint options
 
-## License
+`defineRequest<T>()(config)` and `new Request(config)` take a `RequestConfig`.
 
-MIT
+| Option | Type | Default | What it does |
+| ------ | ---- | ------- | ------------ |
+| `method` | `'GET' \| 'POST' \| 'PUT' \| 'PATCH' \| 'DELETE'` | required | The HTTP method. |
+| `path` | `string` | required | The path after `baseUrl`. Each `:name` is filled from the params ([Defining endpoints](#defining-endpoints)). |
+| `middleware` | `Middleware[]` | — | Runs on every call to this endpoint, after client middleware. |
+| `headers` | `HeadersInit` | — | Sent with every call to this endpoint. Replaces the client's value for the same header. |
+| `responseType` | `'json' \| 'text' \| 'blob' \| 'arrayBuffer' \| 'formData' \| 'none'` | `'json'` | How the response body is read ([Reading responses](#reading-responses)). |
+| `schema` | `StandardSchemaV1` | — | Checks a 2xx body, and `data` becomes the schema's output ([Validating responses](#validating-responses)). |
+| `dedupe` | `boolean` | `false` | A new call cancels the one still running ([details](#drop-stale-calls-with-dedupe)). |
+| `share` | `boolean` | `false` | Identical calls join one request ([details](#sharing-identical-requests)). Can't be combined with `dedupe`. |
+| `bodyAs` | `'query' \| 'body'` | `'query'` for `GET` and `DELETE`, `'body'` for the rest | Where the params that aren't in the path go. |
+| `timeout` | `number` (ms) | no deadline | One deadline for the whole call, retries included ([details](#set-a-deadline-with-timeout)). |
 
-## Reference (in progress)
+### Operation options
 
-These facts are waiting for the final Reference section.
+`new Operation(config)` takes an `OperationConfig`.
 
-### Result type
+| Option | Type | Default | What it does |
+| ------ | ---- | ------- | ------------ |
+| `operation` | `string` | required | The GraphQL document, sent as `query` in the body. |
+| `middleware` | `Middleware[]` | — | Runs on every call to this operation, after client middleware. |
+| `headers` | `HeadersInit` | — | Sent with every call to this operation. Replaces the client's value for the same header. |
+| `dedupe` | `boolean` | `false` | A new call cancels the one still running. |
+| `schema` | `StandardSchemaV1` | — | Checks the response's `data`. The response type stays explicit ([Validating responses](#validating-responses)). |
+| `timeout` | `number` (ms) | no deadline | One deadline for the whole call, retries included. |
+
+### CallOptions
+
+The second argument of every call, as in `api.getUser(params, options)`. [`paginate`](#pagination) takes the same options and applies them to every page.
+
+| Option | Type | Default | What it does |
+| ------ | ---- | ------- | ------------ |
+| `middleware` | `Middleware[]` | — | Runs after the client's and the endpoint's middleware. Turns off `share` for this call. |
+| `skipMiddleware` | `Middleware[]` | — | Middleware to leave out of this call, matched by reference ([details](#skipping-a-middleware-for-one-call)). |
+| `headers` | `HeadersInit` | — | Replaces the client's and the endpoint's value for the same header. Turns off `share` for this call. |
+| `signal` | `AbortSignal` | — | Cancels the call, which ends with `kind: 'abort'` ([details](#cancel-with-a-signal)). |
+| `timeout` | `number` (ms) | the endpoint's `timeout` | Replaces the endpoint's deadline for this call. `0` turns it off. |
+
+A fractional `timeout` is rounded down to whole milliseconds, with a minimum of 1 ms. A value above the timer limit of 2³¹ − 1 ms is capped there. Zero or a negative number means no deadline.
+
+### Result and ApiError
+
+Every call returns a `Result`. `data` and `error` are never both set, so checking `error` narrows `data`.
 
 ```ts
 interface SuccessResult<TResponse> {
-  data: TResponse                          // parsed response
+  data: TResponse
   error: null
   response: Response                       // always present on success
   retry: () => Promise<Result<TResponse>>
@@ -1680,70 +1681,258 @@ interface SuccessResult<TResponse> {
 
 interface ErrorResult<TResponse> {
   data: null
-  error: ApiError                          // structured error, see below
-  response: Response | null                // present for HTTP/parse failures, null for network/abort/timeout
+  error: ApiError
+  response: Response | null                // null when no response arrived
   retry: () => Promise<Result<TResponse>>
 }
 
 type Result<TResponse> = SuccessResult<TResponse> | ErrorResult<TResponse>
 ```
 
-### ApiError
+`response` is set for `'http'` and `'parse'` errors, where the server answered. It is `null` for `'network'`, `'abort'`, `'timeout'` and `'middleware'`.
 
-The error object on failed calls. It is not a subclass of `Error` -- it is a structured container for API-level error details.
+`ApiError` is the `error` of a failed call. It is a plain class and doesn't extend `Error`.
 
-| Property     | Type      | Description                                                       |
-| ------------ | --------- | ----------------------------------------------------------------- |
-| `status`     | `number`  | HTTP status code (e.g., 404, 500). `0` for network errors, aborts, and timeouts. |
-| `kind`       | `'http' \| 'network' \| 'abort' \| 'timeout' \| 'parse' \| 'middleware'` | What category of failure this is. See below. Required -- constructing an `ApiError` yourself (e.g. in custom middleware) must supply it. |
-| `statusText` | `string`  | HTTP status text (e.g., 'Not Found'). `''` for network errors.    |
-| `body`       | `unknown` | Parsed response body -- but for `'parse'`, one of: the thrown exception (a malformed body), the raw response text (an empty body, or a GraphQL response carrying no data), a schema's issues array (the response failed validation), or a value a schema threw. The native Error for network failures. |
-| `headers`    | `Headers` | Response headers. Empty `Headers` for network errors.             |
-| `request`    | `object`  | `{ method, url, params }` -- metadata about the failed request; `url` is the resolved, path-substituted address, falling back to the route template only when it could not be built. |
-| `partialData` | `unknown` (optional) | GraphQL data returned alongside `{ errors }` (partial success). Lives here, not on `Result.data`, so the `Result` stays a clean union: `data` is non-null iff `error` is null. `undefined` for every REST error and for GraphQL responses carrying no data. |
+| Property | Type | What it holds |
+| -------- | ---- | ------------- |
+| `kind` | `ApiErrorKind` | What went wrong. The [kinds table](#handling-errors) says what each one means. If you build an `ApiError` yourself, for example in a middleware, `kind` is required. |
+| `status` | `number` | The response's status for `'http'` and `'parse'`. `0` for `'network'`, `'abort'`, `'timeout'` and `'middleware'`. |
+| `statusText` | `string` | The response's status text, `'GraphQL Error'` for a GraphQL error, and `''` when no response arrived. |
+| `body` | `unknown` | For `'http'`, the error body, or `null` when it is empty or doesn't parse. For `'parse'`, what the [Validating responses](#validating-responses) and [Reading responses](#reading-responses) rules say. Otherwise, the thrown value. |
+| `headers` | `Headers` | The response headers. Empty when no response arrived. |
+| `request` | `{ method, url, params }` | The failed request. `url` is the address with the params filled in. It is the path template only when the URL couldn't be built. |
+| `partialData` | `unknown` (optional) | For a GraphQL error, the data the server sent with the errors. `undefined` for every REST error. |
 
-You can use `instanceof` to check if a value is an `ApiError`:
+```ts
+type ApiErrorKind = 'http' | 'network' | 'abort' | 'timeout' | 'parse' | 'middleware'
+```
+
+You can check for an `ApiError` with `instanceof`:
 
 ```ts
 import { ApiError } from 'liaise'
 
 if (error instanceof ApiError) {
-  // ...
+  console.error(error.kind, error.status)
 }
 ```
 
-### baseUrl query merging
+### MiddlewareContext
 
-A `baseUrl` may carry its own query string — a fixed API key, say. Its params
-are merged ahead of the call's:
+The first argument of every middleware, `ctx`:
+
+| Property | Type | What it holds |
+| -------- | ---- | ------------- |
+| `request.method` | `string` | The HTTP method, such as `'GET'`. |
+| `request.url` | `string` | The full URL, with path params and query string filled in. |
+| `request.path` | `string` | The path template, such as `'/users/:id'`. |
+| `request.params` | `unknown` | The params as the caller passed them. |
+| `request.headers` | `Headers` | The merged headers. A middleware can add, change or remove them. |
+| `request.body` | `unknown` | The serialized body, or `null` when there is none. |
+| `request.signal` | `AbortSignal \| undefined` | The signal `fetch` receives. A middleware can replace it ([Signals in middleware](#signals-in-middleware)). |
+| `requestName` | `string` | The endpoint's key, such as `'getUser'`. |
+
+How a replaced signal works with `share` and `dedupe` is under [Signal-replacing middleware](#signal-replacing-middleware).
+
+### Built-in middleware options
+
+#### RetryOptions
+
+`retryMiddleware(n)` is short for `retryMiddleware({ max: n })`, and `retryMiddleware()` means `{ max: 3 }`.
+
+| Option | Type | Default | What it does |
+| ------ | ---- | ------- | ------------ |
+| `max` | `number` | `3` | Retries after the first attempt. `max: 2` means up to 3 calls in all. |
+| `delay` | `'exponential' \| 'linear' \| (attempt: number) => number` | `'exponential'` | The wait before each retry. Exponential is `baseDelay * 2^(attempt-1)` and linear is `baseDelay * attempt`. A function gets the 1-based attempt and returns milliseconds. |
+| `baseDelay` | `number` (ms) | `250` | The first wait, before jitter and `Retry-After`. |
+| `maxDelay` | `number` (ms) | `30000` | The longest any wait can be, a `Retry-After` value included. |
+| `jitter` | `boolean` | `true` | Waits a random time between 0 and the computed delay, so many clients don't retry at the same moment. Never applied to a `Retry-After` value. |
+| `respectRetryAfter` | `boolean` | `true` | Uses the server's `Retry-After` header, in seconds or as a date, in place of the computed wait. `maxDelay` still caps it. |
+| `retryOn` | `(result: Result<unknown>, attempt: number) => boolean` | `r => (r.error?.status ?? 0) >= 500` | Whether to retry. It gets the 1-based number of the attempt it would start, and is called even once `max` is reached. |
+| `onRetry` | `(info: RetryInfo) => void` | — | Called before each wait. Its return value is ignored, and if it throws, the call goes on. |
+
+`RetryInfo`, the argument to `onRetry`:
+
+| Field | What it holds |
+| ----- | ------------- |
+| `attempt` | The retry about to run, counting from 1. |
+| `max` | The configured `max`. |
+| `delay` | The wait about to start, in milliseconds, after jitter and `Retry-After`. |
+| `result` | The `Result` that caused this retry. |
+
+#### Cache options
+
+`cacheMiddleware(options)` returns a middleware with a `clear()` method, typed `CacheMiddleware`.
+
+| Option | Type | Default | What it does |
+| ------ | ---- | ------- | ------------ |
+| `ttl` | `number` (ms) | `300000` (5 minutes) | How long an entry is served. An expired entry is removed when it is next read. |
+| `maxSize` | `number` | `50` | How many entries the store keeps. When it is full, the oldest entry is dropped. |
+| `debug` | `boolean` | `false` | Logs `[liaise cache] HIT` or `MISS`, with the endpoint and its params, to the console. |
+
+What goes into the key is under [Cache key](#cache-key).
+
+#### Log output
+
+`logMiddleware` logs one line when a call starts and one when it ends:
+
+```text
+[liaise] → <method> <endpoint> <url>
+[liaise] ← <endpoint> OK (<ms>ms)
+[liaise] ← <endpoint> ERROR <status> (<ms>ms)
+```
+
+The time covers everything that runs inside it: the middleware after it and the request. An error with no response logs status `0`.
+
+### liaise/testing
+
+| Export | Kind | What it is |
+| ------ | ---- | ---------- |
+| `mockFetch` | function | Builds a `fetch` stub that matches routes, with `install()`, `restore()`, call recording and response sequences. |
+| `jsonResponse` | function | Builds a `Response` with a JSON body and a `content-type` header. |
+| `successResult` | function | Builds a success `Result`, for stubbing at the `Result` level. |
+| `errorResult` | function | Builds an error `Result` with a given HTTP status, for stubbing at the `Result` level. |
+| `RouteContext` | type | `{ params, request }`, passed to a route function. |
+| `RouteHandler` | type | `(ctx: RouteContext) => Response \| Promise<Response>`, a route value that builds its response. |
+| `RouteValue` | type | `Response \| RouteHandler \| Array<Response \| RouteHandler>`, anything a route key can map to. |
+| `RecordedCall` | type | `{ method, url, headers, body }`, one entry in `mock.calls`. |
+
+How the stub behaves, beyond [Testing your code](#testing-your-code):
+
+- **It honours `init.signal`, like real `fetch`.** A signal that is already aborted, or aborts while a route function is still pending, rejects with its `reason`. So a route that never answers, `() => new Promise(() => {})`, lets you test your own `timeout` and cancel handling.
+- **An aborted call is still recorded** in `calls` and counted by `callCount`, but it doesn't use up a response from a sequence.
+- **`restore()` puts back whatever `globalThis.fetch` was when `install()` ran.** If it was `undefined`, `restore()` puts back `undefined`.
+- **A route key without a space**, such as `'/users'`, throws when you call `mockFetch`, and the message names the key.
+- **Routes are tried in the order you wrote them**, and the first match wins. Put the more specific route first when two could match the same path.
+- **Trailing and doubled slashes are ignored on both sides.** `/a/b/`, `/a//b` and `/a/b` all match the same route.
+
+### Exports
+
+Each entry point is a separate import, and your bundler leaves out what you don't import. Gzipped, as measured by `npm run size`: about 5.8 kB for a REST-only import, 6.9 kB for the whole core entry, and 8.0 kB with all the middleware.
+
+**`liaise`**
+
+| Export | Kind | What it is |
+| ------ | ---- | ---------- |
+| `createApi` | function | Creates a REST client from your endpoints. |
+| `defineRequest` | function | Defines an endpoint, with params checked against the path. |
+| `Request` | class | The endpoint class that `defineRequest` builds ([Without defineRequest](#without-definerequest)). |
+| `paginate` | function | Walks a paginated endpoint, one `Result` per page. |
+| `ApiError` | class | The `error` of a failed call. |
+| `createGraphQL` | function | Creates a GraphQL client from your operations. |
+| `Operation` | class | Defines one GraphQL operation. |
+| `gql` | function | Marks a template string as GraphQL for your editor, and returns it as a plain string. |
+| `Result`, `SuccessResult`, `ErrorResult` | type | What every call returns, and its two branches. |
+| `ApiErrorKind` | type | The union of `error.kind` values. |
+| `CallOptions` | type | The second argument of a call. |
+| `PaginateOptions` | type | `next`, `maxPages`, and any `CallOptions`. |
+| `ApiConfig`, `RequestConfig` | type | The configs of `createApi` and an endpoint. |
+| `GraphQLBaseConfig`, `OperationConfig` | type | The configs of `createGraphQL` and an `Operation`. |
+| `GraphQLError` | type | One entry of a GraphQL `errors` array. |
+| `Middleware`, `MiddlewareContext`, `MiddlewareNext` | type | A middleware, its `ctx`, and its `next`. |
+| `StandardSchemaV1`, `InferOutput`, `StandardIssue` | type | The Standard Schema interface, the type a schema produces, and one validation issue. |
+
+**`liaise/middleware`**
+
+| Export | Kind | What it is |
+| ------ | ---- | ---------- |
+| `retryMiddleware` | function | Returns a middleware that retries failed calls ([RetryOptions](#retryoptions)). |
+| `cacheMiddleware` | function | Returns a middleware that caches successes in memory ([Cache options](#cache-options)). |
+| `logMiddleware` | middleware | Logs each call to the console ([Log output](#log-output)). |
+| `RetryOptions`, `RetryInfo` | type | The options of `retryMiddleware`, and the argument to `onRetry`. |
+| `CacheMiddleware` | type | What `cacheMiddleware()` returns, a `Middleware` with `clear()`. |
+
+**`liaise/testing`** exports are listed under [liaise/testing](#liaisetesting).
+
+### Behaviour in detail
+
+Edge cases the guide links to.
+
+#### Cache key
+
+`cacheMiddleware` keys each entry on the endpoint name, the method, the full URL, the params and every request header except `Content-Type`. A different `Authorization`, base URL or query value gets its own entry.
+
+The query string is sorted by name before it goes in the key, so `?a=1&b=2` and `?b=2&a=1` are one entry. It is sorted by the raw, undecoded name, and repeated names keep their order. A query param that a middleware adds before the cache, such as `?lang=de`, is part of the key.
+
+Params are keyed by content, by the same rules as [`share`](#share-key-and-refcount). Params that `share` can't compare are never cached and never served from the cache. Each `cacheMiddleware()` call makes its own store, so two stores never share entries.
+
+#### Share key and refcount
+
+Two calls share when they go to the same endpoint and their params have the same key. The key is built from content. Object keys are sorted, and an `undefined` member is dropped, so `{ a: undefined }` and `{}` match. A value with a `toJSON` method is keyed by what it returns, so a `Date` is its ISO string. A `Map`, `Set` or typed array is keyed by its entries.
+
+A call can't share when its params hold any of these, at any depth:
+
+- a BigInt
+- a function or a symbol
+- an `ArrayBuffer`, `Blob`, `FormData` or `URLSearchParams`
+- a boxed primitive, such as `new String('a')`
+- a circular structure
+- an object with no enumerable keys that isn't a plain object, such as an `Error`, a `Promise`, or a class instance that keeps its state in private fields
+
+Per-call `headers: {}` and `middleware: []` are empty, so they don't turn sharing off. Only a header or a middleware that is actually there does.
+
+Each caller holds a place in the shared request. A caller whose own `signal` or `timeout` fires gives up its place, and the request is cancelled when the last place is given up. What that caller receives is under [Sharing identical requests](#sharing-identical-requests).
+
+The endpoint's `timeout` counts from when the shared request started. If each new caller restarted it, a steady stream of callers could keep one request open forever.
+
+#### `retry()` on a shared result
+
+Every caller that waits to the end gets the same `Result` object. Its `retry()` uses the per-call options of the caller that started the shared request (its headers, signal and timeout), whoever calls it. A retry is never shared. It sends a request of its own.
+
+#### Signal-replacing middleware
+
+A middleware can replace `ctx.request.signal`, as [Signals in middleware](#signals-in-middleware) shows. Under `share`, liaise merges the signal that tracks the callers back in before `fetch`. The shared request is still cancelled once every caller has given up.
+
+Under `dedupe`, liaise merges the dedupe signal into yours the same way, so the request ends when either one fires. The dedupe signal is added when `fetch` is called. A middleware that reads `ctx.request.signal` before `next()` sees only the caller's signal and the deadline.
+
+#### Timeout backstop
+
+A middleware may wait on work of its own before it calls `next()`, such as a token refresh. If that work never settles, the call still ends at its deadline. Here `user` stands for your auth client:
 
 ```ts
-const api = createApi({
-  baseUrl: 'https://api.example.com/v1?key=abc',
-  requests: { search: new Request<{ q: string }, Hit[]>({ method: 'GET', path: '/search' }) },
-})
+const auth: Middleware = async (ctx, next) => {
+  const token = await user.getIdToken() // stalls on a bad network
+  ctx.request.headers.set('Authorization', `Bearer ${token}`)
+  return next()
+}
+// With timeout: 45_000, the call still settles after about 45 s: kind 'timeout', status 0.
+```
+
+When the deadline passes, the chain gets one macrotask to answer on its own. That is enough for anything that already reacts to the abort: `fetch` rejecting, a middleware rethrowing the reason, or a fallback that turns a timeout into a cached response. Each of those keeps its own `Result`.
+
+A chain still waiting after that is stuck on something the signal doesn't reach. The call then settles with `kind: 'timeout'` and `status: 0`, and `onError` is called once. A caller's `signal` works the same way, with `kind: 'abort'`, which `onError` never sees.
+
+The stuck middleware keeps running, because a promise can't be cancelled. Whatever it returns or throws later is discarded, with no second `Result` and no second `onError`. If it calls `next()` after the call has settled, nothing is sent, and `next()` returns the `Result` the caller already has.
+
+#### Abort classification
+
+liaise decides whether a failure is a cancellation by checking whether this call's own signal aborted. The thrown value's name and type don't matter. A custom reason, such as `controller.abort(new Error('unmounted'))` or a plain string, still gives `kind: 'abort'`, and a deadline gives `'timeout'`.
+
+A middleware that rethrows liaise's own abort or timeout reason, as it is or wrapped once as the `cause` of another error, gives `'abort'` or `'timeout'` too. Anything else a middleware throws is `'middleware'`.
+
+#### baseUrl query merging
+
+A `baseUrl` can carry its own query string, such as a fixed API key. Its params go in front of the call's:
+
+```ts
+import { createApi, defineRequest } from 'liaise'
+
+type Hit = { id: string }
+
+const search = defineRequest<Hit[], { q: string }>()({ method: 'GET', path: '/search' })
+const api = createApi({ baseUrl: 'https://api.example.com/v1?key=abc', requests: { search } })
 
 await api.search({ q: 'hello' })
 // GET https://api.example.com/v1/search?key=abc&q=hello
 ```
 
-Merging **accumulates**, it does not override: a call param whose key the base
-already used produces both, `?key=abc&key=xyz`, and which one wins is the
-server's decision. This differs from headers, where a per-call value replaces a
-global one — because array params already serialize as repeated keys
-(`tags=a&tags=b`), so collapsing duplicates would break them. If a base-level
-param needs to vary per call, set it from middleware rather than the `baseUrl`.
+A key that appears in both is sent twice. A call param named `key` gives `?key=abc&key=xyz`, and the server decides which one counts. Headers merge by name, but query params can't, because an array param is already sent as repeated keys (`tags=a&tags=b`). To change a base param on each call, set it in a middleware.
 
-### URL fragments
+#### URL fragments
 
-**A `#fragment` is refused.** A fragment is never sent to the server, so one in
-a `path` or `baseUrl` cannot do what it appears to. It is an error naming the offending
-value, rather than being stripped, so the dead code does not stay in your
-template.
+A `#` written into a `path` or a `baseUrl` is refused, because a fragment is never sent to the server. The call returns an error with `kind: 'network'` and a `TypeError` in `error.body` that names the value. Nothing is sent. liaise refuses the fragment instead of stripping it, so the dead part doesn't stay in your code.
 
-A fragment in a [`defineRequest`](#defining-endpoints) `path` **literal**
-is also a compile error, so the endpoint is rejected where it is declared rather
-than on every call:
+`defineRequest` also refuses a fragment in a `path` literal, at compile time:
 
 ```ts
 defineRequest<Doc>()({ method: 'GET', path: '/docs#section' })
@@ -1751,133 +1940,28 @@ defineRequest<Doc>()({ method: 'GET', path: '/docs#section' })
 //                                            a URL fragment is never sent to the server
 ```
 
-The check reads the literal, so a path assembled at runtime — or a
-`RequestConfig`-typed variable — still compiles and is caught by the runtime
-error instead. `new Request` takes no path literal, so it has no equivalent
-check; this is one of the things `defineRequest` buys you.
+The check reads the literal. A path built at runtime, or a variable typed as `RequestConfig`, still compiles and is refused when it is called. `new Request` has no compile-time check.
 
-**A `#` inside a param *value* is not a fragment** and is never refused — it is
-escaped to `%23` and sent as ordinary data:
+A `#` inside a param value is data. It is escaped to `%23` and sent:
 
 ```ts
-await api.getDoc({ id: 'a#b' })   // → GET /docs/a%23b
-await api.search({ tag: 'a#b' })  // → GET /search?tag=a%23b
+await api.getDoc({ id: 'a#b' })   // GET /docs/a%23b
+await api.search({ tag: 'a#b' })  // GET /search?tag=a%23b
 ```
 
-Only a `#` written into a `path` or `baseUrl` is refused, because that one was
-never going to reach the server.
+#### Stream bodies
 
-### Timeout backstop
+A `ReadableStream` body is used up as it is sent, so liaise can't send it again. A second attempt, from `retryMiddleware` or `result.retry()`, returns `kind: 'network'` and `status: 0`, with a `TypeError` that tells you to read the stream into a `Blob` or `ArrayBuffer` first. Under `retryMiddleware` that error is the final `Result`, so the 5xx that caused the retry isn't in it.
 
-**The deadline bounds middleware that never looks at the signal, too.** A middleware that awaits something of its own before calling `next()` — a token refresh, say — cannot hold the call past its `timeout`, even if that work never settles:
+#### Empty bodies
 
-```ts
-const auth: Middleware = async (ctx, next) => {
-  const token = await user.getIdToken()   // stalls on a bad network
-  ctx.request.headers.set('Authorization', `Bearer ${token}`)
-  return next()
-}
-// With timeout: 45_000, the call still settles at ~45s: kind 'timeout', status 0.
-```
+- **A 2xx with an empty body under `'json'`** is a `'parse'` error, as [Reading responses](#reading-responses) says. It keeps the response's own status, with no special case for 204, and its `Result` still has `retry()`.
+- **A non-2xx with an empty body** is an ordinary `'http'` error with `error.body` set to `null`. So is a non-2xx whose JSON body doesn't parse, such as an HTML page from a gateway. Nobody promised a body on failure, so neither is a `'parse'` error.
+- **Under `'none'`**, an empty error body is `null` too.
+- **On GraphQL**, a 2xx with neither `data` nor `errors` is a `'parse'` error with the raw text in `error.body` ([GraphQL errors](#graphql-errors)). That includes a root of `null`, a number or an array. Each is valid JSON, but GraphQL requires an object.
 
-When the deadline passes, the chain gets one macrotask to answer by itself. That is enough for everything that already responds to the abort — `fetch` rejecting, a middleware rethrowing the reason, a fallback middleware that turns a timeout into a cached response — so all of those keep their own `Result` exactly as before. A chain still pending after that is waiting on something the signal does not reach, and the call settles with the same `Result` an aborted `fetch` would have produced: `kind: 'timeout'`, `status: 0`, reported to `onError` once. A caller's own `signal` works the same way, with `kind: 'abort'`, which is not reported.
+## Upgrading, contributing, licence
 
-A promise cannot be cancelled, so the stalled middleware keeps running. Whatever it eventually returns or throws is discarded — no second `Result`, no second `onError` — and if it calls `next()` after the call has settled, no request is sent: `next()` hands back the `Result` the caller already has. To stop the work itself, pass `ctx.request.signal` into it (see [`MiddlewareContext`](#middlewarecontext)).
-
-### Abort classification
-
-A cancellation is classified by **provenance**, not by sniffing the thrown value's shape: whatever a middleware or `fetch` actually throws, if it happened because *this request's own signal* aborted, the `Result` is `kind: 'abort'` (or `'timeout'` for a deadline) regardless of the reason's name or type -- a caller-supplied custom abort reason (`controller.abort(new Error('unmounted'))`, or a plain string) still classifies as `'abort'`, not `'network'`.
-
-A middleware that propagates the library's own abort/timeout signal (verbatim, or wrapped one level as `.cause`) is classified `'abort'`/`'timeout'` instead of `'middleware'`, by provenance rather than by the reason's name.
-
-### Stream bodies
-
-Under `retryMiddleware`, the "cannot resend" error is the Result you end up with: after a 5xx, the final Result is the "cannot resend" `TypeError` (status 0), so the original 503 is not in it.
-
-### Share key and refcount
-
-**What counts as "identical":** the request name plus a content-based key of the params — object keys sorted, `undefined` members dropped (so `{ a: undefined }` and `{}` are one key), anything with `toJSON` keyed by what it returns (a `Date` is its ISO string), `Map`, `Set` and typed arrays keyed by their entries. Two calls with the same params to the same endpoint share; different params (or different endpoints) never do.
-
-**What does *not* disable sharing:** a per-call `signal` or `timeout`. These bound *who is still waiting*, not *what is being asked for*, so they're tracked with a per-caller refcount instead: each sharer's own signal/timeout only removes that caller from the wait list. The underlying request keeps running for everyone else, and is only aborted once every sharer — including the one that gave up — has stopped waiting. A sharer that gives up gets an error `Result` (`kind: 'timeout'` or `kind: 'abort'`), reported to `onError` exactly as the identical non-shared call would be — which means a `'timeout'` give-up reports and an `'abort'` give-up does not (see [Reporting errors with onError](#reporting-errors-with-onerror)).
-
-**A per-*request* `timeout` is different: it belongs to the operation.** `RequestConfig.timeout` bounds the single shared request itself, measured from when that request started — not from when each caller joined it. Every sharer is therefore bounded by it, a late joiner cannot extend it, and a caller passing `timeout: 0` cannot switch it off for everyone else. Without that, a steadily arriving stream of joiners would keep one socket open indefinitely against a deadline that was supposed to cap it.
-
-### `retry()` on a shared result
-
-**`result.retry()` on a shared result** re-runs the pipeline using the *acquiring caller's* own per-call options (headers, signal, timeout) — that is, whichever call first started the shared request, not whichever caller happens to invoke `retry()`. This falls out of every non-aborting sharer receiving the literal same `Result` object; it's unavoidable given that design, but worth knowing before relying on it.
-
-### Signal-replacing middleware
-
-**Signal-replacing middleware is safe under `share: true`.** A middleware that installs its own `ctx.request.signal` (a per-attempt timeout, say) does not detach the shared request from the refcount: the refcount signal is merged back in before `fetch`, so the request is still aborted once every sharer has given up.
-
-Under `dedupe: true` your signal is merged rather than discarded: the request is cancelled by whichever fires first -- your signal, or a newer call superseding this one. The dedupe signal is installed by the core fetch, so middleware reading `ctx.request.signal` before `next()` sees the caller's signal, not the dedupe one.
-
-### RetryOptions
-
-Automatically retries requests that fail, with a real backoff policy — exponential (or linear, or custom) delay curves, full jitter, `Retry-After` support, a configurable retry predicate, and an observational `onRetry` hook.
-
-| Option              | Type                                              | Default          | Description |
-| -------------------- | -------------------------------------------------- | ----------------- | ----------- |
-| `max`                | `number`                                            | `3`               | Additional attempts after the first. `retryMiddleware({ max: 2 })` means up to 3 total calls. |
-| `delay`              | `'exponential' \| 'linear' \| (attempt: number) => number` | `'exponential'`   | The delay curve. Exponential is `baseDelay * 2^(attempt-1)`; linear is `baseDelay * attempt`; a function receives the 1-based attempt number and returns milliseconds. |
-| `baseDelay`          | `number`                                            | `250`             | The first delay, in milliseconds, before jitter and `Retry-After` are applied. |
-| `maxDelay`           | `number`                                            | `30000`           | Hard cap applied to every computed delay, including a `Retry-After` value. |
-| `jitter`             | `boolean`                                           | `true`            | Full jitter: the actual delay is `Math.random() * computed`, per AWS's recommendation for de-synchronizing a thundering herd. Never applied to a `Retry-After` value — a server telling you exactly when to come back should not be randomized. |
-| `respectRetryAfter`  | `boolean`                                           | `true`            | Honor a `Retry-After` response header (delta-seconds or an HTTP-date) when present, replacing the computed delay outright (still capped by `maxDelay`). |
-| `retryOn`            | `(result: Result<unknown>, attempt: number) => boolean` | `r => (r.error?.status ?? 0) >= 500` | Whether to retry. Called with the 1-based *candidate* attempt number, even once `max` is reached, so a predicate that counts attempts sees one call per result. |
-| `onRetry`            | `(info: RetryInfo) => void`                         | —                 | Observational hook fired before each retry's delay elapses. Its return value is ignored, and a throw cannot fail the request — this is the only way to observe an in-progress retry sequence, since the call site sees nothing until the final result. |
-
-`RetryInfo` (the argument to `onRetry`): `{ attempt, max, delay, result }` — `attempt` is 1-based (the first retry is `1`), `delay` is the actual delay about to elapse (after jitter and `Retry-After`), and `result` is the `Result` that triggered this retry.
-
-**429 and network errors are opt-in.** The default `retryOn` leaves them out. [Retries, caching and logging](#retries-caching-and-logging) shows how to add them.
-
-**An abort during backoff surfaces as the abort, not the stale result it was retrying.** If the signal driving the request — a whole-operation `timeout`, a caller's own `AbortSignal`, or a dedupe supersede — fires while `retryMiddleware` is sleeping between attempts, the backoff sleep resolves immediately and the loop proceeds straight to the next attempt, which the core fetch rejects instantly (no network call) because the signal is already aborted. The caller receives **that abort** — `kind: 'timeout'` for a deadline, `kind: 'abort'` for a cancellation or a dedupe supersede — never the last real HTTP result (e.g. a stale `503`) that triggered the retry in the first place:
-
-```ts
-const api = createApi({
-  baseUrl: '/api',
-  requests: {
-    getItems: new Request<Record<string, never>, Item[]>({
-      method: 'GET',
-      path: '/items',
-      timeout: 2000, // whole-operation deadline
-    })
-  },
-  middleware: [retryMiddleware({ max: 5, baseDelay: 1000 })], // long backoff
-})
-
-const { error } = await api.getItems()
-// If the 2s deadline fires while retryMiddleware is asleep between attempts:
-// error.status === 0, error.kind === 'timeout' -- not the 503 being retried
-```
-
-### Cache key
-
-Caches successful responses in memory, keyed by request name, method, the full URL, params and every request header except `Content-Type` (which is derived from the params). The URL's query string is part of the key with its pairs sorted by name, so `?a=1&b=2` and `?b=2&a=1` are one entry, while `?key=A` and `?key=B` (or a `?lang=de` appended by a middleware before the cache) are not. Calls that agree on all of those within the TTL window are served from cache without hitting the network. A different `Authorization` or any other header (except `Content-Type`), a different base URL, path or query value gets its own entry, so one user is never served another's response; the same query params in a different order share one. The query is sorted by raw (undecoded) name, keeping the order of repeated names. The trade-off: a middleware that adds a per-call unique header (a request ID, say) must come *after* `cacheMiddleware` in the middleware array; placed before it, every call carries a fresh header and nothing is ever cached. Each `cacheMiddleware()` call creates an isolated store — different endpoints never share entries.
-
-Params are keyed by content, at every depth: plain data as sorted JSON with `undefined` members dropped (so `{ a: undefined }` and `{}` are one key), anything with `toJSON` by what it returns (a `Date` is its ISO string), and `Map`, `Set` and typed arrays by their entries. A call whose params cannot be keyed soundly — a BigInt, an `ArrayBuffer`, `Blob`, `FormData` or `URLSearchParams`, or an object with no enumerable state such as a class instance holding private fields — is never cached and never served from cache. The rule is the same one `share` uses; see [Sharing](#sharing-identical-requests).
-
-### MiddlewareContext
-
-The context object passed to each middleware:
-
-| Property              | Type      | Description                                              |
-| --------------------- | --------- | -------------------------------------------------------- |
-| `request.method`      | `string`  | HTTP method (GET, POST, etc.)                            |
-| `request.url`         | `string`  | Fully resolved URL with path params and query string     |
-| `request.path`        | `string`  | Original path template (e.g., '/users/:id')              |
-| `request.params`      | `unknown` | Original params object from the caller                   |
-| `request.headers`     | `Headers` | Merged headers -- middleware can add/remove entries       |
-| `request.body`        | `unknown` | Serialized body, or null for GET/DELETE                  |
-| `request.signal`      | `AbortSignal \| undefined` | The signal handed to `fetch` -- replace it to impose your own cancellation policy |
-| `requestName`         | `string`  | Key name in the requests object (e.g., 'getUser')        |
-
-`request.signal` holds the call's own signal: the caller's `options.signal` merged with any `timeout` (and, under `share: true`, with the refcount that aborts the shared request once every sharer has given up). It is `undefined` only when there is none of those. The core fetch reads the field at call time, so replacing it takes effect. A middleware can replace it; see [Signals in middleware](#signals-in-middleware).
-
-### liaise/testing behaviours
-
-- **`mock.fetch` honours `init.signal`, like real `fetch`.** An already-aborted signal rejects with its `reason`, and so does one that aborts while a route handler is still pending — so a stalled route (`() => new Promise(() => {})`) lets you test your own `timeout` and cancellation handling through the stub. An aborted call is still recorded in `calls` and counted by `callCount`, but does not use up a response from a sequence.
-- **`restore()` assumes `globalThis.fetch` was defined when `install()` ran** — true on Node 20+ (and in every browser), since `fetch` is a global there. If you somehow call `install()` in an environment where `globalThis.fetch` is `undefined` beforehand, `restore()` puts back that `undefined` rather than inventing a real `fetch`.
-- **A route key must be `"METHOD /path"`.** A key with no space (`'/users'`) throws at `mockFetch(...)` time, naming the offending key, rather than silently registering a route that can never match.
-- **Declaration order decides when two same-length routes could both match.** Routes are matched in the order they appear in the object you pass to `mockFetch`, and the first structural match wins — put more specific routes first if two patterns could both match the same path.
-- **Trailing and duplicate slashes are normalized away on both sides.** `/a/b/`, `/a//b`, and `/a/b` all match the same route, whether the extra slash is in the route key or in the URL the library actually built.
+- **Upgrading.** [MIGRATION.md](./MIGRATION.md) says what to change when an upgrade needs it. [CHANGELOG.md](./CHANGELOG.md) lists every release.
+- **Contributing.** Bug reports, fixes and ideas are welcome. [CONTRIBUTING.md](./CONTRIBUTING.md) explains how to report a bug, run the tests, and the few rules a pull request is checked against.
+- **Licence.** MIT, in [LICENSE](./LICENSE).

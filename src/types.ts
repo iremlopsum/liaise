@@ -76,7 +76,7 @@ export type HttpMethod = 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE'
  *   ceremony with no effect. Mismatch it and you get a wrong `TResponse`
  *   silently, same as always — declare it as `undefined`.
  *
- *   This describes `new Request`'s behaviour specifically. As of 4.1.0,
+ *   This describes `new Request`'s behaviour specifically.
  *   `defineRequest` DOES enforce this pairing at compile time — see
  *   `EmptyBodyGuard` in `define-request.ts` — because a curried function,
  *   unlike a constructor, has no permissive overload for the guard to fall
@@ -260,12 +260,14 @@ export interface RequestConfig {
    * and an `'abort'` give-up does not (see {@link ApiConfig.onError}). A per-*request*
    * {@link RequestConfig.timeout}, by contrast, bounds the shared request
    * itself for everyone.
-   * A call whose params are a special body type — `FormData`, `Blob`,
-   * `ArrayBuffer`, `URLSearchParams`, or a raw string — is also never shared:
-   * the stable serialisation used for identity can't distinguish two
-   * different payloads of these types from each other, so sharing them could
-   * hand one caller the response to a *different* payload than the one it
-   * sent.
+   * A call whose params cannot be compared by content is also never shared.
+   * That is, at any depth: a BigInt, a function or symbol, an `ArrayBuffer`,
+   * `Blob`, `FormData` or `URLSearchParams`, a boxed primitive, a circular
+   * structure, or a non-plain object with no enumerable keys (an `Error`, a
+   * class keeping its state in private fields). Two different payloads of
+   * these kinds could get the same key, and one caller would receive the
+   * response to the other's request. A string, `Date`, `Map`, `Set` or typed
+   * array is compared by content and shares normally.
    *
    * `result.retry()` on a shared result re-runs the pipeline using the
    * **acquiring caller's** own per-call options (headers, signal, timeout) —
@@ -273,15 +275,6 @@ export interface RequestConfig {
    * whichever caller happens to invoke `retry()`. This falls out of every
    * non-aborting sharer receiving the literal same `Result` object; it is
    * unavoidable given that design, but worth knowing before relying on it.
-   *
-   * **Known limitation:** middleware (global or per-request) that replaces
-   * `ctx.request.signal` — see {@link MiddlewareContext.request.signal} — is
-   * re-merged with the dedupe signal under `dedupe: true`, but is **not**
-   * currently re-merged with the share refcount controller. Combining
-   * `share` with signal-replacing middleware means that middleware's signal,
-   * not the refcount, ends up controlling the shared request: one sharer's
-   * middleware-installed signal could cancel the request for every other
-   * sharer.
    *
    * @default false
    */
@@ -315,8 +308,7 @@ export interface RequestConfig {
    * **This is a whole-operation deadline, not a per-attempt budget.** It covers
    * the entire middleware chain including every retry and every backoff delay,
    * so `timeout: 5000` with `retryMiddleware(3)` still means "an answer within
-   * 5 seconds" — not five seconds per attempt. This deliberately differs from
-   * axios, XHR and `got`, which apply timeouts per attempt.
+   * 5 seconds" — not five seconds per attempt.
    *
    * For a per-attempt budget, use a signal-replacing middleware placed inside
    * the retry middleware instead:
@@ -361,8 +353,8 @@ export interface RequestConfig {
  */
 export interface SuccessResult<TResponse> {
   /**
-   * The parsed response data, narrowed by `error === null`. Since 4.0.0 a 2xx
-   * that carries no body under `responseType: 'json'` is a `'parse'` error
+   * The parsed response data, narrowed by `error === null`. A 2xx that
+   * carries no body under `responseType: 'json'` is a `'parse'` error
    * rather than a success, so this is not `null` for that case — declare
    * `responseType: 'none'` on an endpoint that answers with no body. See the
    * `responseType` reference.
@@ -392,7 +384,7 @@ export interface SuccessResult<TResponse> {
  * A failed API call. `error` is populated and `data` is `null`.
  *
  * `response` is present for HTTP and parse failures (the server responded)
- * and `null` for network failures, aborts and timeouts. Check
+ * and `null` for network failures, aborts, timeouts and middleware errors. Check
  * {@link ApiError.kind} to tell them apart.
  */
 export interface ErrorResult<TResponse> {
@@ -466,7 +458,10 @@ export interface CallOptions {
    */
   skipMiddleware?: Middleware[]
 
-  /** Extra headers for this call. Highest merge priority (overrides all). */
+  /**
+   * Extra headers for this call. Each one replaces the client's and the
+   * endpoint's value for the same header; other headers are kept.
+   */
   headers?: HeadersInit
 
   /**
@@ -490,8 +485,9 @@ export interface CallOptions {
    * cannot outlast it.
    *
    * A fractional or out-of-range value is normalised rather than rejected:
-   * rounded down to whole milliseconds, clamped to the platform timer ceiling,
-   * and treated as "no timeout" if it is `NaN` or non-positive.
+   * rounded down to whole milliseconds with a 1 ms minimum, clamped to the
+   * platform timer ceiling, and treated as "no timeout" if it is `NaN` or
+   * non-positive.
    */
   timeout?: number
 }
@@ -528,7 +524,7 @@ export interface MiddlewareContext {
     params: unknown
     /** Merged headers — middleware can add/remove headers here. */
     headers: Headers
-    /** Serialized request body, or null for GET/DELETE requests. */
+    /** Serialized request body, or null when there is none. */
     body: unknown | null
     /**
      * The AbortSignal that will be handed to `fetch`.
@@ -539,7 +535,9 @@ export interface MiddlewareContext {
      * middleware takes effect. Under `dedupe: true` the replacement is merged
      * into the dedupe signal rather than discarded: the fetch is then
      * cancelled by whichever fires first, the middleware's signal or a newer
-     * call superseding this one.
+     * call superseding this one. Under `share: true` the shared request's
+     * refcount signal is merged back in the same way, so the request is still
+     * cancelled once every sharer has given up.
      *
      * While middleware runs — before `next()` reaches the core fetch — this
      * holds the caller's `CallOptions.signal` merged with the timeout signal
