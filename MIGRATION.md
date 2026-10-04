@@ -10,7 +10,7 @@ For the full record of what changed in each release, see [CHANGELOG.md](./CHANGE
 ## Upgrading to 5.0.2
 
 No code changes needed. A call whose path parameter is `undefined`, `null`, an
-empty string, an object, an array, a `Date`, `NaN` or `Infinity` now returns an
+empty string, an object, an array, a `Date`, a function, a symbol, `NaN` or `Infinity` now returns an
 error Result instead of being sent to a URL like `/users/undefined`. Those calls
 were already hitting the wrong URL; now they say so. If you relied on a literal
 `null` or `undefined` segment, pass the string (`'null'`) explicitly.

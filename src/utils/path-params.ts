@@ -330,7 +330,7 @@ export function buildUrl(baseUrl: string, path: string, params: Record<string, u
   if (unusable.length > 0) {
     throw new TypeError(
       `Path parameter ${unusable.join(', ')} in path "${path}", so the call was not sent. ` +
-      'A path parameter must be a non-empty string, a finite number or a boolean.'
+      'A path parameter must be a non-empty string, a finite number, a bigint or a boolean.'
     )
   }
 
