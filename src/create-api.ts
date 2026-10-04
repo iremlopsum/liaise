@@ -647,7 +647,8 @@ export function createApi<TRequests extends Record<string, Request<any, any>>>(
           let dedupeController: AbortController | undefined
           // Under share, the last attempt's part in a round trip, for the
           // backstop (Step 8): a call it settles at the endpoint's deadline
-          // after waiting on a shared request is that request's failure too.
+          // while still waiting on a shared request is that request's failure
+          // too; one whose round trip had answered times out on its own.
           let lastRound: SharedRound | undefined
 
           // -----------------------------------------------------------------

@@ -219,13 +219,23 @@ export function stampShared<R extends { error: object | null }>(result: R, round
  * IndexedDB write) after `next()` — so the call settles without that chain.
  * `round` is the last shared round trip the call took part in, if any.
  *
- * That settlement is this caller giving up on `signal`, and `narrowTag`'s
- * rule for a give-up decides its token: the deadline token when `signal`
- * aborted with the endpoint's or client's deadline — the same one a hung
- * shared request has, so under a hang every caller's backstop is that one
- * failure — and none otherwise. Never the main token: whatever the round
- * trip answered reached the chain the backstop gave up on, and a caller
- * still waiting reports it on its own (spec §4.3). A joined caller keeps its
+ * That settlement is this caller giving up on `signal`. Which token it
+ * carries depends on whether the round trip answered this attempt:
+ *
+ * - **It did not** — the caller was still waiting, gave up, or the shared
+ *   request hit its own deadline (the attempt's tag is the deadline token, or
+ *   none): `narrowTag`'s rule for a give-up decides. The deadline token when
+ *   `signal` aborted with the endpoint's or client's deadline — the same one
+ *   a hung shared request has, so under a hang every caller's backstop is
+ *   that one failure — and none otherwise.
+ * - **It did** (the attempt's tag is still the main token): untagged. The
+ *   caller ran out its deadline after the answer, in its own pipeline, as an
+ *   unshared call with a slow middleware would, so the timeout is its own and
+ *   reports alone (spec §4.3: the one shared failure is a give-up while it
+ *   waits).
+ *
+ * Never the main token either way: that one belongs to the answer, and only a
+ * caller whose Result carries the answer reports it. A joined caller keeps its
  * `, shared` mark: it sent nothing, whoever ended its call.
  */
 export function stampPreempted<R extends { error: object | null }>(
@@ -236,9 +246,14 @@ export function stampPreempted<R extends { error: object | null }>(
 ): R {
   if (round === undefined) return result
   // A copy: `round` belongs to the attempt, whose own stamp may still read it
-  // if the stuck chain resumes (its Result is discarded either way).
+  // if the stuck chain resumes (its Result is discarded either way). It starts
+  // untagged, and keeps `joined` whatever happens below.
   const preempted: SharedRound = { token: round.token, deadlineToken: round.deadlineToken, joined: round.joined }
-  narrowTag(preempted, false, signal, endpointDeadline)
+  // `tag === token` exactly when the round trip answered and core's catch did
+  // not narrow it (`narrowTag`, above, moves it off the main token for the
+  // shared deadline and for every give-up). An unentered round has both
+  // undefined, and narrowing it would tag nothing anyway.
+  if (round.tag !== round.token) narrowTag(preempted, false, signal, endpointDeadline)
   return stampShared(result, preempted)
 }
 

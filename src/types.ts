@@ -705,8 +705,9 @@ export interface ApiConfig<TRequests extends Record<string, unknown>> {
    * `log: import.meta.env.DEV`. The logger is not a middleware: it wraps the
    * whole call, outside all middleware and the timeout backstop, so each call
    * logs once, with its final outcome — after retries, and at its deadline
-   * when a stuck middleware leaves the backstop to end it. A call that joined
-   * a shared request is tagged `, shared`.
+   * when a stuck middleware leaves the backstop to end it. A call whose setup
+   * fails before anything runs (a refused param) logs nothing. A call that
+   * joined a shared request is tagged `, shared`.
    */
   log?: boolean | LogOptions
 
@@ -948,8 +949,9 @@ export interface GraphQLBaseConfig {
    * `log: import.meta.env.DEV`. The logger is not a middleware: it wraps the
    * whole call, outside all middleware and the timeout backstop, so each call
    * logs once, with its final outcome — after retries, and at its deadline
-   * when a stuck middleware leaves the backstop to end it. A call that joined
-   * a shared request is tagged `, shared`.
+   * when a stuck middleware leaves the backstop to end it. A call whose setup
+   * fails before anything runs (variables that can't be serialised) logs
+   * nothing. A call that joined a shared request is tagged `, shared`.
    */
   log?: boolean | LogOptions
 

@@ -165,10 +165,28 @@ describe('log option: one line pair per call, whatever the chain does', () => {
     expect(lines.filter(l => l.endsWith(', shared)'))).toHaveLength(1)
   })
 
+  it('logs nothing for a call whose setup fails before anything runs', async () => {
+    const fetchMock = vi.fn(async () => json(users)); vi.stubGlobal('fetch', fetchMock)
+    const api = createApi({ baseUrl: 'https://x.test', log: true, requests: { get: defineRequest<{ ok: boolean }>()({ method: 'GET', path: '/users/:id' }) } })
+    const r = await api.get({ id: undefined as unknown as string }) // a refused path param
+    expect(r.error?.kind).toBe('network')
+    expect(fetchMock).not.toHaveBeenCalled()
+    expect(log).not.toHaveBeenCalled()
+  })
+
+  it('logs nothing for a GraphQL call whose setup fails before anything runs', async () => {
+    const fetchMock = vi.fn(async () => json({ data: { x: 1 } })); vi.stubGlobal('fetch', fetchMock)
+    const g = createGraphQL({ endpoint: 'https://x.test/graphql', log: true, operations: { getX: new Operation<{ n: bigint }, { x: number }>({ operation: gql`query X($n: Int) { x(n: $n) }` }) } })
+    const r = await g.getX({ n: 1n }) // variables JSON.stringify cannot serialise
+    expect(r.error?.kind).toBe('network')
+    expect(fetchMock).not.toHaveBeenCalled()
+    expect(log).not.toHaveBeenCalled()
+  })
+
   it('logs one line pair for a call retryMiddleware retries', async () => {
     const responses = [json({}, 503), json({}, 503), json(users)]
     vi.stubGlobal('fetch', vi.fn(async () => responses.shift()!))
-    const api = createApi({ baseUrl: 'https://x.test', log: true, middleware: [retryMiddleware(2)], requests: { list: defineRequest<{ id: string }[]>()({ method: 'GET', path: '/users' }) } })
+    const api = createApi({ baseUrl: 'https://x.test', log: true, middleware: [retryMiddleware({ max: 2, baseDelay: 1 })], requests: { list: defineRequest<{ id: string }[]>()({ method: 'GET', path: '/users' }) } })
     const r = await api.list()
     expect(r.data).toEqual(users)
     expect(globalThis.fetch).toHaveBeenCalledTimes(3)

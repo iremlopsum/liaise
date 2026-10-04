@@ -1561,6 +1561,23 @@ describe('one report per hung shared request', () => {
     expect(kinds).toEqual(['timeout', 'timeout'])
   })
 
+  it("leaves a caller's timeout its own when the round trip answered and its own middleware ran out the deadline", async () => {
+    // The shared request answers 200 at once; each caller's response-side
+    // middleware then holds it past the endpoint's deadline. Nothing hung while
+    // they waited, so each backstop timeout is that caller's own failure.
+    const f = controllable(); vi.stubGlobal('fetch', f.fn)
+    const { api, kinds } = timed(30, [slowAfter(60)])
+    const a = api.get({ id: '1' })
+    const b = api.get({ id: '1' })
+    await flush()
+    expect(f.fn).toHaveBeenCalledTimes(1)
+    f.calls[0].resolve()
+    expect((await a).error?.kind).toBe('timeout')
+    expect((await b).error?.kind).toBe('timeout')
+    await new Promise(r => setTimeout(r, 70))
+    expect(kinds).toEqual(['timeout', 'timeout'])
+  })
+
   it("never lets a caller the backstop settles at the deadline swallow another caller's real failure", async () => {
     // The shared request answers 500. B receives it; A's own response-side
     // middleware is still waiting when the endpoint's deadline passes, so the
