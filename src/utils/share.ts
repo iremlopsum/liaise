@@ -169,7 +169,9 @@ export class ShareTracker {
    * `onEnter`, when given, is called synchronously as this caller takes its
    * reference — before the returned promise can settle either way — with the
    * round trip's tokens. A caller rejected because its signal was already
-   * aborted never enters, and `onEnter` is not called.
+   * aborted never enters, and `onEnter` is not called. If `onEnter` throws,
+   * this caller leaves again at once (abandoning the request if it was the
+   * only caller) and the returned promise rejects with what it threw.
    */
   run(
     key: string,
@@ -219,20 +221,24 @@ export class ShareTracker {
 
     const held = entry
     held.refs++
-    onEnter?.({ token: held.token, deadlineToken: held.deadlineToken, joined })
+    if (onEnter) {
+      // A throw here would otherwise leave this caller's reference behind:
+      // an entry that can never be abandoned, holding a request open for
+      // nobody. Give the reference back and fail this caller alone.
+      try {
+        onEnter({ token: held.token, deadlineToken: held.deadlineToken, joined })
+      } catch (err) {
+        this.leave(key, held)
+        return Promise.reject(err)
+      }
+    }
 
     return new Promise<Shared>((resolve, reject) => {
       let done = false
       const onAbort = (): void => {
         if (done) return
         done = true
-        held.refs--
-        if (held.refs <= 0 && !held.settled) {
-          // Drop the entry now: a `send` that ignores its signal would
-          // otherwise leave it (and its key, which holds body text) in the map.
-          if (this.runs.get(key) === held) this.runs.delete(key)
-          if (!held.controller.signal.aborted) held.controller.abort(ABANDONED)
-        }
+        this.leave(key, held)
         reject(callerSignal!.reason)
       }
       if (callerSignal?.aborted === true) {
@@ -247,6 +253,20 @@ export class ShareTracker {
         resolve({ outcome, token: held.token, joined })
       })
     })
+  }
+
+  /**
+   * One caller gives its reference back. The last one to leave a request
+   * that has not settled abandons it: the entry leaves the map at once — a
+   * `send` that ignores its signal would otherwise keep it (and its key, which
+   * holds body text) there — and the request is aborted with `ABANDONED`.
+   */
+  private leave(key: string, held: RunEntry): void {
+    held.refs--
+    if (held.refs <= 0 && !held.settled) {
+      if (this.runs.get(key) === held) this.runs.delete(key)
+      if (!held.controller.signal.aborted) held.controller.abort(ABANDONED)
+    }
   }
 
   /**

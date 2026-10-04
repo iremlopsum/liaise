@@ -228,6 +228,29 @@ describe('ShareTracker.run (5.1.0)', () => {
     void b
   })
 
+  it('a throwing onEnter fails that caller alone and leaves nothing behind', async () => {
+    const t = new ShareTracker()
+    let sentSignal!: AbortSignal
+    const hung = vi.fn((s: AbortSignal) => { sentSignal = s; return new Promise<Exchange>(() => {}) })
+    let thrown: unknown
+    let first: Promise<unknown> | undefined
+    try {
+      first = t.run('k', () => undefined, undefined, hung, () => { throw new Error('boom') })
+    } catch (err) {
+      thrown = err
+    }
+    // A rejection, never a synchronous throw.
+    expect(thrown).toBeUndefined()
+    await expect(first).rejects.toThrow('boom')
+    // Its reference was given back: the request it started was abandoned.
+    expect(sentSignal.reason).toBe(ABANDONED)
+    // And nothing is left to join.
+    const fresh = vi.fn(async () => ex())
+    const next = await t.run('k', () => undefined, undefined, fresh)
+    expect(next.joined).toBe(false)
+    expect(fresh).toHaveBeenCalledTimes(1)
+  })
+
   it('does not call onEnter for a caller that had already given up', async () => {
     const t = new ShareTracker()
     const onEnter = vi.fn()

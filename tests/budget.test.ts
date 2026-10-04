@@ -48,6 +48,12 @@ describe('callBudget', () => {
     expect(callBudget(undefined, undefined, 10, undefined).endpointDeadline).toBeInstanceOf(AbortSignal)
   })
 
+  it('treats an untyped `timeout: null` as no per-call timeout, as timeoutSignalFor does', () => {
+    const b = callBudget(null as unknown as undefined, 10, undefined, undefined)
+    expect(b.signal).toBeInstanceOf(AbortSignal)
+    expect(b.endpointDeadline).toBe(b.signal)
+  })
+
   it('has no endpoint deadline when the call sets its own timeout, or nothing applies', () => {
     expect(callBudget(50, 10, 10, undefined).endpointDeadline).toBeUndefined()
     expect(callBudget(0, 10, 10, undefined).endpointDeadline).toBeUndefined()

@@ -43,6 +43,18 @@ describe('a long-lived caller signal ends with no listeners', () => {
     expect(await runMany(signal => api.get({}, { signal, timeout }))).toBe(0)
   })
 
+  // Under share a caller waits on its own budget merged with any signal a
+  // middleware installed. With no timeout the budget IS the caller's signal,
+  // so that merge listens to it directly and must be released once the call
+  // settles — one retained listener per call otherwise.
+  it('share, with a middleware-installed signal and no timeout', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => json({ ok: true })))
+    const installs: Middleware = (ctx, next) => { ctx.request.signal = new AbortController().signal; return next() }
+    const get = new Request<Record<string, never>, unknown>({ method: 'GET', path: '/x', share: true })
+    const api = createApi({ baseUrl: 'https://x.test', requests: { get }, middleware: [installs] })
+    expect(await runMany(signal => api.get({}, { signal }))).toBe(0)
+  })
+
   it('with a retrying middleware', async () => {
     let n = 0
     vi.stubGlobal('fetch', vi.fn(async () => (n++ % 2 === 0 ? new Response('', { status: 503 }) : json({}))))

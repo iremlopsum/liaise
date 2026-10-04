@@ -269,11 +269,12 @@ export interface RequestConfig {
    * over as-is), and its own `result.retry()`, which re-runs that caller's
    * own pipeline with that caller's own options.
    *
-   * `onError` fires once per failed shared request, not once per caller —
-   * a hung one included: every caller that times out to the endpoint's (or
-   * client's) deadline while waiting on it is that one failure. A caller's
-   * own cancel or per-call timeout, or an error its own middleware produces,
-   * reports as it would without `share`.
+   * `onError` fires once per failed shared request, not once per caller. A
+   * hung shared request reports once: every caller timing out to the
+   * endpoint's (or client's) deadline while waiting is that one failure. If
+   * the request then fails another way for callers still waiting, that
+   * failure reports too. A caller's own cancel or per-call timeout, or an
+   * error its own middleware produces, reports as it would without `share`.
    *
    * A caller that gives up — its `signal`, its own deadline, or a signal a
    * middleware installed — releases only itself: it stops waiting, and the
@@ -542,8 +543,9 @@ export interface MiddlewareContext {
     /** Serialized request body, or null when there is none. */
     body: unknown | null
     /**
-     * The AbortSignal that governs this call's request — the one handed to
-     * `fetch`, except under `share: true` (below).
+     * The AbortSignal that governs this call's request: the one handed to
+     * `fetch`, except when a `share: true` call takes part in a shared
+     * request (below).
      *
      * Middleware may read this, or replace it to impose its own cancellation
      * policy — a timeout, a deadline, or a cancel-on-condition rule. The core
@@ -553,13 +555,17 @@ export interface MiddlewareContext {
      * cancelled by whichever fires first, the middleware's signal or a newer
      * call superseding this one.
      *
-     * Under `share: true` the request may be shared with other callers, so it
-     * is sent with a signal of its own and is cancelled only once every
-     * caller has given up. For this caller, the field as it is when `next()`
-     * reaches the core fetch is merged with the caller's own `signal` and
-     * deadline: whichever fires first, this caller alone stops waiting. A
-     * replacement that never fires therefore cannot keep a caller waiting
-     * past its own cancel.
+     * Under `share: true`, a call whose body can be compared (none, a
+     * string, `URLSearchParams`) takes part in a shared request, even when
+     * it is the only caller. That request is sent with a signal of its own
+     * and is cancelled only once every caller has given up. For this caller,
+     * the field as it is when `next()` reaches the core fetch is merged with
+     * the caller's own `signal` and deadline: whichever fires first, this
+     * caller alone stops waiting. A replacement that never fires therefore
+     * cannot keep a caller waiting past its own cancel. A `share: true` call
+     * whose body can't be compared (`FormData`, `Blob`, `ArrayBuffer`, a
+     * typed array, `DataView`, a stream) sends its own request with this
+     * field, exactly as without `share`.
      *
      * While middleware runs — before `next()` reaches the core fetch — this
      * holds the caller's `CallOptions.signal` merged with the timeout signal

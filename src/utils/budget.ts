@@ -53,6 +53,8 @@ export function callBudget(
   const deadline = timeoutSignalFor(callTimeout, requestTimeout, clientTimeout)
   return {
     signal: anySignal([callerSignal, deadline]),
-    endpointDeadline: callTimeout === undefined ? deadline : undefined,
+    // `== null`, as timeoutSignalFor's `??` reads it: an untyped
+    // `timeout: null` is no per-call timeout either.
+    endpointDeadline: callTimeout == null ? deadline : undefined,
   }
 }
