@@ -1,5 +1,7 @@
 // Bundle size of one JSON GET per library, measured the way scripts/size.mjs measures liaise:
-// minified ESM, ES2020, tree-shaken, then gzip -9 and brotli.
+// minified ESM, ES2020, tree-shaken, then gzip -9 and brotli. Unlike scripts/size.mjs
+// (platform: 'neutral') this uses platform: 'browser' for every contender; the difference
+// does not matter for liaise.
 // Run `npm run build` at the repo root first (liaise resolves to ../dist).
 import { build } from 'esbuild'
 import { gzipSync, brotliCompressSync } from 'node:zlib'
@@ -11,6 +13,7 @@ const entries = {
   ky: `import ky from 'ky'; export default u => ky.get(u).json()`,
   ofetch: `import { ofetch } from 'ofetch'; export default u => ofetch(u)`,
   liaise: `import { createApi, defineRequest } from 'liaise'; const api = createApi({ baseUrl: '', requests: { get: defineRequest()({ method: 'GET', path: '/x' }) } }); export default () => api.get()`,
+  'liaise + retryMiddleware': `import { createApi, defineRequest } from 'liaise'; import { retryMiddleware } from 'liaise/middleware'; const api = createApi({ baseUrl: '', requests: { get: defineRequest()({ method: 'GET', path: '/x', middleware: [retryMiddleware({ max: 3 })] }) } }); export default () => api.get()`,
 }
 
 const sizes = {}
@@ -21,7 +24,7 @@ for (const [name, contents] of Object.entries(entries)) {
   })
   const code = out.outputFiles[0].contents
   sizes[name] = { gzip: gzipSync(code, { level: 9 }).length, brotli: brotliCompressSync(code).length }
-  console.log(`${name.padEnd(8)} ${sizes[name].gzip} B gzip  ${sizes[name].brotli} B brotli`)
+  console.log(`${name.padEnd(24)} ${sizes[name].gzip} B gzip  ${sizes[name].brotli} B brotli`)
 }
 
 const path = new URL('./results.json', import.meta.url)

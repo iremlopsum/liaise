@@ -20,7 +20,7 @@
         "fetch": {
           "notes": {
             "getJson": "hand-written: res.ok check that throws (https://developer.mozilla.org/en-US/docs/Web/API/Response/ok), signal: AbortSignal.timeout(3000) (https://developer.mozilla.org/en-US/docs/Web/API/AbortSignal/timeout_static), skip parsing a 204",
-            "getUser": "hand-written: template string, same as default",
+            "getUser": "same as default; fetch has no path-param option",
             "search": "hand-written: abort the previous call with AbortController (https://developer.mozilla.org/en-US/docs/Web/API/AbortController)",
             "getWithAuth": "hand-written: one shared refresh promise, retry once",
             "getWithDeadline": "hand-written: loop of 4 attempts under one AbortSignal.timeout(3000) (https://developer.mozilla.org/en-US/docs/Web/API/AbortSignal/timeout_static)",
@@ -31,11 +31,11 @@
           },
           "default": {
             "outcome": "wrong data",
-            "ms": 20
+            "ms": 17
           },
           "configured": {
             "outcome": "throws Error",
-            "ms": 20
+            "ms": 18
           }
         },
         "axios": {
@@ -43,7 +43,7 @@
             "getJson": "timeout: 3000 (https://github.com/axios/axios/blob/v1.20.0/README.md#handling-timeouts); responseType: 'json' + transitional.silentJSONParsing: false (https://github.com/axios/axios/blob/v1.20.0/README.md#request-config)",
             "search": "hand-written: abort the previous call with signal + AbortController (https://github.com/axios/axios/blob/v1.20.0/README.md#abortcontroller)",
             "getWithAuth": "hand-written: refresh in a response interceptor (https://github.com/axios/axios/blob/v1.20.0/README.md#interceptors), one shared refresh promise",
-            "getWithDeadline": "no built-in option (retries need a plugin such as axios-retry)",
+            "getWithDeadline": "hand-written: loop of 4 attempts under one AbortSignal.timeout(3000) (https://github.com/axios/axios/blob/v1.20.0/README.md#abortcontroller)",
             "getValidated": "no built-in option"
           },
           "defaultNotes": {
@@ -51,11 +51,11 @@
           },
           "default": {
             "outcome": "throws AxiosError",
-            "ms": 16
+            "ms": 14
           },
           "configured": {
             "outcome": "throws AxiosError",
-            "ms": 16
+            "ms": 14
           }
         },
         "ky": {
@@ -71,11 +71,11 @@
           },
           "default": {
             "outcome": "throws HTTPError",
-            "ms": 931
+            "ms": 926
           },
           "configured": {
             "outcome": "throws HTTPError",
-            "ms": 932
+            "ms": 927
           }
         },
         "ofetch": {
@@ -91,31 +91,31 @@
           },
           "default": {
             "outcome": "throws FetchError",
-            "ms": 26
+            "ms": 23
           },
           "configured": {
             "outcome": "throws FetchError",
-            "ms": 27
+            "ms": 24
           }
         },
         "liaise": {
           "notes": {
-            "getJson": "timeout: 3000 (https://github.com/iremlopsum/liaise/blob/main/README.md#cancelling-deadlines-and-stale-requests); responseType: 'none' for the 204 (https://github.com/iremlopsum/liaise/blob/main/README.md#reading-responses)",
+            "getJson": "timeout: 3000 (https://github.com/iremlopsum/liaise/blob/main/README.md#cancelling-deadlines-and-stale-requests); responseType: 'none' declared on the 204 endpoint; liaise has no option for an endpoint that answers JSON or an empty body (https://github.com/iremlopsum/liaise/blob/main/README.md#reading-responses)",
             "search": "dedupe: true (https://github.com/iremlopsum/liaise/blob/main/README.md#drop-stale-calls-with-dedupe)",
-            "getWithAuth": "share: true on refresh, the README recipe (https://github.com/iremlopsum/liaise/blob/main/README.md#add-an-auth-header-and-refresh-the-token-on-a-401)",
+            "getWithAuth": "hand-written: auth middleware from the README recipe (https://github.com/iremlopsum/liaise/blob/main/README.md#add-an-auth-header-and-refresh-the-token-on-a-401); share: true on refresh replaces the shared refresh promise",
             "getWithDeadline": "timeout: 3000 (https://github.com/iremlopsum/liaise/blob/main/README.md#cancelling-deadlines-and-stale-requests) + retryMiddleware({ max: 3 }) (https://github.com/iremlopsum/liaise/blob/main/README.md#retries-caching-and-logging)",
             "getValidated": "schema, Standard Schema (https://github.com/iremlopsum/liaise/blob/main/README.md#validating-responses)"
           },
           "defaultNotes": {
-            "getWithAuth": "same refresh middleware, without share"
+            "getWithAuth": "hand-written: same refresh middleware, without share"
           },
           "default": {
             "outcome": "error result (http)",
-            "ms": 21
+            "ms": 18
           },
           "configured": {
             "outcome": "error result (http)",
-            "ms": 21
+            "ms": 18
           }
         }
       }
@@ -127,7 +127,7 @@
         "fetch": {
           "notes": {
             "getJson": "hand-written: res.ok check that throws (https://developer.mozilla.org/en-US/docs/Web/API/Response/ok), signal: AbortSignal.timeout(3000) (https://developer.mozilla.org/en-US/docs/Web/API/AbortSignal/timeout_static), skip parsing a 204",
-            "getUser": "hand-written: template string, same as default",
+            "getUser": "same as default; fetch has no path-param option",
             "search": "hand-written: abort the previous call with AbortController (https://developer.mozilla.org/en-US/docs/Web/API/AbortController)",
             "getWithAuth": "hand-written: one shared refresh promise, retry once",
             "getWithDeadline": "hand-written: loop of 4 attempts under one AbortSignal.timeout(3000) (https://developer.mozilla.org/en-US/docs/Web/API/AbortSignal/timeout_static)",
@@ -138,11 +138,11 @@
           },
           "default": {
             "outcome": "throws TypeError",
-            "ms": 8
+            "ms": 7
           },
           "configured": {
             "outcome": "throws TypeError",
-            "ms": 8
+            "ms": 7
           }
         },
         "axios": {
@@ -150,7 +150,7 @@
             "getJson": "timeout: 3000 (https://github.com/axios/axios/blob/v1.20.0/README.md#handling-timeouts); responseType: 'json' + transitional.silentJSONParsing: false (https://github.com/axios/axios/blob/v1.20.0/README.md#request-config)",
             "search": "hand-written: abort the previous call with signal + AbortController (https://github.com/axios/axios/blob/v1.20.0/README.md#abortcontroller)",
             "getWithAuth": "hand-written: refresh in a response interceptor (https://github.com/axios/axios/blob/v1.20.0/README.md#interceptors), one shared refresh promise",
-            "getWithDeadline": "no built-in option (retries need a plugin such as axios-retry)",
+            "getWithDeadline": "hand-written: loop of 4 attempts under one AbortSignal.timeout(3000) (https://github.com/axios/axios/blob/v1.20.0/README.md#abortcontroller)",
             "getValidated": "no built-in option"
           },
           "defaultNotes": {
@@ -162,7 +162,7 @@
           },
           "configured": {
             "outcome": "throws AxiosError (name: Error)",
-            "ms": 8
+            "ms": 7
           }
         },
         "ky": {
@@ -198,31 +198,31 @@
           },
           "default": {
             "outcome": "throws FetchError",
-            "ms": 10
+            "ms": 9
           },
           "configured": {
             "outcome": "throws FetchError",
-            "ms": 10
+            "ms": 9
           }
         },
         "liaise": {
           "notes": {
-            "getJson": "timeout: 3000 (https://github.com/iremlopsum/liaise/blob/main/README.md#cancelling-deadlines-and-stale-requests); responseType: 'none' for the 204 (https://github.com/iremlopsum/liaise/blob/main/README.md#reading-responses)",
+            "getJson": "timeout: 3000 (https://github.com/iremlopsum/liaise/blob/main/README.md#cancelling-deadlines-and-stale-requests); responseType: 'none' declared on the 204 endpoint; liaise has no option for an endpoint that answers JSON or an empty body (https://github.com/iremlopsum/liaise/blob/main/README.md#reading-responses)",
             "search": "dedupe: true (https://github.com/iremlopsum/liaise/blob/main/README.md#drop-stale-calls-with-dedupe)",
-            "getWithAuth": "share: true on refresh, the README recipe (https://github.com/iremlopsum/liaise/blob/main/README.md#add-an-auth-header-and-refresh-the-token-on-a-401)",
+            "getWithAuth": "hand-written: auth middleware from the README recipe (https://github.com/iremlopsum/liaise/blob/main/README.md#add-an-auth-header-and-refresh-the-token-on-a-401); share: true on refresh replaces the shared refresh promise",
             "getWithDeadline": "timeout: 3000 (https://github.com/iremlopsum/liaise/blob/main/README.md#cancelling-deadlines-and-stale-requests) + retryMiddleware({ max: 3 }) (https://github.com/iremlopsum/liaise/blob/main/README.md#retries-caching-and-logging)",
             "getValidated": "schema, Standard Schema (https://github.com/iremlopsum/liaise/blob/main/README.md#validating-responses)"
           },
           "defaultNotes": {
-            "getWithAuth": "same refresh middleware, without share"
+            "getWithAuth": "hand-written: same refresh middleware, without share"
           },
           "default": {
             "outcome": "error result (network)",
-            "ms": 9
+            "ms": 8
           },
           "configured": {
             "outcome": "error result (network)",
-            "ms": 9
+            "ms": 8
           }
         }
       }
@@ -234,7 +234,7 @@
         "fetch": {
           "notes": {
             "getJson": "hand-written: res.ok check that throws (https://developer.mozilla.org/en-US/docs/Web/API/Response/ok), signal: AbortSignal.timeout(3000) (https://developer.mozilla.org/en-US/docs/Web/API/AbortSignal/timeout_static), skip parsing a 204",
-            "getUser": "hand-written: template string, same as default",
+            "getUser": "same as default; fetch has no path-param option",
             "search": "hand-written: abort the previous call with AbortController (https://developer.mozilla.org/en-US/docs/Web/API/AbortController)",
             "getWithAuth": "hand-written: one shared refresh promise, retry once",
             "getWithDeadline": "hand-written: loop of 4 attempts under one AbortSignal.timeout(3000) (https://developer.mozilla.org/en-US/docs/Web/API/AbortSignal/timeout_static)",
@@ -249,7 +249,7 @@
           },
           "default": {
             "outcome": "still waiting after 15s",
-            "ms": 15002
+            "ms": 15001
           }
         },
         "axios": {
@@ -257,7 +257,7 @@
             "getJson": "timeout: 3000 (https://github.com/axios/axios/blob/v1.20.0/README.md#handling-timeouts); responseType: 'json' + transitional.silentJSONParsing: false (https://github.com/axios/axios/blob/v1.20.0/README.md#request-config)",
             "search": "hand-written: abort the previous call with signal + AbortController (https://github.com/axios/axios/blob/v1.20.0/README.md#abortcontroller)",
             "getWithAuth": "hand-written: refresh in a response interceptor (https://github.com/axios/axios/blob/v1.20.0/README.md#interceptors), one shared refresh promise",
-            "getWithDeadline": "no built-in option (retries need a plugin such as axios-retry)",
+            "getWithDeadline": "hand-written: loop of 4 attempts under one AbortSignal.timeout(3000) (https://github.com/axios/axios/blob/v1.20.0/README.md#abortcontroller)",
             "getValidated": "no built-in option"
           },
           "defaultNotes": {
@@ -265,11 +265,11 @@
           },
           "configured": {
             "outcome": "throws AxiosError",
-            "ms": 3005
+            "ms": 3007
           },
           "default": {
             "outcome": "still waiting after 15s",
-            "ms": 15002
+            "ms": 15001
           }
         },
         "ky": {
@@ -285,11 +285,11 @@
           },
           "configured": {
             "outcome": "throws TimeoutError",
-            "ms": 3004
+            "ms": 3006
           },
           "default": {
             "outcome": "throws TimeoutError",
-            "ms": 10002
+            "ms": 10005
           }
         },
         "ofetch": {
@@ -305,31 +305,31 @@
           },
           "configured": {
             "outcome": "throws FetchError",
-            "ms": 3003
+            "ms": 3005
           },
           "default": {
             "outcome": "still waiting after 15s",
-            "ms": 15002
+            "ms": 15001
           }
         },
         "liaise": {
           "notes": {
-            "getJson": "timeout: 3000 (https://github.com/iremlopsum/liaise/blob/main/README.md#cancelling-deadlines-and-stale-requests); responseType: 'none' for the 204 (https://github.com/iremlopsum/liaise/blob/main/README.md#reading-responses)",
+            "getJson": "timeout: 3000 (https://github.com/iremlopsum/liaise/blob/main/README.md#cancelling-deadlines-and-stale-requests); responseType: 'none' declared on the 204 endpoint; liaise has no option for an endpoint that answers JSON or an empty body (https://github.com/iremlopsum/liaise/blob/main/README.md#reading-responses)",
             "search": "dedupe: true (https://github.com/iremlopsum/liaise/blob/main/README.md#drop-stale-calls-with-dedupe)",
-            "getWithAuth": "share: true on refresh, the README recipe (https://github.com/iremlopsum/liaise/blob/main/README.md#add-an-auth-header-and-refresh-the-token-on-a-401)",
+            "getWithAuth": "hand-written: auth middleware from the README recipe (https://github.com/iremlopsum/liaise/blob/main/README.md#add-an-auth-header-and-refresh-the-token-on-a-401); share: true on refresh replaces the shared refresh promise",
             "getWithDeadline": "timeout: 3000 (https://github.com/iremlopsum/liaise/blob/main/README.md#cancelling-deadlines-and-stale-requests) + retryMiddleware({ max: 3 }) (https://github.com/iremlopsum/liaise/blob/main/README.md#retries-caching-and-logging)",
             "getValidated": "schema, Standard Schema (https://github.com/iremlopsum/liaise/blob/main/README.md#validating-responses)"
           },
           "defaultNotes": {
-            "getWithAuth": "same refresh middleware, without share"
+            "getWithAuth": "hand-written: same refresh middleware, without share"
           },
           "configured": {
             "outcome": "error result (timeout)",
-            "ms": 3004
+            "ms": 3005
           },
           "default": {
             "outcome": "still waiting after 15s",
-            "ms": 15002
+            "ms": 15000
           }
         }
       }
@@ -341,7 +341,7 @@
         "fetch": {
           "notes": {
             "getJson": "hand-written: res.ok check that throws (https://developer.mozilla.org/en-US/docs/Web/API/Response/ok), signal: AbortSignal.timeout(3000) (https://developer.mozilla.org/en-US/docs/Web/API/AbortSignal/timeout_static), skip parsing a 204",
-            "getUser": "hand-written: template string, same as default",
+            "getUser": "same as default; fetch has no path-param option",
             "search": "hand-written: abort the previous call with AbortController (https://developer.mozilla.org/en-US/docs/Web/API/AbortController)",
             "getWithAuth": "hand-written: one shared refresh promise, retry once",
             "getWithDeadline": "hand-written: loop of 4 attempts under one AbortSignal.timeout(3000) (https://developer.mozilla.org/en-US/docs/Web/API/AbortSignal/timeout_static)",
@@ -352,11 +352,11 @@
           },
           "default": {
             "outcome": "throws SyntaxError",
-            "ms": 9
+            "ms": 13
           },
           "configured": {
             "outcome": "throws SyntaxError",
-            "ms": 9
+            "ms": 13
           }
         },
         "axios": {
@@ -364,7 +364,7 @@
             "getJson": "timeout: 3000 (https://github.com/axios/axios/blob/v1.20.0/README.md#handling-timeouts); responseType: 'json' + transitional.silentJSONParsing: false (https://github.com/axios/axios/blob/v1.20.0/README.md#request-config)",
             "search": "hand-written: abort the previous call with signal + AbortController (https://github.com/axios/axios/blob/v1.20.0/README.md#abortcontroller)",
             "getWithAuth": "hand-written: refresh in a response interceptor (https://github.com/axios/axios/blob/v1.20.0/README.md#interceptors), one shared refresh promise",
-            "getWithDeadline": "no built-in option (retries need a plugin such as axios-retry)",
+            "getWithDeadline": "hand-written: loop of 4 attempts under one AbortSignal.timeout(3000) (https://github.com/axios/axios/blob/v1.20.0/README.md#abortcontroller)",
             "getValidated": "no built-in option"
           },
           "defaultNotes": {
@@ -372,11 +372,11 @@
           },
           "default": {
             "outcome": "wrong data",
-            "ms": 9
+            "ms": 14
           },
           "configured": {
             "outcome": "throws AxiosError (name: SyntaxError)",
-            "ms": 9
+            "ms": 14
           }
         },
         "ky": {
@@ -392,11 +392,11 @@
           },
           "default": {
             "outcome": "throws SyntaxError",
-            "ms": 11
+            "ms": 15
           },
           "configured": {
             "outcome": "throws SyntaxError",
-            "ms": 11
+            "ms": 17
           }
         },
         "ofetch": {
@@ -412,31 +412,31 @@
           },
           "default": {
             "outcome": "wrong data",
-            "ms": 10
+            "ms": 16
           },
           "configured": {
             "outcome": "throws SyntaxError",
-            "ms": 10
+            "ms": 16
           }
         },
         "liaise": {
           "notes": {
-            "getJson": "timeout: 3000 (https://github.com/iremlopsum/liaise/blob/main/README.md#cancelling-deadlines-and-stale-requests); responseType: 'none' for the 204 (https://github.com/iremlopsum/liaise/blob/main/README.md#reading-responses)",
+            "getJson": "timeout: 3000 (https://github.com/iremlopsum/liaise/blob/main/README.md#cancelling-deadlines-and-stale-requests); responseType: 'none' declared on the 204 endpoint; liaise has no option for an endpoint that answers JSON or an empty body (https://github.com/iremlopsum/liaise/blob/main/README.md#reading-responses)",
             "search": "dedupe: true (https://github.com/iremlopsum/liaise/blob/main/README.md#drop-stale-calls-with-dedupe)",
-            "getWithAuth": "share: true on refresh, the README recipe (https://github.com/iremlopsum/liaise/blob/main/README.md#add-an-auth-header-and-refresh-the-token-on-a-401)",
+            "getWithAuth": "hand-written: auth middleware from the README recipe (https://github.com/iremlopsum/liaise/blob/main/README.md#add-an-auth-header-and-refresh-the-token-on-a-401); share: true on refresh replaces the shared refresh promise",
             "getWithDeadline": "timeout: 3000 (https://github.com/iremlopsum/liaise/blob/main/README.md#cancelling-deadlines-and-stale-requests) + retryMiddleware({ max: 3 }) (https://github.com/iremlopsum/liaise/blob/main/README.md#retries-caching-and-logging)",
             "getValidated": "schema, Standard Schema (https://github.com/iremlopsum/liaise/blob/main/README.md#validating-responses)"
           },
           "defaultNotes": {
-            "getWithAuth": "same refresh middleware, without share"
+            "getWithAuth": "hand-written: same refresh middleware, without share"
           },
           "default": {
             "outcome": "error result (parse)",
-            "ms": 11
+            "ms": 16
           },
           "configured": {
             "outcome": "error result (parse)",
-            "ms": 11
+            "ms": 16
           }
         }
       }
@@ -448,7 +448,7 @@
         "fetch": {
           "notes": {
             "getJson": "hand-written: res.ok check that throws (https://developer.mozilla.org/en-US/docs/Web/API/Response/ok), signal: AbortSignal.timeout(3000) (https://developer.mozilla.org/en-US/docs/Web/API/AbortSignal/timeout_static), skip parsing a 204",
-            "getUser": "hand-written: template string, same as default",
+            "getUser": "same as default; fetch has no path-param option",
             "search": "hand-written: abort the previous call with AbortController (https://developer.mozilla.org/en-US/docs/Web/API/AbortController)",
             "getWithAuth": "hand-written: one shared refresh promise, retry once",
             "getWithDeadline": "hand-written: loop of 4 attempts under one AbortSignal.timeout(3000) (https://developer.mozilla.org/en-US/docs/Web/API/AbortSignal/timeout_static)",
@@ -459,11 +459,11 @@
           },
           "default": {
             "outcome": "throws SyntaxError",
-            "ms": 5
+            "ms": 7
           },
           "configured": {
             "outcome": "resolves with undefined",
-            "ms": 5
+            "ms": 7
           }
         },
         "axios": {
@@ -471,7 +471,7 @@
             "getJson": "timeout: 3000 (https://github.com/axios/axios/blob/v1.20.0/README.md#handling-timeouts); responseType: 'json' + transitional.silentJSONParsing: false (https://github.com/axios/axios/blob/v1.20.0/README.md#request-config)",
             "search": "hand-written: abort the previous call with signal + AbortController (https://github.com/axios/axios/blob/v1.20.0/README.md#abortcontroller)",
             "getWithAuth": "hand-written: refresh in a response interceptor (https://github.com/axios/axios/blob/v1.20.0/README.md#interceptors), one shared refresh promise",
-            "getWithDeadline": "no built-in option (retries need a plugin such as axios-retry)",
+            "getWithDeadline": "hand-written: loop of 4 attempts under one AbortSignal.timeout(3000) (https://github.com/axios/axios/blob/v1.20.0/README.md#abortcontroller)",
             "getValidated": "no built-in option"
           },
           "defaultNotes": {
@@ -479,11 +479,11 @@
           },
           "default": {
             "outcome": "resolves with \"\"",
-            "ms": 6
+            "ms": 8
           },
           "configured": {
             "outcome": "resolves with \"\"",
-            "ms": 6
+            "ms": 8
           }
         },
         "ky": {
@@ -499,11 +499,11 @@
           },
           "default": {
             "outcome": "throws SyntaxError",
-            "ms": 6
+            "ms": 9
           },
           "configured": {
             "outcome": "resolves with undefined",
-            "ms": 6
+            "ms": 9
           }
         },
         "ofetch": {
@@ -519,31 +519,31 @@
           },
           "default": {
             "outcome": "resolves with undefined",
-            "ms": 6
+            "ms": 8
           },
           "configured": {
             "outcome": "resolves with undefined",
-            "ms": 6
+            "ms": 8
           }
         },
         "liaise": {
           "notes": {
-            "getJson": "timeout: 3000 (https://github.com/iremlopsum/liaise/blob/main/README.md#cancelling-deadlines-and-stale-requests); responseType: 'none' for the 204 (https://github.com/iremlopsum/liaise/blob/main/README.md#reading-responses)",
+            "getJson": "timeout: 3000 (https://github.com/iremlopsum/liaise/blob/main/README.md#cancelling-deadlines-and-stale-requests); responseType: 'none' declared on the 204 endpoint; liaise has no option for an endpoint that answers JSON or an empty body (https://github.com/iremlopsum/liaise/blob/main/README.md#reading-responses)",
             "search": "dedupe: true (https://github.com/iremlopsum/liaise/blob/main/README.md#drop-stale-calls-with-dedupe)",
-            "getWithAuth": "share: true on refresh, the README recipe (https://github.com/iremlopsum/liaise/blob/main/README.md#add-an-auth-header-and-refresh-the-token-on-a-401)",
+            "getWithAuth": "hand-written: auth middleware from the README recipe (https://github.com/iremlopsum/liaise/blob/main/README.md#add-an-auth-header-and-refresh-the-token-on-a-401); share: true on refresh replaces the shared refresh promise",
             "getWithDeadline": "timeout: 3000 (https://github.com/iremlopsum/liaise/blob/main/README.md#cancelling-deadlines-and-stale-requests) + retryMiddleware({ max: 3 }) (https://github.com/iremlopsum/liaise/blob/main/README.md#retries-caching-and-logging)",
             "getValidated": "schema, Standard Schema (https://github.com/iremlopsum/liaise/blob/main/README.md#validating-responses)"
           },
           "defaultNotes": {
-            "getWithAuth": "same refresh middleware, without share"
+            "getWithAuth": "hand-written: same refresh middleware, without share"
           },
           "default": {
             "outcome": "error result (parse)",
-            "ms": 6
+            "ms": 8
           },
           "configured": {
             "outcome": "resolves with undefined",
-            "ms": 7
+            "ms": 9
           }
         }
       }
@@ -555,7 +555,7 @@
         "fetch": {
           "notes": {
             "getJson": "hand-written: res.ok check that throws (https://developer.mozilla.org/en-US/docs/Web/API/Response/ok), signal: AbortSignal.timeout(3000) (https://developer.mozilla.org/en-US/docs/Web/API/AbortSignal/timeout_static), skip parsing a 204",
-            "getUser": "hand-written: template string, same as default",
+            "getUser": "same as default; fetch has no path-param option",
             "search": "hand-written: abort the previous call with AbortController (https://developer.mozilla.org/en-US/docs/Web/API/AbortController)",
             "getWithAuth": "hand-written: one shared refresh promise, retry once",
             "getWithDeadline": "hand-written: loop of 4 attempts under one AbortSignal.timeout(3000) (https://developer.mozilla.org/en-US/docs/Web/API/AbortSignal/timeout_static)",
@@ -566,11 +566,11 @@
           },
           "configured": {
             "outcome": "shows \"rea\"",
-            "ms": 26
+            "ms": 24
           },
           "default": {
             "outcome": "shows \"r\"",
-            "ms": 307
+            "ms": 311
           }
         },
         "axios": {
@@ -578,7 +578,7 @@
             "getJson": "timeout: 3000 (https://github.com/axios/axios/blob/v1.20.0/README.md#handling-timeouts); responseType: 'json' + transitional.silentJSONParsing: false (https://github.com/axios/axios/blob/v1.20.0/README.md#request-config)",
             "search": "hand-written: abort the previous call with signal + AbortController (https://github.com/axios/axios/blob/v1.20.0/README.md#abortcontroller)",
             "getWithAuth": "hand-written: refresh in a response interceptor (https://github.com/axios/axios/blob/v1.20.0/README.md#interceptors), one shared refresh promise",
-            "getWithDeadline": "no built-in option (retries need a plugin such as axios-retry)",
+            "getWithDeadline": "hand-written: loop of 4 attempts under one AbortSignal.timeout(3000) (https://github.com/axios/axios/blob/v1.20.0/README.md#abortcontroller)",
             "getValidated": "no built-in option"
           },
           "defaultNotes": {
@@ -586,11 +586,11 @@
           },
           "configured": {
             "outcome": "shows \"rea\"",
-            "ms": 26
+            "ms": 24
           },
           "default": {
             "outcome": "shows \"r\"",
-            "ms": 309
+            "ms": 311
           }
         },
         "ky": {
@@ -606,11 +606,11 @@
           },
           "configured": {
             "outcome": "shows \"rea\"",
-            "ms": 25
+            "ms": 23
           },
           "default": {
             "outcome": "shows \"r\"",
-            "ms": 309
+            "ms": 311
           }
         },
         "ofetch": {
@@ -626,31 +626,31 @@
           },
           "configured": {
             "outcome": "shows \"rea\"",
-            "ms": 25
+            "ms": 23
           },
           "default": {
             "outcome": "shows \"r\"",
-            "ms": 309
+            "ms": 312
           }
         },
         "liaise": {
           "notes": {
-            "getJson": "timeout: 3000 (https://github.com/iremlopsum/liaise/blob/main/README.md#cancelling-deadlines-and-stale-requests); responseType: 'none' for the 204 (https://github.com/iremlopsum/liaise/blob/main/README.md#reading-responses)",
+            "getJson": "timeout: 3000 (https://github.com/iremlopsum/liaise/blob/main/README.md#cancelling-deadlines-and-stale-requests); responseType: 'none' declared on the 204 endpoint; liaise has no option for an endpoint that answers JSON or an empty body (https://github.com/iremlopsum/liaise/blob/main/README.md#reading-responses)",
             "search": "dedupe: true (https://github.com/iremlopsum/liaise/blob/main/README.md#drop-stale-calls-with-dedupe)",
-            "getWithAuth": "share: true on refresh, the README recipe (https://github.com/iremlopsum/liaise/blob/main/README.md#add-an-auth-header-and-refresh-the-token-on-a-401)",
+            "getWithAuth": "hand-written: auth middleware from the README recipe (https://github.com/iremlopsum/liaise/blob/main/README.md#add-an-auth-header-and-refresh-the-token-on-a-401); share: true on refresh replaces the shared refresh promise",
             "getWithDeadline": "timeout: 3000 (https://github.com/iremlopsum/liaise/blob/main/README.md#cancelling-deadlines-and-stale-requests) + retryMiddleware({ max: 3 }) (https://github.com/iremlopsum/liaise/blob/main/README.md#retries-caching-and-logging)",
             "getValidated": "schema, Standard Schema (https://github.com/iremlopsum/liaise/blob/main/README.md#validating-responses)"
           },
           "defaultNotes": {
-            "getWithAuth": "same refresh middleware, without share"
+            "getWithAuth": "hand-written: same refresh middleware, without share"
           },
           "configured": {
             "outcome": "shows \"rea\"",
-            "ms": 27
+            "ms": 25
           },
           "default": {
             "outcome": "shows \"r\"",
-            "ms": 309
+            "ms": 312
           }
         }
       }
@@ -662,7 +662,7 @@
         "fetch": {
           "notes": {
             "getJson": "hand-written: res.ok check that throws (https://developer.mozilla.org/en-US/docs/Web/API/Response/ok), signal: AbortSignal.timeout(3000) (https://developer.mozilla.org/en-US/docs/Web/API/AbortSignal/timeout_static), skip parsing a 204",
-            "getUser": "hand-written: template string, same as default",
+            "getUser": "same as default; fetch has no path-param option",
             "search": "hand-written: abort the previous call with AbortController (https://developer.mozilla.org/en-US/docs/Web/API/AbortController)",
             "getWithAuth": "hand-written: one shared refresh promise, retry once",
             "getWithDeadline": "hand-written: loop of 4 attempts under one AbortSignal.timeout(3000) (https://developer.mozilla.org/en-US/docs/Web/API/AbortSignal/timeout_static)",
@@ -673,11 +673,11 @@
           },
           "default": {
             "outcome": "5 refresh calls, 1/5 succeed",
-            "ms": 53
+            "ms": 65
           },
           "configured": {
-            "outcome": "1 refresh calls, 5/5 succeed",
-            "ms": 65
+            "outcome": "1 refresh call, 5/5 succeed",
+            "ms": 77
           }
         },
         "axios": {
@@ -685,7 +685,7 @@
             "getJson": "timeout: 3000 (https://github.com/axios/axios/blob/v1.20.0/README.md#handling-timeouts); responseType: 'json' + transitional.silentJSONParsing: false (https://github.com/axios/axios/blob/v1.20.0/README.md#request-config)",
             "search": "hand-written: abort the previous call with signal + AbortController (https://github.com/axios/axios/blob/v1.20.0/README.md#abortcontroller)",
             "getWithAuth": "hand-written: refresh in a response interceptor (https://github.com/axios/axios/blob/v1.20.0/README.md#interceptors), one shared refresh promise",
-            "getWithDeadline": "no built-in option (retries need a plugin such as axios-retry)",
+            "getWithDeadline": "hand-written: loop of 4 attempts under one AbortSignal.timeout(3000) (https://github.com/axios/axios/blob/v1.20.0/README.md#abortcontroller)",
             "getValidated": "no built-in option"
           },
           "defaultNotes": {
@@ -693,11 +693,11 @@
           },
           "default": {
             "outcome": "5 refresh calls, 1/5 succeed",
-            "ms": 49
+            "ms": 58
           },
           "configured": {
-            "outcome": "1 refresh calls, 5/5 succeed",
-            "ms": 48
+            "outcome": "1 refresh call, 5/5 succeed",
+            "ms": 57
           }
         },
         "ky": {
@@ -713,11 +713,11 @@
           },
           "default": {
             "outcome": "5 refresh calls, 1/5 succeed",
-            "ms": 51
+            "ms": 60
           },
           "configured": {
-            "outcome": "1 refresh calls, 5/5 succeed",
-            "ms": 353
+            "outcome": "1 refresh call, 5/5 succeed",
+            "ms": 360
           }
         },
         "ofetch": {
@@ -733,31 +733,31 @@
           },
           "default": {
             "outcome": "5 refresh calls, 1/5 succeed",
-            "ms": 51
+            "ms": 58
           },
           "configured": {
-            "outcome": "1 refresh calls, 5/5 succeed",
-            "ms": 63
+            "outcome": "1 refresh call, 5/5 succeed",
+            "ms": 71
           }
         },
         "liaise": {
           "notes": {
-            "getJson": "timeout: 3000 (https://github.com/iremlopsum/liaise/blob/main/README.md#cancelling-deadlines-and-stale-requests); responseType: 'none' for the 204 (https://github.com/iremlopsum/liaise/blob/main/README.md#reading-responses)",
+            "getJson": "timeout: 3000 (https://github.com/iremlopsum/liaise/blob/main/README.md#cancelling-deadlines-and-stale-requests); responseType: 'none' declared on the 204 endpoint; liaise has no option for an endpoint that answers JSON or an empty body (https://github.com/iremlopsum/liaise/blob/main/README.md#reading-responses)",
             "search": "dedupe: true (https://github.com/iremlopsum/liaise/blob/main/README.md#drop-stale-calls-with-dedupe)",
-            "getWithAuth": "share: true on refresh, the README recipe (https://github.com/iremlopsum/liaise/blob/main/README.md#add-an-auth-header-and-refresh-the-token-on-a-401)",
+            "getWithAuth": "hand-written: auth middleware from the README recipe (https://github.com/iremlopsum/liaise/blob/main/README.md#add-an-auth-header-and-refresh-the-token-on-a-401); share: true on refresh replaces the shared refresh promise",
             "getWithDeadline": "timeout: 3000 (https://github.com/iremlopsum/liaise/blob/main/README.md#cancelling-deadlines-and-stale-requests) + retryMiddleware({ max: 3 }) (https://github.com/iremlopsum/liaise/blob/main/README.md#retries-caching-and-logging)",
             "getValidated": "schema, Standard Schema (https://github.com/iremlopsum/liaise/blob/main/README.md#validating-responses)"
           },
           "defaultNotes": {
-            "getWithAuth": "same refresh middleware, without share"
+            "getWithAuth": "hand-written: same refresh middleware, without share"
           },
           "default": {
             "outcome": "5 refresh calls, 1/5 succeed",
-            "ms": 51
+            "ms": 58
           },
           "configured": {
-            "outcome": "1 refresh calls, 5/5 succeed",
-            "ms": 63
+            "outcome": "1 refresh call, 5/5 succeed",
+            "ms": 70
           }
         }
       }
@@ -769,7 +769,7 @@
         "fetch": {
           "notes": {
             "getJson": "hand-written: res.ok check that throws (https://developer.mozilla.org/en-US/docs/Web/API/Response/ok), signal: AbortSignal.timeout(3000) (https://developer.mozilla.org/en-US/docs/Web/API/AbortSignal/timeout_static), skip parsing a 204",
-            "getUser": "hand-written: template string, same as default",
+            "getUser": "same as default; fetch has no path-param option",
             "search": "hand-written: abort the previous call with AbortController (https://developer.mozilla.org/en-US/docs/Web/API/AbortController)",
             "getWithAuth": "hand-written: one shared refresh promise, retry once",
             "getWithDeadline": "hand-written: loop of 4 attempts under one AbortSignal.timeout(3000) (https://developer.mozilla.org/en-US/docs/Web/API/AbortSignal/timeout_static)",
@@ -779,12 +779,12 @@
             "getWithAuth": "hand-written: naive refresh on 401, retry once"
           },
           "default": {
-            "outcome": "after 1.0s: wrong data (1 attempts)",
-            "ms": 1005
+            "outcome": "after 1.0s: wrong data (1 attempt)",
+            "ms": 1008
           },
           "configured": {
             "outcome": "after 3.0s: throws TimeoutError (3 attempts)",
-            "ms": 3005
+            "ms": 3002
           }
         },
         "axios": {
@@ -792,19 +792,19 @@
             "getJson": "timeout: 3000 (https://github.com/axios/axios/blob/v1.20.0/README.md#handling-timeouts); responseType: 'json' + transitional.silentJSONParsing: false (https://github.com/axios/axios/blob/v1.20.0/README.md#request-config)",
             "search": "hand-written: abort the previous call with signal + AbortController (https://github.com/axios/axios/blob/v1.20.0/README.md#abortcontroller)",
             "getWithAuth": "hand-written: refresh in a response interceptor (https://github.com/axios/axios/blob/v1.20.0/README.md#interceptors), one shared refresh promise",
-            "getWithDeadline": "no built-in option (retries need a plugin such as axios-retry)",
+            "getWithDeadline": "hand-written: loop of 4 attempts under one AbortSignal.timeout(3000) (https://github.com/axios/axios/blob/v1.20.0/README.md#abortcontroller)",
             "getValidated": "no built-in option"
           },
           "defaultNotes": {
             "getWithAuth": "hand-written: naive refresh on 401, retry once"
           },
-          "configured": {
-            "outcome": "—",
-            "ms": 0
-          },
           "default": {
-            "outcome": "after 1.0s: throws AxiosError (1 attempts)",
-            "ms": 1005
+            "outcome": "after 1.0s: throws AxiosError (1 attempt)",
+            "ms": 1010
+          },
+          "configured": {
+            "outcome": "after 3.0s: throws CanceledError (3 attempts)",
+            "ms": 3003
           }
         },
         "ky": {
@@ -820,11 +820,11 @@
           },
           "configured": {
             "outcome": "after 3.0s: throws TimeoutError (3 attempts)",
-            "ms": 3006
+            "ms": 3005
           },
           "default": {
             "outcome": "after 3.9s: throws HTTPError (3 attempts)",
-            "ms": 3913
+            "ms": 3919
           }
         },
         "ofetch": {
@@ -840,31 +840,31 @@
           },
           "default": {
             "outcome": "after 2.0s: throws FetchError (2 attempts)",
-            "ms": 2009
+            "ms": 2020
           },
           "configured": {
             "outcome": "after 3.0s: throws FetchError (3 attempts)",
-            "ms": 3005
+            "ms": 3004
           }
         },
         "liaise": {
           "notes": {
-            "getJson": "timeout: 3000 (https://github.com/iremlopsum/liaise/blob/main/README.md#cancelling-deadlines-and-stale-requests); responseType: 'none' for the 204 (https://github.com/iremlopsum/liaise/blob/main/README.md#reading-responses)",
+            "getJson": "timeout: 3000 (https://github.com/iremlopsum/liaise/blob/main/README.md#cancelling-deadlines-and-stale-requests); responseType: 'none' declared on the 204 endpoint; liaise has no option for an endpoint that answers JSON or an empty body (https://github.com/iremlopsum/liaise/blob/main/README.md#reading-responses)",
             "search": "dedupe: true (https://github.com/iremlopsum/liaise/blob/main/README.md#drop-stale-calls-with-dedupe)",
-            "getWithAuth": "share: true on refresh, the README recipe (https://github.com/iremlopsum/liaise/blob/main/README.md#add-an-auth-header-and-refresh-the-token-on-a-401)",
+            "getWithAuth": "hand-written: auth middleware from the README recipe (https://github.com/iremlopsum/liaise/blob/main/README.md#add-an-auth-header-and-refresh-the-token-on-a-401); share: true on refresh replaces the shared refresh promise",
             "getWithDeadline": "timeout: 3000 (https://github.com/iremlopsum/liaise/blob/main/README.md#cancelling-deadlines-and-stale-requests) + retryMiddleware({ max: 3 }) (https://github.com/iremlopsum/liaise/blob/main/README.md#retries-caching-and-logging)",
             "getValidated": "schema, Standard Schema (https://github.com/iremlopsum/liaise/blob/main/README.md#validating-responses)"
           },
           "defaultNotes": {
-            "getWithAuth": "same refresh middleware, without share"
+            "getWithAuth": "hand-written: same refresh middleware, without share"
           },
           "default": {
-            "outcome": "after 1.0s: error result (http) (1 attempts)",
-            "ms": 1006
+            "outcome": "after 1.0s: error result (http) (1 attempt)",
+            "ms": 1013
           },
           "configured": {
             "outcome": "after 3.0s: error result (timeout) (3 attempts)",
-            "ms": 3005
+            "ms": 3004
           }
         }
       }
@@ -876,7 +876,7 @@
         "fetch": {
           "notes": {
             "getJson": "hand-written: res.ok check that throws (https://developer.mozilla.org/en-US/docs/Web/API/Response/ok), signal: AbortSignal.timeout(3000) (https://developer.mozilla.org/en-US/docs/Web/API/AbortSignal/timeout_static), skip parsing a 204",
-            "getUser": "hand-written: template string, same as default",
+            "getUser": "same as default; fetch has no path-param option",
             "search": "hand-written: abort the previous call with AbortController (https://developer.mozilla.org/en-US/docs/Web/API/AbortController)",
             "getWithAuth": "hand-written: one shared refresh promise, retry once",
             "getWithDeadline": "hand-written: loop of 4 attempts under one AbortSignal.timeout(3000) (https://developer.mozilla.org/en-US/docs/Web/API/AbortSignal/timeout_static)",
@@ -887,11 +887,11 @@
           },
           "default": {
             "outcome": "requests /s/users/undefined",
-            "ms": 10
+            "ms": 8
           },
           "configured": {
             "outcome": "requests /s/users/undefined",
-            "ms": 10
+            "ms": 8
           }
         },
         "axios": {
@@ -899,7 +899,7 @@
             "getJson": "timeout: 3000 (https://github.com/axios/axios/blob/v1.20.0/README.md#handling-timeouts); responseType: 'json' + transitional.silentJSONParsing: false (https://github.com/axios/axios/blob/v1.20.0/README.md#request-config)",
             "search": "hand-written: abort the previous call with signal + AbortController (https://github.com/axios/axios/blob/v1.20.0/README.md#abortcontroller)",
             "getWithAuth": "hand-written: refresh in a response interceptor (https://github.com/axios/axios/blob/v1.20.0/README.md#interceptors), one shared refresh promise",
-            "getWithDeadline": "no built-in option (retries need a plugin such as axios-retry)",
+            "getWithDeadline": "hand-written: loop of 4 attempts under one AbortSignal.timeout(3000) (https://github.com/axios/axios/blob/v1.20.0/README.md#abortcontroller)",
             "getValidated": "no built-in option"
           },
           "defaultNotes": {
@@ -907,11 +907,11 @@
           },
           "default": {
             "outcome": "requests /s/users/undefined",
-            "ms": 10
+            "ms": 8
           },
           "configured": {
             "outcome": "requests /s/users/undefined",
-            "ms": 10
+            "ms": 8
           }
         },
         "ky": {
@@ -927,7 +927,7 @@
           },
           "default": {
             "outcome": "requests /s/users/undefined",
-            "ms": 10
+            "ms": 8
           },
           "configured": {
             "outcome": "requests /s/users/undefined",
@@ -947,30 +947,30 @@
           },
           "default": {
             "outcome": "requests /s/users/undefined",
-            "ms": 8
+            "ms": 9
           },
           "configured": {
             "outcome": "requests /s/users/undefined",
-            "ms": 8
+            "ms": 9
           }
         },
         "liaise": {
           "notes": {
-            "getJson": "timeout: 3000 (https://github.com/iremlopsum/liaise/blob/main/README.md#cancelling-deadlines-and-stale-requests); responseType: 'none' for the 204 (https://github.com/iremlopsum/liaise/blob/main/README.md#reading-responses)",
+            "getJson": "timeout: 3000 (https://github.com/iremlopsum/liaise/blob/main/README.md#cancelling-deadlines-and-stale-requests); responseType: 'none' declared on the 204 endpoint; liaise has no option for an endpoint that answers JSON or an empty body (https://github.com/iremlopsum/liaise/blob/main/README.md#reading-responses)",
             "search": "dedupe: true (https://github.com/iremlopsum/liaise/blob/main/README.md#drop-stale-calls-with-dedupe)",
-            "getWithAuth": "share: true on refresh, the README recipe (https://github.com/iremlopsum/liaise/blob/main/README.md#add-an-auth-header-and-refresh-the-token-on-a-401)",
+            "getWithAuth": "hand-written: auth middleware from the README recipe (https://github.com/iremlopsum/liaise/blob/main/README.md#add-an-auth-header-and-refresh-the-token-on-a-401); share: true on refresh replaces the shared refresh promise",
             "getWithDeadline": "timeout: 3000 (https://github.com/iremlopsum/liaise/blob/main/README.md#cancelling-deadlines-and-stale-requests) + retryMiddleware({ max: 3 }) (https://github.com/iremlopsum/liaise/blob/main/README.md#retries-caching-and-logging)",
             "getValidated": "schema, Standard Schema (https://github.com/iremlopsum/liaise/blob/main/README.md#validating-responses)"
           },
           "defaultNotes": {
-            "getWithAuth": "same refresh middleware, without share"
+            "getWithAuth": "hand-written: same refresh middleware, without share"
           },
           "default": {
-            "outcome": "error result (network)",
+            "outcome": "refused before sending (error result (network))",
             "ms": 3
           },
           "configured": {
-            "outcome": "error result (network)",
+            "outcome": "refused before sending (error result (network))",
             "ms": 3
           }
         }
@@ -983,7 +983,7 @@
         "fetch": {
           "notes": {
             "getJson": "hand-written: res.ok check that throws (https://developer.mozilla.org/en-US/docs/Web/API/Response/ok), signal: AbortSignal.timeout(3000) (https://developer.mozilla.org/en-US/docs/Web/API/AbortSignal/timeout_static), skip parsing a 204",
-            "getUser": "hand-written: template string, same as default",
+            "getUser": "same as default; fetch has no path-param option",
             "search": "hand-written: abort the previous call with AbortController (https://developer.mozilla.org/en-US/docs/Web/API/AbortController)",
             "getWithAuth": "hand-written: one shared refresh promise, retry once",
             "getWithDeadline": "hand-written: loop of 4 attempts under one AbortSignal.timeout(3000) (https://developer.mozilla.org/en-US/docs/Web/API/AbortSignal/timeout_static)",
@@ -998,7 +998,7 @@
           },
           "default": {
             "outcome": "wrong data",
-            "ms": 3
+            "ms": 4
           }
         },
         "axios": {
@@ -1006,7 +1006,7 @@
             "getJson": "timeout: 3000 (https://github.com/axios/axios/blob/v1.20.0/README.md#handling-timeouts); responseType: 'json' + transitional.silentJSONParsing: false (https://github.com/axios/axios/blob/v1.20.0/README.md#request-config)",
             "search": "hand-written: abort the previous call with signal + AbortController (https://github.com/axios/axios/blob/v1.20.0/README.md#abortcontroller)",
             "getWithAuth": "hand-written: refresh in a response interceptor (https://github.com/axios/axios/blob/v1.20.0/README.md#interceptors), one shared refresh promise",
-            "getWithDeadline": "no built-in option (retries need a plugin such as axios-retry)",
+            "getWithDeadline": "hand-written: loop of 4 attempts under one AbortSignal.timeout(3000) (https://github.com/axios/axios/blob/v1.20.0/README.md#abortcontroller)",
             "getValidated": "no built-in option"
           },
           "defaultNotes": {
@@ -1018,7 +1018,7 @@
           },
           "default": {
             "outcome": "wrong data",
-            "ms": 3
+            "ms": 4
           }
         },
         "ky": {
@@ -1034,11 +1034,11 @@
           },
           "default": {
             "outcome": "wrong data",
-            "ms": 4
+            "ms": 5
           },
           "configured": {
             "outcome": "throws SchemaValidationError",
-            "ms": 4
+            "ms": 5
           }
         },
         "ofetch": {
@@ -1058,27 +1058,27 @@
           },
           "default": {
             "outcome": "wrong data",
-            "ms": 3
+            "ms": 4
           }
         },
         "liaise": {
           "notes": {
-            "getJson": "timeout: 3000 (https://github.com/iremlopsum/liaise/blob/main/README.md#cancelling-deadlines-and-stale-requests); responseType: 'none' for the 204 (https://github.com/iremlopsum/liaise/blob/main/README.md#reading-responses)",
+            "getJson": "timeout: 3000 (https://github.com/iremlopsum/liaise/blob/main/README.md#cancelling-deadlines-and-stale-requests); responseType: 'none' declared on the 204 endpoint; liaise has no option for an endpoint that answers JSON or an empty body (https://github.com/iremlopsum/liaise/blob/main/README.md#reading-responses)",
             "search": "dedupe: true (https://github.com/iremlopsum/liaise/blob/main/README.md#drop-stale-calls-with-dedupe)",
-            "getWithAuth": "share: true on refresh, the README recipe (https://github.com/iremlopsum/liaise/blob/main/README.md#add-an-auth-header-and-refresh-the-token-on-a-401)",
+            "getWithAuth": "hand-written: auth middleware from the README recipe (https://github.com/iremlopsum/liaise/blob/main/README.md#add-an-auth-header-and-refresh-the-token-on-a-401); share: true on refresh replaces the shared refresh promise",
             "getWithDeadline": "timeout: 3000 (https://github.com/iremlopsum/liaise/blob/main/README.md#cancelling-deadlines-and-stale-requests) + retryMiddleware({ max: 3 }) (https://github.com/iremlopsum/liaise/blob/main/README.md#retries-caching-and-logging)",
             "getValidated": "schema, Standard Schema (https://github.com/iremlopsum/liaise/blob/main/README.md#validating-responses)"
           },
           "defaultNotes": {
-            "getWithAuth": "same refresh middleware, without share"
+            "getWithAuth": "hand-written: same refresh middleware, without share"
           },
           "default": {
             "outcome": "wrong data",
-            "ms": 3
+            "ms": 4
           },
           "configured": {
             "outcome": "error result (parse)",
-            "ms": 3
+            "ms": 5
           }
         }
       }
@@ -1104,67 +1104,71 @@
     "liaise": {
       "gzip": 5954,
       "brotli": 5373
+    },
+    "liaise + retryMiddleware": {
+      "gzip": 6479,
+      "brotli": 5860
     }
   },
   "overhead": {
     "fetch": {
       "sequential": {
-        "median": 15428,
-        "min": 8344,
-        "max": 16708
+        "median": 16797,
+        "min": 15033,
+        "max": 17325
       },
       "concurrent": {
-        "median": 18343,
-        "min": 13064,
-        "max": 19248
+        "median": 19763,
+        "min": 18024,
+        "max": 20044
       }
     },
     "axios": {
       "sequential": {
-        "median": 12567,
-        "min": 8927,
-        "max": 12957
+        "median": 13691,
+        "min": 10658,
+        "max": 14091
       },
       "concurrent": {
-        "median": 14347,
-        "min": 13439,
-        "max": 14842
+        "median": 15414,
+        "min": 13178,
+        "max": 16110
       }
     },
     "ky": {
       "sequential": {
-        "median": 12800,
-        "min": 10689,
-        "max": 13427
+        "median": 13742,
+        "min": 11637,
+        "max": 14631
       },
       "concurrent": {
-        "median": 14174,
-        "min": 12641,
-        "max": 15419
+        "median": 15714,
+        "min": 14888,
+        "max": 16153
       }
     },
     "ofetch": {
       "sequential": {
-        "median": 15016,
-        "min": 14681,
-        "max": 15561
+        "median": 16230,
+        "min": 14586,
+        "max": 17118
       },
       "concurrent": {
-        "median": 17602,
-        "min": 16585,
-        "max": 18218
+        "median": 18780,
+        "min": 18020,
+        "max": 19515
       }
     },
     "liaise": {
       "sequential": {
-        "median": 14546,
-        "min": 11670,
-        "max": 15104
+        "median": 16414,
+        "min": 15543,
+        "max": 16727
       },
       "concurrent": {
-        "median": 17403,
-        "min": 16855,
-        "max": 18372
+        "median": 19014,
+        "min": 18201,
+        "max": 19800
       }
     }
   }

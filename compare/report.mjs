@@ -17,13 +17,27 @@ function cell(s, name, variant) {
   const res = r[variant]
   const notes = variant === 'configured' ? r.notes : r.defaultNotes
   let text = res.outcome
-  if (timingRows.has(s.id) && res.outcome !== '—' && !/ after \d/.test(` ${res.outcome}`)) text += ` (${res.ms} ms)`
+  if (timingRows.has(s.id) && res.outcome !== '—' && !/ after \d/.test(` ${res.outcome}`)) text += `, ${res.ms} ms`
   return text + (handWritten(notes?.[methodFor[s.id]]) ? '*' : '')
 }
 const outcomes = variant => table(['Scenario', ...names], results.scenarios.map(s => [s.title, ...names.map(n => cell(s, n, variant))]))
 
 const kb = b => (b / 1024).toFixed(1)
-const sizeTable = () => table(['Library', 'gzip (kB)', 'brotli (kB)'], names.map(n => [n, kb(results.sizes[n].gzip), kb(results.sizes[n].brotli)]))
+const sizeNames = [...names, 'liaise + retryMiddleware']
+const sizeTable = () => table(['Library', 'gzip (kB)', 'brotli (kB)'], sizeNames.map(n => [n, kb(results.sizes[n].gzip), kb(results.sizes[n].brotli)]))
+
+// A sentence about liaise's out-of-the-box failures in the hang and 204 rows, from results.json.
+function liaiseDefaultSentence() {
+  const row = id => results.scenarios.find(s => s.id === id).results.liaise.default.outcome
+  const hang = row('hang'), empty = row('empty-204')
+  const hangBad = /^still waiting/.test(hang), emptyBad = /^(throws|error result)/.test(empty)
+  const others = names.filter(n => n !== 'liaise' && /^throws/.test(results.scenarios.find(s => s.id === 'hang').results[n].default.outcome))
+  const parts = []
+  if (hangBad) parts.push(`has no timeout (${others.length ? `only ${others.join(' and ')} ${others.length === 1 ? 'has one' : 'have one'} by default` : 'no library here has one by default'})`)
+  if (emptyBad) parts.push(`treats a 204 on a JSON call as ${/parse/.test(empty) ? 'a parse error' : 'an error'}`)
+  if (!parts.length) return 'Out of the box, liaise handles the hang and 204 rows without a failure. See Table B in [compare/results.md](compare/results.md).'
+  return `Out of the box, liaise ${parts.join(' and ')}. See Table B in [compare/results.md](compare/results.md).`
+}
 const fmt = x => `${x.median.toLocaleString('en-US')} (${x.min.toLocaleString('en-US')}–${x.max.toLocaleString('en-US')})`
 const overheadTable = () => table(['Library', 'Sequential', 'Concurrent (50 in flight)'], names.map(n => [n, fmt(results.overhead[n].sequential), fmt(results.overhead[n].concurrent)]))
 const overheadLine = () => `Request overhead on localhost, sequential (median requests per second): ${names.map(n => `${n} ${results.overhead[n].sequential.median.toLocaleString('en-US')}`).join(', ')}.`
@@ -59,15 +73,19 @@ ${outcomes('default')}
 
 \\* needed hand-written code, described in the notes.
 
+Reading guide: a 204 and a slow server are normal. An error, or still waiting, in those rows is a failure.
+
 ## Table C. Size
 
 One JSON GET, minified ES2020 ESM bundle for a browser.
 
 ${sizeTable()}
 
+fetch is built into the runtime; its row is the call site only, the floor rather than a library.
+
 ## Table D. Requests per second on localhost
 
-Median (min–max) of 10 runs of 2,000 calls each, after 300 warm-up calls. ${meta.overheadNote}.
+Median (min–max) of 10 interleaved rounds of 2,000 calls each, after 2,000 warm-up calls per library. ${meta.overheadNote}. Differences under about 5% are noise.
 
 ${overheadTable()}
 
@@ -87,7 +105,11 @@ ${outcomes('configured')}
 
 \\* needed hand-written code, described in the [notes](compare/results.md#notes). — means the library has no built-in option.
 
+${liaiseDefaultSentence()}
+
 ${sizeTable()}
+
+fetch is built into the runtime; its row is the call site only, the floor rather than a library.
 
 ${overheadLine()}
 
