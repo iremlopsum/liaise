@@ -1,0 +1,19 @@
+{
+  "name": "liaise-compare",
+  "private": true,
+  "type": "module",
+  "engines": { "node": ">=22" },
+  "scripts": {
+    "compare": "node run.mjs && node sizes.mjs && node overhead.mjs && node report.mjs",
+    "compare:behaviour": "node run.mjs",
+    "compare:readme": "node report.mjs --splice ../README.md",
+    "test": "node --test observe.test.mjs"
+  },
+  "devDependencies": {
+    "axios": "1.20.0",
+    "esbuild": "0.27.4",
+    "ky": "2.1.0",
+    "liaise": "file:..",
+    "ofetch": "1.5.1"
+  }
+}
