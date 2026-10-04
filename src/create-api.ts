@@ -52,6 +52,8 @@ import { isReadableStream } from './utils/special-body.js'
 import { classifyParams } from './utils/classify-params.js'
 import { runSchema } from './utils/validate.js'
 import type { SchemaOutcome } from './utils/validate.js'
+import { sendExchange, AbortedRead } from './utils/exchange.js'
+import type { Exchange } from './utils/exchange.js'
 import type { ApiConfig, CallOptions, ErrorResult, Middleware, MiddlewareContext, Result, ResponseType } from './types.js'
 
 // =============================================================================
@@ -140,7 +142,7 @@ type Api<TRequests extends Record<string, Request<any, any>>> = {
 const sentStreams = new WeakSet<ReadableStream>()
 
 /**
- * Returned by `parseResponse` when a `json` request received an empty body.
+ * Returned by `decodeBody` when a `json` request received an empty body.
  *
  * Distinct from `null` because `JSON.parse("null")` is also `null`: a server
  * sending the body `null` is sending valid JSON and must not be confused with
@@ -153,51 +155,48 @@ const sentStreams = new WeakSet<ReadableStream>()
 const EMPTY_JSON_BODY: unique symbol = Symbol('liaise.emptyJsonBody')
 
 /**
- * Parses the response body according to the configured response type.
+ * This caller's own copy of the body, decoded from the one shared read.
+ * Throws what reading or parsing threw, so the call sites' existing try/catch
+ * blocks keep classifying failures as before.
  *
- * Each Request can specify how its response should be parsed (json, text, blob,
- * etc.). This function dispatches to the appropriate Response method.
+ * The read itself happened once, in `sendExchange` (src/utils/exchange.ts),
+ * which also cancelled the stream for a 2xx under 'none'. A read the
+ * request's own signal aborted never reaches here: `sendExchange` throws it
+ * as an `AbortedRead`, and core's outer catch classifies it. What can reach
+ * here is a read that failed for another reason (rethrown as-is) or a body
+ * that does not parse.
  *
- * Special handling for JSON: we first read the body as text and then parse it.
+ * Special handling for JSON: the body arrives as text and is parsed here.
  * This avoids the "unexpected end of input" error that response.json() throws
- * on empty responses (e.g., 204 No Content, or a 200 with an empty body).
- * Empty text yields the EMPTY_JSON_BODY sentinel rather than throwing; each
- * call site decides what an empty body means for it.
+ * on empty responses (e.g., 204 No Content, or a 200 with an empty body, which
+ * DELETE and fire-and-forget endpoints do send). Empty text yields the
+ * EMPTY_JSON_BODY sentinel rather than throwing; each call site decides what
+ * an empty body means for it.
  *
- * @param response - The raw fetch Response object to parse.
- * @param responseType - How to parse the body. Defaults to 'json'.
- * @returns The parsed response body (type depends on responseType).
+ * @param exchange - The round trip's single read.
+ * @param responseType - How to decode it. Defaults to 'json', and so does a
+ *   value this switch does not name, exactly as the read in `sendExchange`
+ *   falls back to text for one.
+ * @returns The decoded body (type depends on responseType).
  */
-async function parseResponse(response: Response, responseType: ResponseType = 'json'): Promise<unknown> {
+function decodeBody(exchange: Exchange, responseType: ResponseType = 'json'): unknown {
+  if (exchange.readFailed) throw exchange.readError
   switch (responseType) {
     case 'text':
-      return response.text()
     case 'blob':
-      return response.blob()
     case 'arrayBuffer':
-      return response.arrayBuffer()
     case 'formData':
-      return response.formData()
+      // Already in its final form: text, or the native object the read produced.
+      return exchange.body
     case 'none':
       // The caller has declared this endpoint returns no body, so there is
-      // nothing to parse and a body the server sends anyway is discarded.
-      //
-      // Cancel the stream rather than leaving it unread: an abandoned body
-      // can hold a keep-alive connection open. Guarded because cancelling an
-      // absent or already-consumed stream can throw, and cleanup must never
-      // fail a request that otherwise succeeded.
-      try {
-        await response.body?.cancel()
-      } catch {
-        /* nothing to release */
-      }
+      // nothing to decode; `sendExchange` cancelled whatever the server sent.
       return undefined
     case 'json':
     default: {
-      // Read as text first to safely handle empty responses.
-      // response.json() throws on empty bodies, but sometimes servers return
-      // 200 OK with no body (especially for DELETE or fire-and-forget endpoints).
-      const text = await response.text()
+      // Read as text first so an empty body is reported, not thrown — see the
+      // EMPTY_JSON_BODY seam.
+      const text = exchange.body as string
       return text ? JSON.parse(text) : EMPTY_JSON_BODY
     }
   }
@@ -721,12 +720,14 @@ export function createApi<TRequests extends Record<string, Request<any, any>>>(
           // The core function receives the (possibly mutated) middleware
           // context and performs:
           // a. Build the fetch RequestInit (method, headers, signal, body)
-          // b. Call fetch with the resolved URL and init
-          // c. Parse the response based on the configured responseType
+          // b. Call fetch with the resolved URL and init, and read the body
+          //    once (`sendExchange`, src/utils/exchange.ts)
+          // c. Decode that read based on the configured responseType
           // d. Return a success or error Result
           //
-          // Network errors (fetch throws) are caught and returned as
-          // network error Results (status 0, no response).
+          // Network errors (fetch throws), and a body read our own signal
+          // aborted, are caught and returned as network error Results
+          // (status 0, no response).
           // -----------------------------------------------------------------
           const core = async (ctx: MiddlewareContext): Promise<Result<unknown>> => {
             try {
@@ -805,7 +806,13 @@ export function createApi<TRequests extends Record<string, Request<any, any>>>(
                 fetchInit.body = body as BodyInit
               }
 
-              const response = await fetch(ctx.request.url, fetchInit)
+              // fetch, then the body read, exactly once. A read our own signal
+              // aborted throws AbortedRead (classified in the outer catch); any
+              // other read failure is recorded on the exchange and rethrown by
+              // decodeBody inside the branch's own try below, where it was
+              // always handled.
+              const exchange = await sendExchange(ctx.request.url, fetchInit, request.config.responseType ?? 'json')
+              const response = exchange.response
 
               // ---------------------------------------------------------------
               // Handle non-OK responses (4xx, 5xx)
@@ -814,19 +821,20 @@ export function createApi<TRequests extends Record<string, Request<any, any>>>(
               // the response (headers, body) available for inspection.
               // ---------------------------------------------------------------
               if (!response.ok) {
-                // Try to parse the error response body using the same
-                // responseType config. If parsing fails (e.g., server returned
-                // HTML for a JSON endpoint), fall back to null.
+                // Decode the error response body using the same responseType
+                // config. If decoding fails (e.g., server returned HTML for a
+                // JSON endpoint), or the read failed for a reason other than
+                // our own signal, fall back to null.
                 //
-                // Same provenance concern as the success path below —
-                // parseResponse performs the network body read here too, so
-                // an abort landing while an ERROR body downloads (a slow
+                // An abort landing while an ERROR body downloads (a slow
                 // gateway's multi-kilobyte 502 page, say) must not be
-                // misreported as a genuine 'http' error with a null body.
-                // Without this check the classification is decided by the
-                // server's status code rather than by what actually
-                // happened — the same user action (navigating away) would
-                // read as a real 5xx to retryOn and to onError.
+                // misreported as a genuine 'http' error with a null body:
+                // the classification would then be decided by the server's
+                // status code rather than by what actually happened, and the
+                // same user action (navigating away) would read as a real
+                // 5xx to retryOn and to onError. That read never reaches this
+                // catch — `sendExchange` throws it as an AbortedRead, and the
+                // outer catch classifies it by the signal's reason.
                 let body: unknown
                 try {
                   // 'none' describes the success shape only — it means "this
@@ -834,11 +842,12 @@ export function createApi<TRequests extends Record<string, Request<any, any>>>(
                   // read a body". An error response is a different shape and
                   // its body is diagnostic (validation messages, error
                   // codes), so a 'none' request still gets its error body
-                  // parsed as JSON here, on this non-2xx path only. The
-                  // success path below is untouched.
+                  // parsed as JSON here, on this non-2xx path only —
+                  // `sendExchange` read it as text for exactly that reason.
+                  // The success path below is untouched.
                   const errorResponseType =
                     request.config.responseType === 'none' ? 'json' : request.config.responseType
-                  body = await parseResponse(response, errorResponseType)
+                  body = decodeBody(exchange, errorResponseType)
                   // Normalize the empty-JSON sentinel here too. This is NOT
                   // part of the 4.0.0 seam (the success-path empty-body branch
                   // below is the only place that seam applies) — an error
@@ -851,21 +860,7 @@ export function createApi<TRequests extends Record<string, Request<any, any>>>(
                   // breaks `` `${error.body}` `` for every caller (it throws
                   // TypeError on a symbol) — see tests/empty-body.test.ts.
                   if (body === EMPTY_JSON_BODY) body = null
-                } catch (parseErr) {
-                  const signal = ctx.request.signal
-                  // Same "aborted now, not necessarily caused by" limitation
-                  // as the success-path guard below — see its comment.
-                  if (signal?.aborted === true) {
-                    const error = new ApiError({
-                      status: 0,
-                      kind: abortKind(signal.reason) ?? 'abort',
-                      statusText: '',
-                      body: parseErr,
-                      headers: new Headers(),
-                      request: { method: ctx.request.method, url: ctx.request.url, params }
-                    })
-                    return createNetworkErrorResult(error, retry)
-                  }
+                } catch {
                   body = null
                 }
 
@@ -885,47 +880,31 @@ export function createApi<TRequests extends Record<string, Request<any, any>>>(
               // ---------------------------------------------------------------
               // Handle successful responses (2xx)
               // ---------------------------------------------------------------
-              // Parse in its own try so a malformed body is reported as what it
-              // is: the server responded, we could not read it. Falling through
-              // to the network catch would report status 0 and discard the
-              // Response, telling the caller they are offline when they are not.
+              // Decode in its own try so a malformed body is reported as what
+              // it is: the server responded, we could not read it. Falling
+              // through to the network catch would report status 0 and
+              // discard the Response, telling the caller they are offline
+              // when they are not. A read that failed for a reason other than
+              // our own signal (a stream that errored, a body that is not the
+              // declared FormData) is rethrown by decodeBody and lands here
+              // too, as a 'parse' for the same reason.
               //
-              // But `parseResponse` doesn't just parse — it performs the
-              // network body read (`response.text()`/`.blob()`/etc.), so an
-              // abort that lands after headers arrive (a component unmounting
-              // mid-download) surfaces HERE, not in the outer catch below.
-              // Provenance still applies: if our own signal is what aborted,
-              // this is our cancellation, not "the server responded but the
-              // body was unreadable" — same check as the outer catch, and the
+              // An abort that lands after headers arrive (a component
+              // unmounting mid-download) never lands here. That is our own
+              // cancellation, not "the server responded but the body was
+              // unreadable", and `sendExchange` tells the two apart by
+              // provenance: it checks the signal handed to fetch at the
+              // moment the read failed, and throws the abort as an
+              // AbortedRead. The outer catch below classifies it, with the
               // same response:null/status:0 shape (createNetworkErrorResult)
-              // so this matches what graphql.ts already does for the
-              // identical scenario, which keeps its network read (`await
-              // response.text()`) outside its own JSON.parse try for exactly
-              // this reason — outside the parse-only try to fall through to
-              // the outer catch's provenance handling.
+              // a fetch-time abort gets, and graphql.ts does the same for the
+              // identical scenario. Because that decision is made at the
+              // read, a body that was read in full and then fails to parse is
+              // a 'parse' even if the signal has aborted by now.
               let data: unknown
               try {
-                data = await parseResponse(response, request.config.responseType)
+                data = decodeBody(exchange, request.config.responseType)
               } catch (parseErr) {
-                const signal = ctx.request.signal
-                // Known limitation: this checks "is the signal aborted NOW",
-                // not "did the abort CAUSE this catch" — a genuinely
-                // malformed payload that happens to arrive after the signal
-                // was separately aborted is misclassified as the abort too.
-                // Narrowing that requires parseResponse to distinguish its
-                // own read failure from a parse failure across all five
-                // response types, which the doc above already declines.
-                if (signal?.aborted === true) {
-                  const error = new ApiError({
-                    status: 0,
-                    kind: abortKind(signal.reason) ?? 'abort',
-                    statusText: '',
-                    body: parseErr,
-                    headers: new Headers(),
-                    request: { method: ctx.request.method, url: ctx.request.url, params }
-                  })
-                  return createNetworkErrorResult(error, retry)
-                }
                 const error = new ApiError({
                   kind: 'parse',
                   status: response.status,
@@ -1035,16 +1014,21 @@ export function createApi<TRequests extends Record<string, Request<any, any>>>(
               // `ac.abort(reason)`. Only fall back to sniffing `err`'s own
               // shape when our signal is not the cause, for a genuine
               // network failure.
+              //
+              // An abort during the body read arrives as AbortedRead: its
+              // `reason` classifies it, its `cause` (what the read threw) is
+              // the body, as before.
               // ---------------------------------------------------------------
+              const aborted = err instanceof AbortedRead
               const signal = ctx.request.signal
               const kind = signal?.aborted === true
                 ? (abortKind(signal.reason) ?? 'abort')
-                : (abortKind(err) ?? 'network')
+                : (abortKind(aborted ? err.reason : err) ?? 'network')
               const error = new ApiError({
                 status: 0,
                 kind,
                 statusText: '',
-                body: err,
+                body: aborted ? err.cause : err,
                 headers: new Headers(),
                 request: { method: ctx.request.method, url: ctx.request.url, params }
               })

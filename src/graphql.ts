@@ -8,6 +8,7 @@ import { releaseSignal } from './utils/any-signal.js'
 import { createBackstop } from './utils/backstop.js'
 import { runSchema } from './utils/validate.js'
 import type { SchemaOutcome } from './utils/validate.js'
+import { sendExchange, AbortedRead } from './utils/exchange.js'
 import type { CallOptions, ErrorResult, Middleware, MiddlewareContext, Result, GraphQLBaseConfig, OperationConfig, GraphQLError } from './types.js'
 
 // ---------------------------------------------------------------------------
@@ -219,54 +220,43 @@ export function createGraphQL(config: any): any {
                 backstop.watch(tracked.controller.signal)
               }
 
-              const response = await fetch(ctx.request.url, {
-                method: 'POST',
-                headers: ctx.request.headers,
-                body: ctx.request.body as string,
-                signal: ctx.request.signal,
-              })
+              // fetch, then the body read, exactly once, as text — the same
+              // helper create-api.ts uses. A read our own signal aborted
+              // throws AbortedRead, classified in the outer catch below; any
+              // other read failure is recorded on the exchange and rethrown
+              // at the point each branch below used to do its own read.
+              const exchange = await sendExchange(
+                ctx.request.url,
+                {
+                  method: 'POST',
+                  headers: ctx.request.headers,
+                  body: ctx.request.body as string,
+                  signal: ctx.request.signal,
+                },
+                'text'
+              )
+              const response = exchange.response
 
               if (!response.ok) {
-                // `response.text()` is the network body read, not just
-                // parsing, so an abort landing while an ERROR body downloads
-                // must not be misreported as a genuine 'http' error with a
-                // null body — the classification would otherwise be decided
-                // by the server's status code rather than by what actually
-                // happened. This is the same provenance concern the outer
-                // `catch (err)` below already handles for the fetch() call
-                // itself — NOT the success path's `JSON.parse` try further
-                // down, which deliberately keeps its own `response.text()`
-                // outside that try specifically so an abort during ITS
-                // network read falls through to that same outer catch
-                // instead of needing its own guard. The rationale for that
-                // split is written up in full in create-api.ts, on the
-                // identical `data`/success-path guard there (the comment
-                // beginning "But `parseResponse` doesn't just parse"); it is
-                // not repeated per call site in this file. A test pins this
-                // exact behaviour below — see "abort during a success-body
-                // download".
+                // An abort landing while an ERROR body downloads must not be
+                // misreported as a genuine 'http' error with a null body —
+                // the classification would otherwise be decided by the
+                // server's status code rather than by what actually happened.
+                // That read never reaches the catch below: `sendExchange`
+                // throws it as an AbortedRead, and the outer `catch (err)`
+                // classifies it by the signal's reason, exactly as it does
+                // for an abort during the fetch() call itself. The full
+                // rationale is written up in create-api.ts, on its
+                // success-path decode (the comment beginning "Decode in its
+                // own try"); it is not repeated per call site in this file.
+                // A read that failed for any other reason, or a body that is
+                // not JSON, is diagnostic only and falls back to null.
                 let body: unknown
                 try {
-                  const text = await response.text()
+                  if (exchange.readFailed) throw exchange.readError
+                  const text = exchange.body as string
                   body = text ? JSON.parse(text) : null
-                } catch (parseErr) {
-                  const signal = ctx.request.signal
-                  // Same "aborted now, not necessarily caused by" limitation
-                  // as the outer `catch (err)` below shares — checking
-                  // `signal.aborted` at the moment of the catch, not
-                  // causation. See create-api.ts's equivalent guards for the
-                  // fuller writeup; not repeated per call site in this file.
-                  if (signal?.aborted === true) {
-                    const error = new ApiError({
-                      status: 0,
-                      kind: abortKind(signal.reason) ?? 'abort',
-                      statusText: '',
-                      body: parseErr,
-                      headers: new Headers(),
-                      request: { method: 'POST', url: ctx.request.url, params: variables },
-                    })
-                    return createNetworkErrorResult(error, execute)
-                  }
+                } catch {
                   body = null
                 }
                 const error = new ApiError({
@@ -284,7 +274,20 @@ export function createGraphQL(config: any): any {
               // is: the server responded, we could not read it. Falling through
               // to the network catch would report status 0 and discard the
               // Response, telling the caller they are offline when they are not.
-              const text = await response.text()
+              //
+              // A failed read is rethrown OUTSIDE that try, deliberately, and
+              // lands in the outer `catch (err)` as status 0. That is where
+              // this read has always sat (it used to be the `await
+              // response.text()` on this line), so a body stream that breaks
+              // mid-download is a 'network' failure here — unlike
+              // create-api.ts, whose success-path read sat inside its parse
+              // try and reports the same break as 'parse'. An abort during
+              // the read never gets this far: it is an AbortedRead from
+              // `sendExchange`, also classified in the outer catch; "abort
+              // during a success-body download" in
+              // tests/create-graphql.test.ts pins that case.
+              if (exchange.readFailed) throw exchange.readError
+              const text = exchange.body as string
               let gqlBody: { data?: unknown; errors?: GraphQLError[] } | null
               try {
                 gqlBody = text
@@ -404,15 +407,20 @@ export function createGraphQL(config: any): any {
               // `ac.abort(reason)`. Only fall back to sniffing `err`'s own
               // shape when our signal is not the cause, for a genuine
               // network failure.
+              //
+              // An abort during the body read arrives as AbortedRead: its
+              // `reason` classifies it, its `cause` (what the read threw) is
+              // the body, as before.
+              const aborted = err instanceof AbortedRead
               const signal = ctx.request.signal
               const kind = signal?.aborted === true
                 ? (abortKind(signal.reason) ?? 'abort')
-                : (abortKind(err) ?? 'network')
+                : (abortKind(aborted ? err.reason : err) ?? 'network')
               const error = new ApiError({
                 status: 0,
                 kind,
                 statusText: '',
-                body: err,
+                body: aborted ? err.cause : err,
                 headers: new Headers(),
                 request: { method: 'POST', url: ctx.request.url, params: variables },
               })
