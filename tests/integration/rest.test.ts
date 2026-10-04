@@ -1,6 +1,9 @@
 import { describe, it, expect, beforeAll, afterAll, afterEach, vi } from 'vitest'
+import { AsyncLocalStorage } from 'node:async_hooks'
 import { createApi } from '../../src/create-api.js'
 import { Request } from '../../src/request.js'
+import { defineRequest } from '../../src/define-request.js'
+import type { Middleware } from '../../src/types.js'
 import { retryMiddleware, cacheMiddleware, logMiddleware } from '../../src/built-in-middleware.js'
 import { startServer, type TestServer } from './server.js'
 
@@ -570,7 +573,7 @@ describe('REST — a hung middleware against a real server', () => {
   })
 })
 
-describe('REST — share keys params by content (4.4.3)', () => {
+describe('REST — share decides on what is sent: identical requests share, different ones do not (4.4.3, 5.1.0)', () => {
   it('two different nested-Date payloads make two real requests, each answered with its own body', async () => {
     const echo = new Request<{ since: Date }, { body: { since: string } }>({
       method: 'POST',
@@ -604,6 +607,33 @@ describe('REST — share keys params by content (4.4.3)', () => {
     expect(server.callCounts.get('POST /echo')).toBe(1)
     expect(ra.data?.body.since).toBe(d.toISOString())
     expect(rb.data?.body.since).toBe(d.toISOString())
+  })
+})
+
+describe('REST — share decides on what is sent (5.1.0)', () => {
+  const whoami = () => defineRequest<{ authorization: string | null }>()({ method: 'GET', path: '/whoami', share: true })
+
+  it('sends one request for identical concurrent calls', async () => {
+    const api = createApi({ baseUrl: server.baseUrl, requests: { whoami: whoami() } })
+    const rs = await Promise.all([api.whoami(), api.whoami(), api.whoami()])
+    expect(server.callCounts.get('GET /whoami')).toBe(1)
+    expect(rs.every(r => r.error === null)).toBe(true)
+  })
+
+  it('sends one request per user when a global middleware adds the user', async () => {
+    const current = new AsyncLocalStorage<string>()
+    const auth: Middleware = (ctx, next) => {
+      ctx.request.headers.set('authorization', `Bearer ${current.getStore()}`)
+      return next()
+    }
+    const api = createApi({ baseUrl: server.baseUrl, middleware: [auth], requests: { whoami: whoami() } })
+    const [alice, bob] = await Promise.all([
+      current.run('alice', () => api.whoami()),
+      current.run('bob', () => api.whoami()),
+    ])
+    expect(server.callCounts.get('GET /whoami')).toBe(2)
+    expect(alice.data?.authorization).toBe('Bearer alice')
+    expect(bob.data?.authorization).toBe('Bearer bob')
   })
 })
 

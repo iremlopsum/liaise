@@ -181,3 +181,30 @@ describe('GraphQL — a hung middleware against a real server', () => {
     expect(server.callCounts.get('POST /graphql')).toBeUndefined()
   })
 })
+
+describe('GraphQL — share decides on what is sent (5.1.0)', () => {
+  const make = () => createGraphQL({
+    endpoint: `${server.baseUrl}/graphql`,
+    operations: {
+      slow: new Operation<{ id: string }, { slow: { id: string } }>({
+        operation: gql`query gqlSlow($id: ID!) { gqlSlow(id: $id) { id } }`,
+        share: true,
+      }),
+    },
+  })
+
+  it('identical concurrent operations make one POST', async () => {
+    const client = make()
+    const rs = await Promise.all([client.slow({ id: '1' }), client.slow({ id: '1' })])
+    expect(server.callCounts.get('POST /graphql')).toBe(1)
+    expect(rs.every(r => r.error === null && r.data?.slow.id === '1')).toBe(true)
+  })
+
+  it('different variables make two POSTs, each answered with its own data', async () => {
+    const client = make()
+    const [a, b] = await Promise.all([client.slow({ id: '1' }), client.slow({ id: '2' })])
+    expect(server.callCounts.get('POST /graphql')).toBe(2)
+    expect(a.data?.slow.id).toBe('1')
+    expect(b.data?.slow.id).toBe('2')
+  })
+})

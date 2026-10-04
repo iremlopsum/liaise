@@ -89,6 +89,13 @@ export function startServer(): Promise<TestServer> {
           const raw = await readRaw(req)
           sendJson(res, 200, { bytes: [...raw], contentType: req.headers['content-type'] ?? null })
 
+        } else if (method === 'GET' && pathname === '/whoami') {
+          // Waits so concurrent calls overlap, then reports who the request
+          // says it is — what lets a share test prove each user got their own
+          // answer, not just that the call count was right.
+          await new Promise(r => setTimeout(r, 30))
+          sendJson(res, 200, { authorization: req.headers.authorization ?? null })
+
         } else if (method === 'GET' && pathname === '/headers') {
           sendJson(res, 200, { headers: req.headers })
 
@@ -148,6 +155,10 @@ export function startServer(): Promise<TestServer> {
             sendJson(res, 200, { data: { hello: 'world' } })
           } else if (query.includes('gqlUser')) {
             sendJson(res, 200, { data: { user: { id: variables.id, name: `User ${variables.id}` } } })
+          } else if (query.includes('gqlSlow')) {
+            // Delayed so concurrent identical operations overlap in flight.
+            await new Promise(r => setTimeout(r, 30))
+            sendJson(res, 200, { data: { slow: { id: variables.id ?? null } } })
           } else if (query.includes('gqlError')) {
             sendJson(res, 200, { errors: [{ message: 'Something went wrong' }] })
           } else if (query.includes('gqlMutation')) {
