@@ -3,7 +3,12 @@
   "compilerOptions": {
     "noEmit": true,
     "rootDir": ".",
-    "types": ["node"]
+    "types": ["node"],
+    "paths": {
+      "liaise": ["./src/index.ts"],
+      "liaise/middleware": ["./src/built-in-middleware.ts"],
+      "liaise/testing": ["./src/testing.ts"]
+    }
   },
   "include": ["src/**/*.ts", "tests/**/*.ts"],
   "exclude": ["node_modules", "dist"]

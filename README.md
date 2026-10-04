@@ -376,7 +376,7 @@ arbitrary limit looks exactly like reaching the last page.
 paginate(api.listItems, { limit: 50 }, { next, maxPages: 100 })
 ```
 
-Any other [`CallOptions`](#calloptions) — `signal`, `timeout`, `headers` — apply
+Any other [`CallOptions`](#core-liaise) — `signal`, `timeout`, `headers` — apply
 to every request, so one signal cancels the whole crawl.
 
 `paginate` yields pages, not items. Flattening would mean deciding which field
