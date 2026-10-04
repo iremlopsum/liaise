@@ -75,6 +75,7 @@ function createConfigured({ baseUrl, auth }) {
   // Token refresh, following the readme's FAQ "How do I implement token refresh on 401
   // responses?" (DOCS.faqRefresh): `retry: { statusCodes: [401] }` plus a `beforeRetry` hook
   // (DOCS.beforeRetry) that calls a user-supplied `refreshToken()` and sets the new header.
+  // FAQ default: up to 2 retries (`retry.limit` keeps ky's default of 2).
   // The bearer is set first in `hooks.beforeRequest`, the readme's FAQ "How do I add
   // authentication headers to every request?" (DOCS.faqAuth).
   // hand-written: `refreshToken()` shares one in-flight promise, and skips the refresh when
@@ -122,7 +123,7 @@ export default {
     configured: { create: createConfigured, notes: {
       getJson: `timeout: 3000 (${DOCS.timeout}); parseJson handles an empty body (${DOCS.parseJson})`,
       search: `hand-written: abort the previous call with signal + AbortController (${DOCS.cancel})`,
-      getWithAuth: `hand-written: one shared refresh promise in beforeRetry (readme FAQ: token refresh, ${DOCS.faqRefresh})`,
+      getWithAuth: `hand-written: one shared refresh promise in beforeRetry (readme FAQ: token refresh, ${DOCS.faqRefresh}); FAQ default: up to 2 retries`,
       getWithDeadline: `timeout: 3000, totalTimeout: 3000, retry: { limit: 3 } (${DOCS.totalTimeout}, ${DOCS.retry})`,
       getValidated: `.json(schema), Standard Schema (${DOCS.json})`,
     } },

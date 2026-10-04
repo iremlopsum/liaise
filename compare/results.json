@@ -34,7 +34,7 @@
           },
           "configured": {
             "outcome": "throws Error",
-            "ms": 19
+            "ms": 18
           }
         },
         "axios": {
@@ -50,18 +50,18 @@
           },
           "default": {
             "outcome": "throws AxiosError",
-            "ms": 16
+            "ms": 14
           },
           "configured": {
             "outcome": "throws AxiosError",
-            "ms": 16
+            "ms": 15
           }
         },
         "ky": {
           "notes": {
             "getJson": "timeout: 3000 (https://github.com/sindresorhus/ky/blob/v2.1.0/readme.md#timeout); parseJson handles an empty body (https://github.com/sindresorhus/ky/blob/v2.1.0/readme.md#parsejson)",
             "search": "hand-written: abort the previous call with signal + AbortController (https://github.com/sindresorhus/ky/blob/v2.1.0/readme.md#cancellation)",
-            "getWithAuth": "hand-written: one shared refresh promise in beforeRetry (readme FAQ: token refresh, https://github.com/sindresorhus/ky/blob/v2.1.0/readme.md#how-do-i-implement-token-refresh-on-401-responses)",
+            "getWithAuth": "hand-written: one shared refresh promise in beforeRetry (readme FAQ: token refresh, https://github.com/sindresorhus/ky/blob/v2.1.0/readme.md#how-do-i-implement-token-refresh-on-401-responses); FAQ default: up to 2 retries",
             "getWithDeadline": "timeout: 3000, totalTimeout: 3000, retry: { limit: 3 } (https://github.com/sindresorhus/ky/blob/v2.1.0/readme.md#totaltimeout, https://github.com/sindresorhus/ky/blob/v2.1.0/readme.md#retry)",
             "getValidated": ".json(schema), Standard Schema (https://github.com/sindresorhus/ky/blob/v2.1.0/readme.md#kyinput-options)"
           },
@@ -70,11 +70,11 @@
           },
           "default": {
             "outcome": "throws HTTPError",
-            "ms": 931
+            "ms": 925
           },
           "configured": {
             "outcome": "throws HTTPError",
-            "ms": 932
+            "ms": 926
           }
         },
         "ofetch": {
@@ -90,7 +90,7 @@
           },
           "default": {
             "outcome": "throws FetchError",
-            "ms": 24
+            "ms": 25
           },
           "configured": {
             "outcome": "throws FetchError",
@@ -137,11 +137,11 @@
           },
           "default": {
             "outcome": "throws TypeError",
-            "ms": 7
+            "ms": 5
           },
           "configured": {
             "outcome": "throws TypeError",
-            "ms": 7
+            "ms": 5
           }
         },
         "axios": {
@@ -157,18 +157,18 @@
           },
           "default": {
             "outcome": "throws AxiosError (name: Error)",
-            "ms": 7
+            "ms": 5
           },
           "configured": {
             "outcome": "throws AxiosError (name: Error)",
-            "ms": 7
+            "ms": 5
           }
         },
         "ky": {
           "notes": {
             "getJson": "timeout: 3000 (https://github.com/sindresorhus/ky/blob/v2.1.0/readme.md#timeout); parseJson handles an empty body (https://github.com/sindresorhus/ky/blob/v2.1.0/readme.md#parsejson)",
             "search": "hand-written: abort the previous call with signal + AbortController (https://github.com/sindresorhus/ky/blob/v2.1.0/readme.md#cancellation)",
-            "getWithAuth": "hand-written: one shared refresh promise in beforeRetry (readme FAQ: token refresh, https://github.com/sindresorhus/ky/blob/v2.1.0/readme.md#how-do-i-implement-token-refresh-on-401-responses)",
+            "getWithAuth": "hand-written: one shared refresh promise in beforeRetry (readme FAQ: token refresh, https://github.com/sindresorhus/ky/blob/v2.1.0/readme.md#how-do-i-implement-token-refresh-on-401-responses); FAQ default: up to 2 retries",
             "getWithDeadline": "timeout: 3000, totalTimeout: 3000, retry: { limit: 3 } (https://github.com/sindresorhus/ky/blob/v2.1.0/readme.md#totaltimeout, https://github.com/sindresorhus/ky/blob/v2.1.0/readme.md#retry)",
             "getValidated": ".json(schema), Standard Schema (https://github.com/sindresorhus/ky/blob/v2.1.0/readme.md#kyinput-options)"
           },
@@ -177,11 +177,11 @@
           },
           "default": {
             "outcome": "throws NetworkError",
-            "ms": 914
+            "ms": 910
           },
           "configured": {
             "outcome": "throws NetworkError",
-            "ms": 914
+            "ms": 910
           }
         },
         "ofetch": {
@@ -197,11 +197,11 @@
           },
           "default": {
             "outcome": "throws FetchError",
-            "ms": 9
+            "ms": 6
           },
           "configured": {
             "outcome": "throws FetchError",
-            "ms": 10
+            "ms": 6
           }
         },
         "liaise": {
@@ -217,11 +217,11 @@
           },
           "default": {
             "outcome": "error result (network)",
-            "ms": 8
+            "ms": 5
           },
           "configured": {
             "outcome": "error result (network)",
-            "ms": 8
+            "ms": 5
           }
         }
       }
@@ -244,7 +244,7 @@
           },
           "configured": {
             "outcome": "throws TimeoutError",
-            "ms": 3002
+            "ms": 3003
           },
           "default": {
             "outcome": "still waiting after 15s",
@@ -264,7 +264,7 @@
           },
           "configured": {
             "outcome": "throws AxiosError",
-            "ms": 3009
+            "ms": 3006
           },
           "default": {
             "outcome": "still waiting after 15s",
@@ -275,7 +275,7 @@
           "notes": {
             "getJson": "timeout: 3000 (https://github.com/sindresorhus/ky/blob/v2.1.0/readme.md#timeout); parseJson handles an empty body (https://github.com/sindresorhus/ky/blob/v2.1.0/readme.md#parsejson)",
             "search": "hand-written: abort the previous call with signal + AbortController (https://github.com/sindresorhus/ky/blob/v2.1.0/readme.md#cancellation)",
-            "getWithAuth": "hand-written: one shared refresh promise in beforeRetry (readme FAQ: token refresh, https://github.com/sindresorhus/ky/blob/v2.1.0/readme.md#how-do-i-implement-token-refresh-on-401-responses)",
+            "getWithAuth": "hand-written: one shared refresh promise in beforeRetry (readme FAQ: token refresh, https://github.com/sindresorhus/ky/blob/v2.1.0/readme.md#how-do-i-implement-token-refresh-on-401-responses); FAQ default: up to 2 retries",
             "getWithDeadline": "timeout: 3000, totalTimeout: 3000, retry: { limit: 3 } (https://github.com/sindresorhus/ky/blob/v2.1.0/readme.md#totaltimeout, https://github.com/sindresorhus/ky/blob/v2.1.0/readme.md#retry)",
             "getValidated": ".json(schema), Standard Schema (https://github.com/sindresorhus/ky/blob/v2.1.0/readme.md#kyinput-options)"
           },
@@ -284,11 +284,11 @@
           },
           "configured": {
             "outcome": "throws TimeoutError",
-            "ms": 3008
+            "ms": 3005
           },
           "default": {
             "outcome": "throws TimeoutError",
-            "ms": 10008
+            "ms": 10004
           }
         },
         "ofetch": {
@@ -304,11 +304,11 @@
           },
           "configured": {
             "outcome": "throws FetchError",
-            "ms": 3005
+            "ms": 3004
           },
           "default": {
             "outcome": "still waiting after 15s",
-            "ms": 15000
+            "ms": 15001
           }
         },
         "liaise": {
@@ -324,11 +324,11 @@
           },
           "configured": {
             "outcome": "error result (timeout)",
-            "ms": 3005
+            "ms": 3004
           },
           "default": {
             "outcome": "still waiting after 15s",
-            "ms": 15000
+            "ms": 15001
           }
         }
       }
@@ -351,11 +351,11 @@
           },
           "default": {
             "outcome": "throws SyntaxError",
-            "ms": 7
+            "ms": 8
           },
           "configured": {
             "outcome": "throws SyntaxError",
-            "ms": 7
+            "ms": 9
           }
         },
         "axios": {
@@ -371,18 +371,18 @@
           },
           "default": {
             "outcome": "wrong data",
-            "ms": 7
+            "ms": 9
           },
           "configured": {
             "outcome": "throws AxiosError (name: SyntaxError)",
-            "ms": 8
+            "ms": 9
           }
         },
         "ky": {
           "notes": {
             "getJson": "timeout: 3000 (https://github.com/sindresorhus/ky/blob/v2.1.0/readme.md#timeout); parseJson handles an empty body (https://github.com/sindresorhus/ky/blob/v2.1.0/readme.md#parsejson)",
             "search": "hand-written: abort the previous call with signal + AbortController (https://github.com/sindresorhus/ky/blob/v2.1.0/readme.md#cancellation)",
-            "getWithAuth": "hand-written: one shared refresh promise in beforeRetry (readme FAQ: token refresh, https://github.com/sindresorhus/ky/blob/v2.1.0/readme.md#how-do-i-implement-token-refresh-on-401-responses)",
+            "getWithAuth": "hand-written: one shared refresh promise in beforeRetry (readme FAQ: token refresh, https://github.com/sindresorhus/ky/blob/v2.1.0/readme.md#how-do-i-implement-token-refresh-on-401-responses); FAQ default: up to 2 retries",
             "getWithDeadline": "timeout: 3000, totalTimeout: 3000, retry: { limit: 3 } (https://github.com/sindresorhus/ky/blob/v2.1.0/readme.md#totaltimeout, https://github.com/sindresorhus/ky/blob/v2.1.0/readme.md#retry)",
             "getValidated": ".json(schema), Standard Schema (https://github.com/sindresorhus/ky/blob/v2.1.0/readme.md#kyinput-options)"
           },
@@ -391,11 +391,11 @@
           },
           "default": {
             "outcome": "throws SyntaxError",
-            "ms": 10
+            "ms": 12
           },
           "configured": {
             "outcome": "throws SyntaxError",
-            "ms": 10
+            "ms": 13
           }
         },
         "ofetch": {
@@ -415,7 +415,7 @@
           },
           "configured": {
             "outcome": "throws SyntaxError",
-            "ms": 9
+            "ms": 10
           }
         },
         "liaise": {
@@ -431,11 +431,11 @@
           },
           "default": {
             "outcome": "error result (parse)",
-            "ms": 9
+            "ms": 11
           },
           "configured": {
             "outcome": "error result (parse)",
-            "ms": 9
+            "ms": 12
           }
         }
       }
@@ -462,7 +462,7 @@
           },
           "configured": {
             "outcome": "resolves with undefined",
-            "ms": 6
+            "ms": 7
           }
         },
         "axios": {
@@ -478,18 +478,18 @@
           },
           "default": {
             "outcome": "resolves with \"\"",
-            "ms": 6
+            "ms": 7
           },
           "configured": {
             "outcome": "resolves with \"\"",
-            "ms": 6
+            "ms": 7
           }
         },
         "ky": {
           "notes": {
             "getJson": "timeout: 3000 (https://github.com/sindresorhus/ky/blob/v2.1.0/readme.md#timeout); parseJson handles an empty body (https://github.com/sindresorhus/ky/blob/v2.1.0/readme.md#parsejson)",
             "search": "hand-written: abort the previous call with signal + AbortController (https://github.com/sindresorhus/ky/blob/v2.1.0/readme.md#cancellation)",
-            "getWithAuth": "hand-written: one shared refresh promise in beforeRetry (readme FAQ: token refresh, https://github.com/sindresorhus/ky/blob/v2.1.0/readme.md#how-do-i-implement-token-refresh-on-401-responses)",
+            "getWithAuth": "hand-written: one shared refresh promise in beforeRetry (readme FAQ: token refresh, https://github.com/sindresorhus/ky/blob/v2.1.0/readme.md#how-do-i-implement-token-refresh-on-401-responses); FAQ default: up to 2 retries",
             "getWithDeadline": "timeout: 3000, totalTimeout: 3000, retry: { limit: 3 } (https://github.com/sindresorhus/ky/blob/v2.1.0/readme.md#totaltimeout, https://github.com/sindresorhus/ky/blob/v2.1.0/readme.md#retry)",
             "getValidated": ".json(schema), Standard Schema (https://github.com/sindresorhus/ky/blob/v2.1.0/readme.md#kyinput-options)"
           },
@@ -498,11 +498,11 @@
           },
           "default": {
             "outcome": "throws SyntaxError",
-            "ms": 7
+            "ms": 8
           },
           "configured": {
             "outcome": "resolves with undefined",
-            "ms": 7
+            "ms": 8
           }
         },
         "ofetch": {
@@ -518,7 +518,7 @@
           },
           "default": {
             "outcome": "resolves with undefined",
-            "ms": 6
+            "ms": 7
           },
           "configured": {
             "outcome": "resolves with undefined",
@@ -542,7 +542,7 @@
           },
           "configured": {
             "outcome": "resolves with undefined",
-            "ms": 7
+            "ms": 8
           }
         }
       }
@@ -565,11 +565,11 @@
           },
           "configured": {
             "outcome": "shows \"rea\"",
-            "ms": 22
+            "ms": 26
           },
           "default": {
             "outcome": "shows \"r\"",
-            "ms": 308
+            "ms": 310
           }
         },
         "axios": {
@@ -585,18 +585,18 @@
           },
           "configured": {
             "outcome": "shows \"rea\"",
-            "ms": 23
+            "ms": 25
           },
           "default": {
             "outcome": "shows \"r\"",
-            "ms": 309
+            "ms": 310
           }
         },
         "ky": {
           "notes": {
             "getJson": "timeout: 3000 (https://github.com/sindresorhus/ky/blob/v2.1.0/readme.md#timeout); parseJson handles an empty body (https://github.com/sindresorhus/ky/blob/v2.1.0/readme.md#parsejson)",
             "search": "hand-written: abort the previous call with signal + AbortController (https://github.com/sindresorhus/ky/blob/v2.1.0/readme.md#cancellation)",
-            "getWithAuth": "hand-written: one shared refresh promise in beforeRetry (readme FAQ: token refresh, https://github.com/sindresorhus/ky/blob/v2.1.0/readme.md#how-do-i-implement-token-refresh-on-401-responses)",
+            "getWithAuth": "hand-written: one shared refresh promise in beforeRetry (readme FAQ: token refresh, https://github.com/sindresorhus/ky/blob/v2.1.0/readme.md#how-do-i-implement-token-refresh-on-401-responses); FAQ default: up to 2 retries",
             "getWithDeadline": "timeout: 3000, totalTimeout: 3000, retry: { limit: 3 } (https://github.com/sindresorhus/ky/blob/v2.1.0/readme.md#totaltimeout, https://github.com/sindresorhus/ky/blob/v2.1.0/readme.md#retry)",
             "getValidated": ".json(schema), Standard Schema (https://github.com/sindresorhus/ky/blob/v2.1.0/readme.md#kyinput-options)"
           },
@@ -605,11 +605,11 @@
           },
           "configured": {
             "outcome": "shows \"rea\"",
-            "ms": 22
+            "ms": 26
           },
           "default": {
             "outcome": "shows \"r\"",
-            "ms": 309
+            "ms": 311
           }
         },
         "ofetch": {
@@ -625,11 +625,11 @@
           },
           "configured": {
             "outcome": "shows \"rea\"",
-            "ms": 22
+            "ms": 27
           },
           "default": {
             "outcome": "shows \"r\"",
-            "ms": 310
+            "ms": 311
           }
         },
         "liaise": {
@@ -645,7 +645,7 @@
           },
           "configured": {
             "outcome": "shows \"rea\"",
-            "ms": 22
+            "ms": 27
           },
           "default": {
             "outcome": "shows \"r\"",
@@ -672,11 +672,11 @@
           },
           "default": {
             "outcome": "5 refresh calls, 1/5 succeed",
-            "ms": 64
+            "ms": 54
           },
           "configured": {
             "outcome": "1 refresh calls, 5/5 succeed",
-            "ms": 75
+            "ms": 63
           }
         },
         "axios": {
@@ -692,18 +692,18 @@
           },
           "default": {
             "outcome": "5 refresh calls, 1/5 succeed",
-            "ms": 50
+            "ms": 52
           },
           "configured": {
             "outcome": "1 refresh calls, 5/5 succeed",
-            "ms": 60
+            "ms": 51
           }
         },
         "ky": {
           "notes": {
             "getJson": "timeout: 3000 (https://github.com/sindresorhus/ky/blob/v2.1.0/readme.md#timeout); parseJson handles an empty body (https://github.com/sindresorhus/ky/blob/v2.1.0/readme.md#parsejson)",
             "search": "hand-written: abort the previous call with signal + AbortController (https://github.com/sindresorhus/ky/blob/v2.1.0/readme.md#cancellation)",
-            "getWithAuth": "hand-written: one shared refresh promise in beforeRetry (readme FAQ: token refresh, https://github.com/sindresorhus/ky/blob/v2.1.0/readme.md#how-do-i-implement-token-refresh-on-401-responses)",
+            "getWithAuth": "hand-written: one shared refresh promise in beforeRetry (readme FAQ: token refresh, https://github.com/sindresorhus/ky/blob/v2.1.0/readme.md#how-do-i-implement-token-refresh-on-401-responses); FAQ default: up to 2 retries",
             "getWithDeadline": "timeout: 3000, totalTimeout: 3000, retry: { limit: 3 } (https://github.com/sindresorhus/ky/blob/v2.1.0/readme.md#totaltimeout, https://github.com/sindresorhus/ky/blob/v2.1.0/readme.md#retry)",
             "getValidated": ".json(schema), Standard Schema (https://github.com/sindresorhus/ky/blob/v2.1.0/readme.md#kyinput-options)"
           },
@@ -712,11 +712,11 @@
           },
           "default": {
             "outcome": "5 refresh calls, 1/5 succeed",
-            "ms": 64
+            "ms": 53
           },
           "configured": {
             "outcome": "1 refresh calls, 5/5 succeed",
-            "ms": 359
+            "ms": 356
           }
         },
         "ofetch": {
@@ -732,11 +732,11 @@
           },
           "default": {
             "outcome": "5 refresh calls, 1/5 succeed",
-            "ms": 57
+            "ms": 52
           },
           "configured": {
             "outcome": "1 refresh calls, 5/5 succeed",
-            "ms": 73
+            "ms": 63
           }
         },
         "liaise": {
@@ -752,11 +752,11 @@
           },
           "default": {
             "outcome": "5 refresh calls, 1/5 succeed",
-            "ms": 57
+            "ms": 51
           },
           "configured": {
             "outcome": "1 refresh calls, 5/5 succeed",
-            "ms": 71
+            "ms": 62
           }
         }
       }
@@ -779,7 +779,7 @@
           },
           "default": {
             "outcome": "after 1.0s: wrong data (1 attempts)",
-            "ms": 1004
+            "ms": 1005
           },
           "configured": {
             "outcome": "after 3.0s: throws TimeoutError (3 attempts)",
@@ -803,14 +803,14 @@
           },
           "default": {
             "outcome": "after 1.0s: throws AxiosError (1 attempts)",
-            "ms": 1005
+            "ms": 1006
           }
         },
         "ky": {
           "notes": {
             "getJson": "timeout: 3000 (https://github.com/sindresorhus/ky/blob/v2.1.0/readme.md#timeout); parseJson handles an empty body (https://github.com/sindresorhus/ky/blob/v2.1.0/readme.md#parsejson)",
             "search": "hand-written: abort the previous call with signal + AbortController (https://github.com/sindresorhus/ky/blob/v2.1.0/readme.md#cancellation)",
-            "getWithAuth": "hand-written: one shared refresh promise in beforeRetry (readme FAQ: token refresh, https://github.com/sindresorhus/ky/blob/v2.1.0/readme.md#how-do-i-implement-token-refresh-on-401-responses)",
+            "getWithAuth": "hand-written: one shared refresh promise in beforeRetry (readme FAQ: token refresh, https://github.com/sindresorhus/ky/blob/v2.1.0/readme.md#how-do-i-implement-token-refresh-on-401-responses); FAQ default: up to 2 retries",
             "getWithDeadline": "timeout: 3000, totalTimeout: 3000, retry: { limit: 3 } (https://github.com/sindresorhus/ky/blob/v2.1.0/readme.md#totaltimeout, https://github.com/sindresorhus/ky/blob/v2.1.0/readme.md#retry)",
             "getValidated": ".json(schema), Standard Schema (https://github.com/sindresorhus/ky/blob/v2.1.0/readme.md#kyinput-options)"
           },
@@ -819,11 +819,11 @@
           },
           "configured": {
             "outcome": "after 3.0s: throws TimeoutError (3 attempts)",
-            "ms": 3001
+            "ms": 3002
           },
           "default": {
             "outcome": "after 3.9s: throws HTTPError (3 attempts)",
-            "ms": 3913
+            "ms": 3917
           }
         },
         "ofetch": {
@@ -839,7 +839,7 @@
           },
           "default": {
             "outcome": "after 2.0s: throws FetchError (2 attempts)",
-            "ms": 2011
+            "ms": 2014
           },
           "configured": {
             "outcome": "after 3.0s: throws FetchError (3 attempts)",
@@ -859,7 +859,7 @@
           },
           "default": {
             "outcome": "after 1.0s: error result (http) (1 attempts)",
-            "ms": 1006
+            "ms": 1009
           },
           "configured": {
             "outcome": "after 3.0s: error result (timeout) (3 attempts)",
@@ -886,11 +886,11 @@
           },
           "default": {
             "outcome": "requests /s/users/undefined",
-            "ms": 6
+            "ms": 9
           },
           "configured": {
             "outcome": "requests /s/users/undefined",
-            "ms": 6
+            "ms": 9
           }
         },
         "axios": {
@@ -906,18 +906,18 @@
           },
           "default": {
             "outcome": "requests /s/users/undefined",
-            "ms": 6
+            "ms": 9
           },
           "configured": {
             "outcome": "requests /s/users/undefined",
-            "ms": 6
+            "ms": 9
           }
         },
         "ky": {
           "notes": {
             "getJson": "timeout: 3000 (https://github.com/sindresorhus/ky/blob/v2.1.0/readme.md#timeout); parseJson handles an empty body (https://github.com/sindresorhus/ky/blob/v2.1.0/readme.md#parsejson)",
             "search": "hand-written: abort the previous call with signal + AbortController (https://github.com/sindresorhus/ky/blob/v2.1.0/readme.md#cancellation)",
-            "getWithAuth": "hand-written: one shared refresh promise in beforeRetry (readme FAQ: token refresh, https://github.com/sindresorhus/ky/blob/v2.1.0/readme.md#how-do-i-implement-token-refresh-on-401-responses)",
+            "getWithAuth": "hand-written: one shared refresh promise in beforeRetry (readme FAQ: token refresh, https://github.com/sindresorhus/ky/blob/v2.1.0/readme.md#how-do-i-implement-token-refresh-on-401-responses); FAQ default: up to 2 retries",
             "getWithDeadline": "timeout: 3000, totalTimeout: 3000, retry: { limit: 3 } (https://github.com/sindresorhus/ky/blob/v2.1.0/readme.md#totaltimeout, https://github.com/sindresorhus/ky/blob/v2.1.0/readme.md#retry)",
             "getValidated": ".json(schema), Standard Schema (https://github.com/sindresorhus/ky/blob/v2.1.0/readme.md#kyinput-options)"
           },
@@ -926,11 +926,11 @@
           },
           "default": {
             "outcome": "requests /s/users/undefined",
-            "ms": 6
+            "ms": 9
           },
           "configured": {
             "outcome": "requests /s/users/undefined",
-            "ms": 6
+            "ms": 9
           }
         },
         "ofetch": {
@@ -946,11 +946,11 @@
           },
           "default": {
             "outcome": "requests /s/users/undefined",
-            "ms": 7
+            "ms": 10
           },
           "configured": {
             "outcome": "requests /s/users/undefined",
-            "ms": 7
+            "ms": 10
           }
         },
         "liaise": {
@@ -966,11 +966,11 @@
           },
           "default": {
             "outcome": "error result (network)",
-            "ms": 3
+            "ms": 4
           },
           "configured": {
             "outcome": "error result (network)",
-            "ms": 3
+            "ms": 4
           }
         }
       }
@@ -1024,7 +1024,7 @@
           "notes": {
             "getJson": "timeout: 3000 (https://github.com/sindresorhus/ky/blob/v2.1.0/readme.md#timeout); parseJson handles an empty body (https://github.com/sindresorhus/ky/blob/v2.1.0/readme.md#parsejson)",
             "search": "hand-written: abort the previous call with signal + AbortController (https://github.com/sindresorhus/ky/blob/v2.1.0/readme.md#cancellation)",
-            "getWithAuth": "hand-written: one shared refresh promise in beforeRetry (readme FAQ: token refresh, https://github.com/sindresorhus/ky/blob/v2.1.0/readme.md#how-do-i-implement-token-refresh-on-401-responses)",
+            "getWithAuth": "hand-written: one shared refresh promise in beforeRetry (readme FAQ: token refresh, https://github.com/sindresorhus/ky/blob/v2.1.0/readme.md#how-do-i-implement-token-refresh-on-401-responses); FAQ default: up to 2 retries",
             "getWithDeadline": "timeout: 3000, totalTimeout: 3000, retry: { limit: 3 } (https://github.com/sindresorhus/ky/blob/v2.1.0/readme.md#totaltimeout, https://github.com/sindresorhus/ky/blob/v2.1.0/readme.md#retry)",
             "getValidated": ".json(schema), Standard Schema (https://github.com/sindresorhus/ky/blob/v2.1.0/readme.md#kyinput-options)"
           },
@@ -1033,7 +1033,7 @@
           },
           "default": {
             "outcome": "wrong data",
-            "ms": 4
+            "ms": 5
           },
           "configured": {
             "outcome": "throws SchemaValidationError",
@@ -1057,7 +1057,7 @@
           },
           "default": {
             "outcome": "wrong data",
-            "ms": 5
+            "ms": 4
           }
         },
         "liaise": {
@@ -1073,11 +1073,11 @@
           },
           "default": {
             "outcome": "wrong data",
-            "ms": 5
+            "ms": 4
           },
           "configured": {
             "outcome": "error result (parse)",
-            "ms": 5
+            "ms": 4
           }
         }
       }

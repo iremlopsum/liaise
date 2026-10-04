@@ -96,8 +96,8 @@ function createConfigured({ baseUrl, auth }) {
     // ofetch's `timeout` is per attempt; it has no overall-deadline option. hand-written: an
     // overall deadline via `signal: AbortSignal.timeout(3000)`, a fetch option ofetch passes
     // through (DOCS.abortTimeout), the same deadline the fetch contender gets. ofetch ignores
-    // `timeout` when a `signal` is given.
-    getWithDeadline: path => http(path, { timeout: 3000, retry: 3, signal: AbortSignal.timeout(3000) }),
+    // `timeout` when a `signal` is given, so none is set here.
+    getWithDeadline: path => http(path, { retry: 3, signal: AbortSignal.timeout(3000) }),
     // getValidated: no built-in option.
   }
 }
