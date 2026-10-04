@@ -1,6 +1,19 @@
+import { fileURLToPath } from 'node:url'
 import { defineConfig, configDefaults } from 'vitest/config'
 
+const src = (file: string) => fileURLToPath(new URL(`./src/${file}`, import.meta.url))
+
 export default defineConfig({
+  // README examples import 'liaise' by its published name. These aliases point
+  // that name at src/, so a tested README block is byte-identical to the test
+  // that runs it (scripts/check-readme.mjs) and needs no build first.
+  resolve: {
+    alias: [
+      { find: /^liaise$/, replacement: src('index.ts') },
+      { find: /^liaise\/middleware$/, replacement: src('built-in-middleware.ts') },
+      { find: /^liaise\/testing$/, replacement: src('testing.ts') },
+    ],
+  },
   test: {
     environment: 'node',
     // `.worktrees/` is excluded as a belt-and-braces guard. The actual rule is
@@ -13,7 +26,10 @@ export default defineConfig({
     // Spread `configDefaults.exclude` rather than replacing it — setting
     // `exclude` overrides vitest's defaults outright, which would start
     // pulling in `node_modules` and the compiled `dist/`.
-    exclude: [...configDefaults.exclude, '**/.worktrees/**'],
+    //
+    // `compare/` is the library comparison harness: its own package.json, its
+    // own dependencies, never part of this suite.
+    exclude: [...configDefaults.exclude, '**/.worktrees/**', 'compare/**'],
     typecheck: { tsconfig: './tsconfig.test.json', include: ['tests/**/*.test.ts', 'tests/**/*.test-d.ts'], only: true },
   }
 })

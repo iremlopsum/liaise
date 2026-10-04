@@ -7,6 +7,12 @@ For the full record of what changed in each release, see [CHANGELOG.md](./CHANGE
 
 ---
 
+## Upgrading to 5.0.3
+
+No action needed. Documentation only, plus corrected type comments in `src/types.ts`.
+
+---
+
 ## Upgrading to 5.0.2
 
 No code changes needed. A call whose path parameter is `undefined`, `null`, an

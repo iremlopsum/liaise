@@ -1,6 +1,6 @@
 {
   "name": "liaise",
-  "version": "5.0.2",
+  "version": "5.0.3",
   "description": "Type-safe API client for REST and GraphQL on standard fetch. Never throws. Zero dependencies.",
   "type": "module",
   "sideEffects": false,
@@ -34,10 +34,11 @@
     "test": "vitest",
     "test:run": "vitest run",
     "test:integration": "vitest run --config vitest.integration.ts",
+    "docs:check": "node scripts/check-readme.mjs",
     "typecheck": "tsc --noEmit",
     "test:types": "vitest run --typecheck",
     "sessions": "test -f .claude/sessions.mjs && node .claude/sessions.mjs || echo \"npm run sessions is a local-only helper (gitignored .claude/); nothing to list in this clone\"",
-    "prepublishOnly": "npm run typecheck && npm run test:types && npm run test:run && npm run test:integration && npm run build && npm run size"
+    "prepublishOnly": "npm run typecheck && npm run test:types && npm run test:run && npm run test:integration && npm run docs:check && npm run build && npm run size"
   },
   "repository": {
     "type": "git",
@@ -69,6 +70,7 @@
     "http-client"
   ],
   "devDependencies": {
+    "@tanstack/query-core": "5.104.1",
     "@types/node": "^22.19.18",
     "esbuild": "0.27.4",
     "typescript": "~5.8.0",

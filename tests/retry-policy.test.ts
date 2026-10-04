@@ -335,3 +335,28 @@ describe('retry policy', () => {
     expect(seen).toEqual([10, 20])
   })
 })
+
+describe('retryMiddleware defaults (the README option table)', () => {
+  afterEach(() => { vi.restoreAllMocks(); vi.useRealTimers() })
+
+  it('max is 3, baseDelay is 250 and delay is exponential', async () => {
+    vi.useFakeTimers()
+    const seen: number[] = []
+    vi.stubGlobal('fetch', always(503))
+    const p = makeApi(retryMiddleware({ jitter: false, onRetry: ({ delay }) => { seen.push(delay) } })).g()
+    await vi.runAllTimersAsync()
+    await p
+    expect((globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls.length).toBe(4)
+    expect(seen).toEqual([250, 500, 1000])
+  })
+
+  it('maxDelay is 30000, and caps a Retry-After value too', async () => {
+    vi.useFakeTimers()
+    const seen: number[] = []
+    vi.stubGlobal('fetch', always(503, { 'retry-after': '120' }))
+    const p = makeApi(retryMiddleware({ max: 1, jitter: false, onRetry: ({ delay }) => { seen.push(delay) } })).g()
+    await vi.runAllTimersAsync()
+    await p
+    expect(seen).toEqual([30_000])
+  })
+})

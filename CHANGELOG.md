@@ -5,6 +5,41 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [5.0.3] — 2026-10-04
+
+A documentation release. Nothing in the package's behaviour changes. See
+[MIGRATION.md](./MIGRATION.md#upgrading-to-503).
+
+### Documentation
+
+- **The README is reorganised around what you need first.** It now runs from the
+  problem, to a quick start, a guide, tested recipes and a comparison, and ends with
+  a complete reference. Every recipe in it runs as a test in CI, and
+  `npm run docs:check` fails if the README copy drifts from that test.
+- **`src/types.ts` comments corrected.** More than ten stale or wrong comments,
+  including the claim that a raw string param is never shared, and a comparison of
+  timeouts with axios, XHR and got that the project cannot support, which is removed.
+
+### Fixed
+
+- **The `share` option's type documentation no longer lists signal-replacing
+  middleware as a known limitation.** It was fixed in 3.0.0 (the shared signal is
+  re-merged when a middleware replaces `ctx.request.signal`), and an existing test
+  pins it.
+
+### Added (repository only, not in the package)
+
+- `compare/`, a rerunnable comparison of fetch, axios, ky, ofetch and liaise. The
+  README's comparison section is generated from it.
+- `npm run docs:check`, which fails when a README recipe drifts from its test or an
+  in-page link has no heading.
+- Tests for behaviour the README states: a throwing middleware gives
+  `kind: 'middleware'` with `status: 0`; a caller's cancel still ends the call as
+  `'abort'` when a middleware replaces `ctx.request.signal`, without aborting the
+  request itself; a header added by middleware is not part of the `share` key;
+  and the defaults of `retryMiddleware` (`max` 3, `baseDelay` 250,
+  `maxDelay` 30000) and `cacheMiddleware` (`ttl` 5 minutes, `maxSize` 50).
+
 ## [5.0.2] — 2026-10-04
 
 ### Fixed
@@ -1031,6 +1066,7 @@ Initial release of the rewritten client. Reconstructed from the release commit
   `ArrayBuffer` and strings
 - Response parsing as `json`, `text`, `blob`, `arrayBuffer` or `formData`
 
+[5.0.3]: https://github.com/iremlopsum/liaise/compare/v5.0.2...v5.0.3
 [5.0.2]: https://github.com/iremlopsum/liaise/compare/v5.0.1...v5.0.2
 [5.0.1]: https://github.com/iremlopsum/liaise/compare/v5.0.0...v5.0.1
 [5.0.0]: https://github.com/iremlopsum/liaise/compare/v4.4.3...v5.0.0
