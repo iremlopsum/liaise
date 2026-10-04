@@ -229,7 +229,7 @@ api.getReport.getHeaders() // { 'x-api-version': '2' }
 
 [`getHeaders()`](#getheaders) shows the headers an endpoint sends from the client and the endpoint, before any call adds its own.
 
-When the most specific `timeout` is `0`, the call has no deadline, so `timeout: 0` on an endpoint opts it out of the client's ([details](#set-a-deadline-with-timeout)).
+`timeout: 0` at the most specific level means no deadline ([details](#set-a-deadline-with-timeout)).
 
 ## Guide
 
@@ -401,7 +401,7 @@ const api = createApi({
 
 `logToTracker` stands for your error tracker, such as Sentry.
 
-- It runs once per call, after all your middleware has finished. A call that a retry middleware rescues from a 500 never reaches it. Calls that [share](#sharing-identical-requests) one failed request report it once.
+- It runs once per call, after all your middleware has finished. A call that a retry middleware rescues from a 500 never reaches it. When calls [share](#sharing-identical-requests) one failed request, it runs once for all of them.
 - It isn't called for `'abort'`, because a cancellation isn't a failure. A `'timeout'` is reported, because it's a deadline you missed.
 - It only watches. The caller gets the same `Result` either way.
 
@@ -673,7 +673,7 @@ const { error } = await api.getReport()
 - **The most specific `timeout` wins.** A call's replaces the endpoint's, and the endpoint's replaces the client's. Zero or a negative number at the winning level means no deadline, so `timeout: 0` on an endpoint opts it out of the client's, and on a call turns both off. With no `timeout` anywhere there is no deadline, which is the default.
 - **`result.retry()` starts a fresh deadline.** The retried call isn't charged for time the first one used.
 - If you want a separate limit for each attempt instead, see [Give each attempt its own timeout](#give-each-attempt-its-own-timeout).
-- Under [`share`](#sharing-identical-requests), the endpoint's or the client's `timeout` also bounds the one shared request, and a caller can't extend it.
+- Under [`share`](#sharing-identical-requests), the endpoint's or the client's `timeout` also bounds the one shared request ([details](#share-key-and-refcount)).
 
 #### Drop stale calls with dedupe
 
@@ -729,22 +729,19 @@ const [a, b] = await Promise.all([
 ])
 ```
 
-If two requests are the same byte for byte, the server can't tell them apart either, so sharing them is safe. If anything differs, they never share.
+If two requests are the same byte for byte, the server can't tell them apart either, so sharing them is safe. Apart from tracing headers, if anything differs, they never share.
 
-- **`share` joins the call already running. [`dedupe`](#drop-stale-calls-with-dedupe) cancels it.** Setting both on one endpoint throws when you create the client, so you find the mistake straight away.
-- **The request is compared after all your middleware has run.** A header your auth middleware adds is part of it, so calls made as different users don't share. [On a server](#on-a-server-safe-by-default) says what this relies on.
+- **The request is compared after all your middleware has run.** A header your auth middleware adds is part of it, so calls made as different users don't share. [On a server](#on-a-server) says what this relies on.
 - **The URL and the body are compared as sent.** `?a=1&b=2` and `?b=2&a=1` don't share, and neither do two JSON bodies with the same keys in a different order. Params written in the same order always match.
-- **Per-call `headers` and `middleware` count by what they send.** Calls with identical per-call headers share. A per-call middleware that changes nothing doesn't stop sharing.
-- **Tracing headers are left out**, so a middleware that stamps a request ID on every call doesn't stop sharing. The shared request goes out with the first caller's tracing headers. [Share key and refcount](#share-key-and-refcount) lists them.
+- **Per-call `headers` and `middleware` are judged by what they change.** Calls with identical per-call headers share, and a per-call middleware that changes nothing doesn't stop sharing.
+- **Tracing headers aren't compared**, so a middleware that stamps a request ID on every call doesn't stop sharing. The shared request goes out with the first caller's tracing headers. [Share key and refcount](#share-key-and-refcount) lists them.
 - **An upload never shares.** A call whose body is `FormData`, a `Blob`, an `ArrayBuffer`, a typed array, a `DataView` or a `ReadableStream` sends its own request.
-- **Each caller has its own `data`.** A middleware that edits `data` changes only its own caller's copy ([details](#share-key-and-refcount)).
+- **Each caller has its own `data` for JSON and text.** A middleware that edits `data` changes only its own caller's copy ([details](#share-key-and-refcount)).
 - **[`onError`](#reporting-errors-with-onerror) hears about a failed shared request once**, however many callers get the error. An error that a caller's own middleware makes from it is reported separately.
-- **A hung shared request reports once.** If the request then fails another way for callers still waiting, that failure reports too. A caller's own per-call timeout or cancel is its own, and reports by the usual rules, which never report a cancel.
-- **A retry joins only an identical attempt in flight at that moment.** Nothing is kept between attempts. Each caller's `result.retry()` runs that caller's own call again, with its own options.
 - **A call that arrives after the shared request has settled sends a new one.** Nothing is cached. For that, use [`cacheMiddleware`](#cache-repeated-reads).
-- **On a write, `share` merges identical concurrent calls into one.** That is usually what you want for reads and refresh-style calls, such as the [token refresh](#add-an-auth-header-and-refresh-the-token-on-a-401), and rarely for other writes.
+- **Think before you set `share` on a write.** Two identical writes at the same moment become one, so adding the same item to a cart twice at once adds it once. That suits a refresh-style call, such as the [token refresh](#add-an-auth-header-and-refresh-the-token-on-a-401), and rarely other writes.
+- **`share` joins the call already running. [`dedupe`](#drop-stale-calls-with-dedupe) cancels it.** Setting both on one endpoint throws when you create the client, so you find the mistake straight away.
 - **A per-call `signal` or `timeout` only lets that caller leave.** The caller that gives up gets `kind: 'abort'` or `'timeout'`. The request keeps running for the others, and is cancelled once every caller has given up.
-- **The endpoint's `timeout`, or the client's, bounds the shared request for everyone.** It counts from when the request was sent. A caller that joins late can't extend it, and `timeout: 0` on one call can't turn it off.
 
 ```ts
 const impatient = api.getProduct({ id: '42' }, { timeout: 20 }) // gives up quickly
@@ -753,9 +750,9 @@ const patient = api.getProduct({ id: '42' })                    // keeps waiting
 // impatient's timeout doesn't cancel the shared request, so patient still gets the response.
 ```
 
-A middleware that replaces the signal has its own note, under [Signal-replacing middleware](#signal-replacing-middleware).
+How the shared request's own deadline, its timeouts and retries work is under [Share key and refcount](#share-key-and-refcount). A middleware that replaces the signal has its own note, under [Signal-replacing middleware](#signal-replacing-middleware).
 
-#### On a server: safe by default
+#### On a server
 
 One client can serve every user. The user's token or cookie is part of what is sent, so one user's call never joins another's. [One /me per page view on the server](#one-me-per-page-view-on-the-server) shows the setup.
 
@@ -853,7 +850,7 @@ const getItems = defineRequest<{ id: string }[]>()({ method: 'GET', path: '/item
 const api = createApi({
   baseUrl: '/api',
   requests: { getItems },
-  log: import.meta.env.DEV, // on in development only (Vite's flag; any boolean works)
+  log: import.meta.env.DEV, // on in development only (Vite); in Node: process.env.NODE_ENV !== 'production'
 })
 ```
 
@@ -865,9 +862,9 @@ const api = createApi({
 [liaise] ← createUser ERROR 422 (89ms)
 ```
 
-- **Each call logs once, with its final outcome.** The logger runs outside all your middleware, so a call that `retryMiddleware` retries still logs one pair of lines, and the time covers the whole call.
-- **`log: { data: true }` also prints the data.** An object or array goes to `console.table`, anything else to `console.log`, and a failed call prints its `error.body`. `data` is off by default, because responses often hold personal data and tokens, and a long list makes the console slow.
-- **A call that joined a [shared](#sharing-identical-requests) request ends with `, shared`**, as in `[liaise] ← getUser OK (138ms, shared)`. That call sent nothing itself.
+- **Each call logs once, with its final outcome.** The logger runs outside all your middleware, so a call that `retryMiddleware` retries still logs one pair of lines.
+- **`log: { data: true }` also prints each call's data, or its `error.body` on failure** ([Log options](#log-options)). `data` is off by default, because responses often hold personal data and tokens, and a long list makes the console slow.
+- **A call that joined a [shared](#sharing-identical-requests) request ends with `, shared`**, as in `[liaise] ← getUser OK (138ms, shared)`. Its answer came from a request another call sent.
 - **To log one endpoint or one call, use `logMiddleware`** in that level's `middleware`. It takes the same options ([Log options](#log-options)):
 
   ```ts
@@ -1385,7 +1382,7 @@ async function renderPage(req: IncomingRequest) {
 }
 ```
 
-Each loader sends the user's cookie as a per-call header. Calls with the same cookie share one request, and calls with different cookies never do ([On a server](#on-a-server-safe-by-default)). Inside React Server Components, React's [`cache()`](https://react.dev/reference/react/cache) does this too.
+Each loader sends the user's cookie as a per-call header. Calls with the same cookie share one request, and calls with different cookies never do ([On a server](#on-a-server)). Inside React Server Components, React's [`cache()`](https://react.dev/reference/react/cache) gives one /me per page view too.
 
 ### Retry a flaky backend within one deadline
 
@@ -1620,7 +1617,7 @@ Every option, type and export, read from the source. The guide explains when to 
 | `headers` | `HeadersInit` | — | Sent with every call. An endpoint or a call can replace a header ([three levels](#three-levels-of-settings)). |
 | `timeout` | `number` (ms) | no deadline | A deadline for every call. An endpoint or a call can set its own, and `0` there turns it off ([details](#set-a-deadline-with-timeout)). |
 | `log` | `boolean \| LogOptions` | off | Logs every call to the console ([Log every call](#log-every-call), [options](#log-options)). |
-| `onError` | `(error: ApiError) => void` | — | Called once per failed call, after all middleware, and once per failed shared request under `share`. Never for `'abort'` ([details](#reporting-errors-with-onerror)). |
+| `onError` | `(error: ApiError) => void` | — | Called once per failed call, after all middleware. Calls that share one failed request count as one. Never for `'abort'` ([details](#reporting-errors-with-onerror)). |
 
 ### createGraphQL options
 
@@ -1633,7 +1630,7 @@ Every option, type and export, read from the source. The guide explains when to 
 | `headers` | `HeadersInit` | — | Sent with every operation. An operation or a call can replace a header. |
 | `timeout` | `number` (ms) | no deadline | A deadline for every operation. An operation or a call can set its own, and `0` there turns it off. |
 | `log` | `boolean \| LogOptions` | off | Logs every call to the console ([Log every call](#log-every-call), [options](#log-options)). |
-| `onError` | `(error: ApiError) => void` | — | Called once per failed call, GraphQL errors included, and once per failed shared request under `share`. Never for `'abort'`. |
+| `onError` | `(error: ApiError) => void` | — | Called once per failed call, GraphQL errors included. Calls that share one failed request count as one. Never for `'abort'`. |
 
 ### Endpoint options
 
@@ -1672,7 +1669,7 @@ The second argument of every call, as in `api.getUser(params, options)`. [`pagin
 
 | Option | Type | Default | What it does |
 | ------ | ---- | ------- | ------------ |
-| `middleware` | `Middleware[]` | — | Runs after the client's and the endpoint's middleware. Under `share` it runs for this caller only, like every middleware. |
+| `middleware` | `Middleware[]` | — | Runs after the client's and the endpoint's middleware. Under `share`, what it changes in the request is part of what is compared. |
 | `skipMiddleware` | `Middleware[]` | — | Middleware to leave out of this call, matched by reference ([details](#skipping-a-middleware-for-one-call)). |
 | `headers` | `HeadersInit` | — | Replaces the client's and the endpoint's value for the same header. Under `share` they are part of what is compared, so identical per-call headers share. |
 | `signal` | `AbortSignal` | — | Cancels the call, which ends with `kind: 'abort'` ([details](#cancel-with-a-signal)). |
@@ -1682,7 +1679,7 @@ A fractional `timeout` is rounded down to whole milliseconds, with a minimum of 
 
 ### getHeaders()
 
-Every method on a client has `getHeaders()`. It returns the headers that endpoint sends from configuration, which are the client's headers merged with the endpoint's, the endpoint's winning, with lowercase names.
+Every method on a client has `getHeaders()`, which returns the headers its endpoint sends from configuration. Those are the client's headers merged with the endpoint's, with the endpoint's winning, and every name is lowercase.
 
 ```ts
 import { createApi, defineRequest } from 'liaise'
@@ -1829,7 +1826,7 @@ Each call logs one line when it starts and one when it ends:
 [liaise] ← <endpoint> OK (<ms>ms, shared)
 ```
 
-The time covers everything that runs inside the logger. For `log` that is the whole call, and for `logMiddleware` it is the middleware after it and the request. An error with no response logs status `0`. `, shared` marks a call that joined a [shared](#sharing-identical-requests) request. A console that throws never fails the call.
+The time covers everything that runs inside the logger. For `log` that is the whole call, and for `logMiddleware` it is the middleware after it and the request. An error with no response logs status `0`. A console that throws never fails the call.
 
 ### liaise/testing
 
@@ -1931,7 +1928,11 @@ The response is read once, and each caller decodes its own copy, so each has its
 
 Each caller holds a place in the shared request, counted by a refcount. A caller whose own `signal` or deadline fires gives up its place and stops waiting. When the last caller gives up, the request is aborted. Nobody is left to receive that abort, so it is never reported.
 
-The shared request's deadline is the endpoint's `timeout`, or the client's when the endpoint has none, counted from when the request was sent. If each new caller restarted it, a steady stream of callers could keep one request open forever.
+The shared request's deadline is the endpoint's `timeout`, or the client's when the endpoint has none, counted from when the request was sent. A caller that joins late can't extend it, and `timeout: 0` on one call can't turn it off. If each new caller restarted it, a steady stream of callers could keep one request open forever.
+
+Every caller that runs out of the endpoint's or the client's `timeout` while it waits counts as one failure, and `onError` hears about it once. If the shared request then fails another way for callers still waiting, such as with a 500, that failure is reported too. A per-call `timeout` is its caller's own, and is reported on its own.
+
+A retry from `retryMiddleware` is a new attempt. It joins an identical attempt in flight at that moment, and otherwise sends its own. Nothing is kept between attempts. Each caller's `result.retry()` runs that caller's own call again, with its own options.
 
 #### Signal-replacing middleware
 
@@ -1984,7 +1985,7 @@ await api.search({ q: 'hello' })
 
 A key that appears in both is sent twice. A call param named `api-version` gives `?api-version=2&api-version=3`, and the server decides which one counts. Headers merge by name, but query params can't, because an array param is already sent as repeated keys (`tags=a&tags=b`). To change a base param on each call, set it in a middleware.
 
-The full URL, base query included, appears in `ctx.request.url`, `error.request.url` and `logMiddleware`'s output, so anything that logs or reports it sends that query too. Put a secret in a header instead.
+The full URL, base query included, appears in `ctx.request.url`, `error.request.url` and the [log](#log-every-call) output, so anything that logs or reports it sends that query too. Put a secret in a header instead.
 
 #### URL fragments
 
