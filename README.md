@@ -708,11 +708,11 @@ const [a, b] = await Promise.all([
 ])
 ```
 
-- **`share` joins the call already running. [`dedupe`](#drop-stale-calls-with-dedupe) cancels it.** Setting both on one endpoint throws when you create the client, so the mistake shows up straight away instead of on the first call.
+- **`share` joins the call already running. [`dedupe`](#drop-stale-calls-with-dedupe) cancels it.** Setting both on one endpoint throws when you create the client, so you find the mistake straight away.
 - **Identical means the same endpoint and the same params, compared by content.** Key order doesn't matter, and two `Date`s with the same time match. Different params or a different endpoint never share. [Share key and refcount](#share-key-and-refcount) has the full rules.
 - **A per-call `headers` or `middleware` turns sharing off for that call.** Either one can change what is requested, so that call gets a request of its own.
-- **Params that can't be compared safely turn sharing off too.** These are a BigInt, an `ArrayBuffer`, `Blob`, `FormData` or `URLSearchParams`, a circular structure, and an object with no enumerable state, such as an `Error` or a class instance that keeps its state in private fields. This applies at any depth.
-- Two different values of those kinds could look the same, and one caller would get the response meant for another. Sending a second request is always safe. A `Date`, `Map`, `Set`, typed array or string param shares normally.
+- **Params that can't be compared safely turn sharing off too.** These are a BigInt, an `ArrayBuffer`, `Blob`, `FormData` or `URLSearchParams`, a circular structure, and an object with no enumerable state, such as an `Error` or a class instance that keeps its state in private fields, at any depth. Two different values of those kinds could look the same, so that call gets its own request.
+- **A `Date`, `Map`, `Set`, typed array or string param shares normally.**
 - **A per-call `signal` or `timeout` only lets that caller leave.** The caller that gives up gets `kind: 'abort'` or `'timeout'`, reported to [`onError`](#reporting-errors-with-onerror) as an unshared call would be. The request keeps running for the others, and is cancelled once every caller has given up.
 - **The endpoint's own `timeout` bounds the shared request for everyone.** It counts from when the request started. A caller that joins late can't extend it, and `timeout: 0` on one call can't turn it off.
 
@@ -741,7 +741,7 @@ import { retryMiddleware, cacheMiddleware, logMiddleware } from 'liaise/middlewa
 
 #### Retry failed calls
 
-`retryMiddleware(2)` retries a failed call up to two more times, three attempts in all. By default it retries only 5xx responses. A 4xx, a 429 and a network error are returned as they are, and `retryOn` opts you in to the last two:
+`retryMiddleware(2)` retries a failed call up to two more times, three attempts in all. By default it retries only 5xx responses. Any 4xx, including a 429, comes back as it is, and so does a network error. To retry 429s and network errors too, pass `retryOn`:
 
 ```ts
 import { createApi, defineRequest } from 'liaise'
@@ -775,7 +775,7 @@ const retry = retryMiddleware({
 ```
 
 - By default the waits grow exponentially with random jitter, and a `Retry-After` header from the server is honoured. Every option is in [RetryOptions](#retryoptions).
-- **A deadline that passes during a wait ends the call with the deadline's error.** If your `timeout`, your signal or a newer `dedupe` call fires between attempts, you get `kind: 'timeout'` or `'abort'`, and the stale 503 that caused the retry is dropped.
+- **A cancel or a deadline during a wait ends the call with that error.** If your `timeout`, your signal or a newer `dedupe` call fires between attempts, you get `kind: 'timeout'` or `'abort'`. The 503 that caused the retry is dropped.
 
 #### Cache repeated reads
 
@@ -805,8 +805,8 @@ const { data } = await api.getUser({ id: '42' }, { skipMiddleware: [getUserCache
 ```
 
 - **Only successes are cached.** An error always goes to the network again.
-- **The key includes the URL, the params and the headers**, so one user never sees another user's entry. [Cache key](#cache-key) has the details.
-- **Put a middleware that adds a unique header to each call after `cacheMiddleware`.** A request ID added before it makes every call look new, and nothing is ever cached.
+- **The key includes the URL, the params and the headers.** When your auth header is set before the cache runs, one user never sees another user's entry. [Cache key](#cache-key) has the details.
+- **Put a middleware that adds a unique header to each call after `cacheMiddleware`.** A request ID added before it makes every call look new, and nothing is ever cached. Client middleware always runs before endpoint middleware, so either list the request-ID middleware on the endpoint after the cache, or put the cache on the client before it.
 - The options are `ttl` in milliseconds (default 5 minutes), `maxSize` in entries (default 50), and `debug`, which logs hits and misses to the console (default `false`).
 
 #### Log every call
@@ -939,6 +939,8 @@ const api = createApi({
 })
 ```
 
+Your signal is then the only one `fetch` receives, so if the caller cancels, the call still ends with `kind: 'abort'` while the request itself runs on until your signal fires.
+
 A newer call can still cancel this one under [`dedupe`](#drop-stale-calls-with-dedupe), because liaise adds that signal after your middleware runs.
 
 **Pass `ctx.request.signal` on to async work your middleware does itself**, such as a token refresh, a lookup or a queue. liaise won't wait for that work past the deadline or the caller's cancel ([Timeout backstop](#timeout-backstop)). A promise can't be stopped from outside, so passing the signal is the only way to end the work. Without it, the work keeps running and its result is thrown away.
@@ -1006,7 +1008,7 @@ for await (const page of paginate(api.listItems, { limit: 50 }, {
   ```
 
 - **Return `undefined` or `null` to stop.**
-- **An error page ends the walk.** You get the error page, and then the loop ends, because there is no data to read the next cursor from. You see what failed instead of a loop that quietly stopped.
+- **An error page ends the walk.** You get the error page, and then the loop ends, because there is no data to read the next cursor from. You see what failed. The loop never stops quietly.
 - **`maxPages` has no default.** Set it if you want a ceiling, as in `paginate(api.listItems, { limit: 50 }, { next, maxPages: 100 })`. liaise doesn't pick a number, because a silent cut-off at an arbitrary page looks exactly like reaching the last one.
 - **Every other option applies to every page.** Any of the [`CallOptions`](#reference-in-progress), such as `signal`, `timeout` or `headers`, goes with each request, so one signal cancels the whole walk.
 - **`paginate` yields pages.** Read the items from each page yourself. Flattening them would mean guessing which field holds the array.
@@ -1110,7 +1112,7 @@ Most of what the guide says about `createApi` holds for `createGraphQL`.
 - **Every call returns a `Result`**, `{ data, error, response, retry }`, and `error.kind` names the failure.
 - **`middleware`** runs on the client, the `Operation` and the call, in the same order. The context has the same shape, so the [built-in middleware](#retries-caching-and-logging) and yours work unchanged.
 - **`headers`** go on the client, the `Operation` and the call, and merge by the [three levels](#three-levels-of-settings).
-- **`onError`** on `createGraphQL` follows the same rules.
+- **`onError`** goes on `createGraphQL` and works as in [Reporting errors with onError](#reporting-errors-with-onerror).
 - **`retry()`** is on every `Result`.
 - **`dedupe`** goes on the `Operation`, as in [Drop stale calls with dedupe](#drop-stale-calls-with-dedupe).
 - **`timeout`** goes on the `Operation` or the call. It is one deadline for the whole call, retries included.
@@ -1163,6 +1165,8 @@ const r = await api.getUser({ id: '42' })   // routes only define 'GET /api/user
 expect(r.error?.kind).toBe('network')
 expect(String(r.error?.body)).toMatch(/no route matched GET \/api\/users\/42/)
 ```
+
+`api` is a client created with `baseUrl: '/api'`.
 
 An empty array for a route behaves the same way, with a descriptive `Error` in `error.body`.
 
@@ -1453,7 +1457,7 @@ Automatically retries requests that fail, with a real backoff policy — exponen
 
 `RetryInfo` (the argument to `onRetry`): `{ attempt, max, delay, result }` — `attempt` is 1-based (the first retry is `1`), `delay` is the actual delay about to elapse (after jitter and `Retry-After`), and `result` is the `Result` that triggered this retry.
 
-**429 and network-error opt-in.** Both are deliberately excluded from the default `retryOn` — retrying a rate limit or a network failure by default would change behavior under existing callers on upgrade. Opt in explicitly:
+**429 and network errors are opt-in.** The default `retryOn` leaves them out. [Retries, caching and logging](#retries-caching-and-logging) shows how to add them.
 
 **An abort during backoff surfaces as the abort, not the stale result it was retrying.** If the signal driving the request — a whole-operation `timeout`, a caller's own `AbortSignal`, or a dedupe supersede — fires while `retryMiddleware` is sleeping between attempts, the backoff sleep resolves immediately and the loop proceeds straight to the next attempt, which the core fetch rejects instantly (no network call) because the signal is already aborted. The caller receives **that abort** — `kind: 'timeout'` for a deadline, `kind: 'abort'` for a cancellation or a dedupe supersede — never the last real HTTP result (e.g. a stale `503`) that triggered the retry in the first place:
 
