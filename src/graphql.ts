@@ -4,7 +4,7 @@ import { DedupeTracker } from './utils/dedupe.js'
 import { loggerFor } from './utils/log.js'
 import { ShareTracker, requestKey, narrowTag, stampShared } from './utils/share.js'
 import type { SharedRound } from './utils/share.js'
-import { mergeHeaders } from './utils/headers.js'
+import { mergeHeaders, headersRecord } from './utils/headers.js'
 import { abortKind, propagatesReason } from './utils/abort-kind.js'
 import { callBudget } from './utils/budget.js'
 import { anySignal, releaseSignal } from './utils/any-signal.js'
@@ -14,7 +14,7 @@ import { runSchema } from './utils/validate.js'
 import type { SchemaOutcome } from './utils/validate.js'
 import { sendExchange, sendSharedExchange, AbortedRead } from './utils/exchange.js'
 import type { Exchange } from './utils/exchange.js'
-import type { CallOptions, ErrorResult, Middleware, MiddlewareContext, Result, GraphQLBaseConfig, OperationConfig, GraphQLError } from './types.js'
+import type { CallOptions, EndpointExtras, ErrorResult, Middleware, MiddlewareContext, Result, GraphQLBaseConfig, OperationConfig, GraphQLError } from './types.js'
 
 // ---------------------------------------------------------------------------
 // Operation — typed config container for GraphQL operations
@@ -43,9 +43,9 @@ export const gql = (strings: TemplateStringsArray, ...values: unknown[]): string
 // ---------------------------------------------------------------------------
 
 type GraphQLMethod<TVariables extends object, TData> =
-  Record<string, never> extends TVariables
+  (Record<string, never> extends TVariables
     ? (variables?: TVariables, options?: CallOptions) => Promise<Result<TData>>
-    : (variables: TVariables, options?: CallOptions) => Promise<Result<TData>>
+    : (variables: TVariables, options?: CallOptions) => Promise<Result<TData>>) & EndpointExtras
 
 type FlatClient<TOperations> = {
   [K in keyof TOperations]: TOperations[K] extends Operation<infer V, infer D>
@@ -125,7 +125,7 @@ export function createGraphQL(config: any): any {
   }
 
   function buildMethod(name: string, operation: Operation<any, any>) {
-    return (variables: object = {}, options: CallOptions = {}): Promise<Result<unknown>> => {
+    const method = (variables: object = {}, options: CallOptions = {}): Promise<Result<unknown>> => {
       const execute = (): Promise<Result<unknown>> => {
         /**
          * `create-api.ts`'s local equivalent, for the same reason: a Result
@@ -643,6 +643,14 @@ export function createGraphQL(config: any): any {
 
       return execute()
     }
+
+    // Configuration-only headers: no per-call layer and no Content-Type (a call
+    // sets that). A fresh record each time. The split client reuses this
+    // function object, so `gql.query.x` inherits it.
+    return Object.assign(method, {
+      getHeaders: (): Record<string, string> =>
+        headersRecord(mergeHeaders(globalHeaders, operation.config.headers, undefined)),
+    })
   }
 
   const allOperations: Record<string, Operation<any, any>> = {

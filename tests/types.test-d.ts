@@ -9,6 +9,7 @@ import type { StandardSchemaV1 } from '../src/types.js'
 import type { PathParams } from '../src/define-request.js'
 import { defineRequest } from '../src/define-request.js'
 import { logMiddleware } from '../src/built-in-middleware.js'
+import { paginate } from '../src/paginate.js'
 
 interface User { id: string; name: string }
 
@@ -481,5 +482,17 @@ describe('log option (5.1.0)', () => {
     createApi({ baseUrl: '/api', requests: {}, log: 'yes' })
     logMiddleware({ data: true })
     logMiddleware({ enabled: false })
+  })
+})
+
+describe('getHeaders (5.1.0)', () => {
+  it('is on every method and returns a plain string record', () => {
+    expectTypeOf(api.getUser.getHeaders()).toEqualTypeOf<Record<string, string>>()
+    expectTypeOf(api.health.getHeaders).toEqualTypeOf<() => Record<string, string>>()
+  })
+
+  it('does not break paginate, nor calling the method', () => {
+    paginate(api.getUser, { id: '1' }, { next: () => undefined })
+    expectTypeOf(api.getUser({ id: '1' })).resolves.toHaveProperty('data')
   })
 })

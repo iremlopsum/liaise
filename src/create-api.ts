@@ -47,7 +47,7 @@ import { DedupeTracker } from './utils/dedupe.js'
 import { loggerFor } from './utils/log.js'
 import { ShareTracker, requestKey, narrowTag, stampShared } from './utils/share.js'
 import type { SharedRound } from './utils/share.js'
-import { mergeHeaders } from './utils/headers.js'
+import { mergeHeaders, headersRecord } from './utils/headers.js'
 import { abortKind, propagatesReason } from './utils/abort-kind.js'
 import { anySignal, releaseSignal } from './utils/any-signal.js'
 import { callBudget } from './utils/budget.js'
@@ -59,7 +59,7 @@ import { runSchema } from './utils/validate.js'
 import type { SchemaOutcome } from './utils/validate.js'
 import { sendExchange, sendSharedExchange, AbortedRead } from './utils/exchange.js'
 import type { Exchange } from './utils/exchange.js'
-import type { ApiConfig, CallOptions, ErrorResult, Middleware, MiddlewareContext, Result, ResponseType } from './types.js'
+import type { ApiConfig, CallOptions, EndpointExtras, ErrorResult, Middleware, MiddlewareContext, Result, ResponseType } from './types.js'
 
 // =============================================================================
 // Type helpers — these bridge Request generics to the API method signatures
@@ -102,9 +102,9 @@ type ExtractResponse<R> = R extends Request<any, infer Res> ? Res : never
  * @typeParam TResponse - The response type for this endpoint.
  */
 type ApiMethod<TParams extends object, TResponse> =
-  Record<string, never> extends TParams
+  (Record<string, never> extends TParams
     ? (params?: TParams, options?: CallOptions) => Promise<Result<TResponse>>
-    : (params: TParams, options?: CallOptions) => Promise<Result<TResponse>>
+    : (params: TParams, options?: CallOptions) => Promise<Result<TResponse>>) & EndpointExtras
 
 /**
  * The typed API object returned by createApi.
@@ -1310,6 +1310,11 @@ export function createApi<TRequests extends Record<string, Request<any, any>>>(
 
       return execute()
     }
+
+    // Configuration-only headers (no per-call layer): a fresh record each call,
+    // so a caller mutating it cannot reach the next caller.
+    ;(api[name] as Function & EndpointExtras).getHeaders = () =>
+      headersRecord(mergeHeaders(globalHeaders, request.config.headers, undefined))
   }
 
   // Cast the dynamically-built object to the fully-typed Api type.

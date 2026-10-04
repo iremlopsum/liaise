@@ -976,3 +976,19 @@ export interface GraphQLBaseConfig {
    */
   onError?: (error: ApiError) => void
 }
+
+/**
+ * Extra members on every generated method (`api.x`, `gql.x`, `gql.query.x`,
+ * `gql.mutation.x`), intersected with the call signature. Lives here, with the
+ * other shared types, so both clients import it without an import cycle.
+ */
+export type EndpointExtras = {
+  /**
+   * The headers this endpoint sends from configuration — client headers
+   * merged with the endpoint's (endpoint wins), lowercase names, as a fresh
+   * plain object on every call. Read-only: changing it changes nothing.
+   * Per-call headers, headers a middleware adds and the Content-Type liaise
+   * derives from the body are not included: they only exist once a call happens.
+   */
+  getHeaders(): Record<string, string>
+}

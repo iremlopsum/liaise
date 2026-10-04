@@ -9,3 +9,10 @@ export function mergeHeaders(...sources: (HeadersInit | undefined)[]): Headers {
   }
   return merged
 }
+
+/** A plain-object copy of `headers`, lowercase names — for `getHeaders()`. */
+export function headersRecord(headers: Headers): Record<string, string> {
+  const out: Record<string, string> = {}
+  headers.forEach((value, key) => { out[key] = value })
+  return out
+}
