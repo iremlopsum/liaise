@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { createApi, defineRequest, createGraphQL, Operation, gql } from '../src/index.js'
-import { logMiddleware } from '../src/built-in-middleware.js'
+import type { Middleware } from '../src/index.js'
+import { logMiddleware, retryMiddleware } from '../src/built-in-middleware.js'
 
 const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } })
 let log: ReturnType<typeof vi.spyOn>, table: ReturnType<typeof vi.spyOn>
@@ -96,6 +97,85 @@ describe('log option', () => {
     const g = createGraphQL({ endpoint: 'https://x.test/graphql', log: true, operations: { getX: new Operation<Record<string, never>, { x: number }>({ operation: gql`query { x }` }) } })
     await g.getX()
     expect(log.mock.calls[0][0]).toBe('[liaise] → POST getX https://x.test/graphql')
+  })
+  it('data: true prints the data on createGraphQL', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => json({ data: { x: 1 } })))
+    const g = createGraphQL({ endpoint: 'https://x.test/graphql', log: { data: true }, operations: { getX: new Operation<Record<string, never>, { x: number }>({ operation: gql`query { x }` }) } })
+    await g.getX()
+    expect(table).toHaveBeenCalledWith({ x: 1 })
+  })
+  it('tags a GraphQL call that joined a shared operation with ", shared"', async () => {
+    let release!: () => void
+    vi.stubGlobal('fetch', vi.fn(() => new Promise<Response>(r => { release = () => r(json({ data: { x: 1 } })) })))
+    const g = createGraphQL({ endpoint: 'https://x.test/graphql', log: true, operations: { getX: new Operation<Record<string, never>, { x: number }>({ operation: gql`query { x }`, share: true }) } })
+    const a = g.getX(); const b = g.getX()
+    await new Promise(r => setTimeout(r, 0)); release()
+    await Promise.all([a, b])
+    const outcomes = log.mock.calls.map(c => String(c[0])).filter(l => l.includes('←'))
+    expect(outcomes).toHaveLength(2)
+    expect(outcomes.filter(l => l.endsWith(', shared)'))).toHaveLength(1)
+  })
+})
+
+// The client's logger is not a middleware: it prints the start line before the
+// chain runs and the end line from the post-execution hook, with the Result the
+// caller actually receives. So a call the timeout backstop settles — a
+// middleware stuck on something the signal does not reach — still logs its
+// end, at the deadline, once; and a retried call logs one pair.
+describe('log option: one line pair per call, whatever the chain does', () => {
+  const ends = () => log.mock.calls.map(c => String(c[0])).filter(l => l.startsWith('[liaise] ←'))
+  const stuck: Middleware = () => new Promise(() => {})
+
+  it('prints the end line at the deadline when a middleware never settles', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => json(users)))
+    const api = createApi({ baseUrl: 'https://x.test', log: true, timeout: 30, middleware: [stuck], requests: { list: defineRequest<{ id: string }[]>()({ method: 'GET', path: '/users' }) } })
+    const r = await api.list()
+    expect(r.error?.kind).toBe('timeout')
+    const lines = ends()
+    expect(lines).toHaveLength(1)
+    const ms = Number(/^\[liaise\] ← list ERROR 0 \((\d+)ms\)$/.exec(lines[0])?.[1])
+    expect(ms).toBeGreaterThanOrEqual(20)
+    expect(ms).toBeLessThan(1000)
+  })
+
+  it('prints the end line at the deadline when a middleware never settles, on createGraphQL', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => json({ data: { x: 1 } })))
+    const g = createGraphQL({ endpoint: 'https://x.test/graphql', log: true, timeout: 30, middleware: [stuck], operations: { getX: new Operation<Record<string, never>, { x: number }>({ operation: gql`query { x }` }) } })
+    const r = await g.getX()
+    expect(r.error?.kind).toBe('timeout')
+    const lines = ends()
+    expect(lines).toHaveLength(1)
+    const ms = Number(/^\[liaise\] ← getX ERROR 0 \((\d+)ms\)$/.exec(lines[0])?.[1])
+    expect(ms).toBeGreaterThanOrEqual(20)
+    expect(ms).toBeLessThan(1000)
+  })
+
+  it('tags ", shared" on a joined caller the backstop settles: it still sent nothing', async () => {
+    // Both callers share one hung request; each one's response-side
+    // middleware then waits forever, so the backstop ends both calls.
+    vi.stubGlobal('fetch', vi.fn(() => new Promise<Response>(() => {})))
+    const stuckAfter: Middleware = async (_ctx, next) => { await next(); return new Promise(() => {}) }
+    const api = createApi({ baseUrl: 'https://x.test', log: true, middleware: [stuckAfter], requests: { list: defineRequest<{ id: string }[]>()({ method: 'GET', path: '/users', share: true, timeout: 30 }) } })
+    const [a, b] = await Promise.all([api.list(), api.list()])
+    expect(a.error?.kind).toBe('timeout')
+    expect(b.error?.kind).toBe('timeout')
+    expect(globalThis.fetch).toHaveBeenCalledTimes(1)
+    const lines = ends()
+    expect(lines).toHaveLength(2)
+    expect(lines.filter(l => l.endsWith(', shared)'))).toHaveLength(1)
+  })
+
+  it('logs one line pair for a call retryMiddleware retries', async () => {
+    const responses = [json({}, 503), json({}, 503), json(users)]
+    vi.stubGlobal('fetch', vi.fn(async () => responses.shift()!))
+    const api = createApi({ baseUrl: 'https://x.test', log: true, middleware: [retryMiddleware(2)], requests: { list: defineRequest<{ id: string }[]>()({ method: 'GET', path: '/users' }) } })
+    const r = await api.list()
+    expect(r.data).toEqual(users)
+    expect(globalThis.fetch).toHaveBeenCalledTimes(3)
+    const lines = log.mock.calls.map(c => String(c[0])).filter(l => l.startsWith('[liaise]'))
+    expect(lines).toHaveLength(2)
+    expect(lines[0]).toBe('[liaise] → GET list https://x.test/users')
+    expect(lines[1]).toMatch(/^\[liaise\] ← list OK \(\d+ms\)$/)
   })
 })
 

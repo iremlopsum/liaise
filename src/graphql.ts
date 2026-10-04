@@ -1,8 +1,8 @@
 import { ApiError, createSuccessResult, createErrorResult, createNetworkErrorResult } from './result.js'
 import { composeMiddleware } from './middleware.js'
 import { DedupeTracker } from './utils/dedupe.js'
-import { loggerFor } from './utils/log.js'
-import { ShareTracker, requestKey, narrowTag, stampShared } from './utils/share.js'
+import { callLoggerFor } from './utils/log.js'
+import { ShareTracker, requestKey, narrowTag, stampShared, stampPreempted } from './utils/share.js'
 import type { SharedRound } from './utils/share.js'
 import { mergeHeaders, headersRecord } from './utils/headers.js'
 import { abortKind, propagatesReason } from './utils/abort-kind.js'
@@ -88,8 +88,9 @@ export function createGraphQL(config: any): any {
     onError,
     timeout: clientTimeout,
   } = config
-  // Outermost, so each call logs once with its final outcome. Null when off.
-  const logger = loggerFor(config.log)
+  // Not a middleware: it wraps each whole call, ending in the post-execution
+  // hook — see the same line in create-api.ts. Null when off.
+  const logger = callLoggerFor(config.log)
 
   const dedupeTracker = new DedupeTracker()
 
@@ -175,8 +176,9 @@ export function createGraphQL(config: any): any {
         }
         const releaseAll = (): void => { for (const s of merged) releaseSignal(s) }
         try {
+          // The client's `log` is not in this list: it wraps the whole call
+          // (below, around the chain and in the post-execution hook).
           const allMiddleware: Middleware[] = [
-            ...(logger ? [logger] : []),
             ...globalMiddleware,
             ...(operation.config.middleware ?? []),
             ...(options.middleware ?? []),
@@ -213,6 +215,9 @@ export function createGraphQL(config: any): any {
           )
           own(callerSignal, options.signal)
           let dedupeController: AbortController | undefined
+          // Under share, the last attempt's part in a round trip, for the
+          // backstop below — see the same variable in create-api.ts.
+          let lastRound: SharedRound | undefined
 
           // One attempt: the innermost layer of the onion. Under share,
           // `core` (below) wraps it so every Result it returns passes through
@@ -541,6 +546,7 @@ export function createGraphQL(config: any): any {
           const core: (ctx: MiddlewareContext) => Promise<Result<unknown>> = operation.config.share === true
             ? async ctx => {
               const round: SharedRound = { joined: false }
+              lastRound = round
               // An error derived from the shared round trip carries one of its
               // tokens, so onError hears about one failed shared operation
               // once; a Result that joined is marked (stampShared).
@@ -573,12 +579,19 @@ export function createGraphQL(config: any): any {
           // uses, and for the same reason: a middleware awaiting something
           // the signal does not reach (a stalled token refresh) must not hold
           // the call past its deadline. See utils/backstop.ts, and the
-          // matching block in create-api.ts's execute().
+          // matching block in create-api.ts's execute(). Under share its
+          // Result is stamped by the same rule as core's (stampPreempted), so
+          // a hung shared operation reports once even when a response-side
+          // middleware outlives the grace period.
           const backstop = createBackstop<Result<unknown>>(signal =>
-            buildFailedResult(signal.reason, signal, 'abort')
+            stampPreempted(buildFailedResult(signal.reason, signal, 'abort'), lastRound, signal, endpointDeadline)
           )
           backstop.watch(callerSignal)
           const composed = composeMiddleware(allMiddleware, backstop.guard(core), options.skipMiddleware ?? [])
+          // The client's `log`: the start line now, before any middleware
+          // runs, and the end line from the post-execution hook below, after
+          // the backstop — see create-api.ts.
+          const logEnd = logger?.(context)
           // Same guard as create-api.ts's execute(), and for the same reason:
           // composeMiddleware has no guard of its own, so an async middleware
           // that throws would otherwise escape as a rejection. A middleware
@@ -596,6 +609,9 @@ export function createGraphQL(config: any): any {
             resultPromise = Promise.resolve(buildFailedResult(err, context.request.signal, 'middleware'))
           }
           return backstop.follow(resultPromise, (result, preempted) => {
+            // The end line first, with the final Result — before anything
+            // onError prints.
+            logEnd?.(result)
             // dedupeController is only assigned inside core() — if every
             // middleware short-circuited and core() never ran, it stays
             // undefined here. clear() with no controller deletes the map
@@ -623,6 +639,7 @@ export function createGraphQL(config: any): any {
             // A signal-shaped value whose `reason` throws — see create-api.ts.
             releaseAll()
             const result = buildFailedResult(err, undefined, 'abort')
+            logEnd?.(result)
             fireOnError(result.error as ApiError)
             return result
           })

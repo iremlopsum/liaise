@@ -10,6 +10,7 @@ import type { PathParams } from '../src/define-request.js'
 import { defineRequest } from '../src/define-request.js'
 import { logMiddleware } from '../src/built-in-middleware.js'
 import { paginate } from '../src/paginate.js'
+import { createGraphQL, Operation, gql } from '../src/graphql.js'
 
 interface User { id: string; name: string }
 
@@ -483,6 +484,11 @@ describe('log option (5.1.0)', () => {
     logMiddleware({ data: true })
     logMiddleware({ enabled: false })
   })
+
+  it('logMiddleware still goes in a middleware list bare, and called', () => {
+    createApi({ baseUrl: '/api', requests: {}, middleware: [logMiddleware] })
+    createApi({ baseUrl: '/api', requests: {}, middleware: [logMiddleware({ data: true })] })
+  })
 })
 
 describe('getHeaders (5.1.0)', () => {
@@ -494,5 +500,14 @@ describe('getHeaders (5.1.0)', () => {
   it('does not break paginate, nor calling the method', () => {
     paginate(api.getUser, { id: '1' }, { next: () => undefined })
     expectTypeOf(api.getUser({ id: '1' })).resolves.toHaveProperty('data')
+  })
+
+  it('is on every GraphQL method too, flat and split', () => {
+    const getX = new Operation<Record<string, never>, { x: number }>({ operation: gql`query { x }` })
+    const flat = createGraphQL({ endpoint: '/graphql', operations: { getX } })
+    expectTypeOf(flat.getX.getHeaders()).toEqualTypeOf<Record<string, string>>()
+    const split = createGraphQL({ endpoint: '/graphql', queries: { getX }, mutations: { setX: getX } })
+    expectTypeOf(split.query.getX.getHeaders()).toEqualTypeOf<Record<string, string>>()
+    expectTypeOf(split.mutation.setX.getHeaders()).toEqualTypeOf<Record<string, string>>()
   })
 })

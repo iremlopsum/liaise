@@ -1527,6 +1527,57 @@ describe('one report per hung shared request', () => {
     await flush()
     expect(kinds).toEqual(['timeout'])
   })
+
+  // A response-side middleware that awaits a macrotask after next() (remote
+  // logging, an IndexedDB write) outlives the backstop's grace period, so the
+  // backstop settles every caller with a Result of its own making. That
+  // Result is still the one hung request's deadline, and carries its token.
+  const slowAfter = (ms: number): Middleware => async (_ctx, next) => {
+    const result = await next()
+    await new Promise(r => setTimeout(r, ms))
+    return result
+  }
+
+  it('reports a hung shared request once when every caller has slow response-side middleware', async () => {
+    const f = controllable(); vi.stubGlobal('fetch', f.fn)
+    const { api, kinds } = timed(30, [slowAfter(5)])
+    const [a, b] = await Promise.all([api.get({ id: '1' }), api.get({ id: '1' })])
+    expect(f.fn).toHaveBeenCalledTimes(1)
+    expect(a.error?.kind).toBe('timeout')
+    expect(b.error?.kind).toBe('timeout')
+    // Past the middleware's own late return too, which the backstop discards.
+    await new Promise(r => setTimeout(r, 20))
+    expect(kinds).toEqual(['timeout'])
+  })
+
+  it("still reports per caller a per-call timeout the backstop settles: it is each caller's own", async () => {
+    const f = controllable(); vi.stubGlobal('fetch', f.fn)
+    const { api, kinds } = timed(0, [slowAfter(5)])
+    const [a, b] = await Promise.all([api.get({ id: '1' }, { timeout: 30 }), api.get({ id: '1' }, { timeout: 30 })])
+    expect(f.fn).toHaveBeenCalledTimes(1)
+    expect(a.error?.kind).toBe('timeout')
+    expect(b.error?.kind).toBe('timeout')
+    await new Promise(r => setTimeout(r, 20))
+    expect(kinds).toEqual(['timeout', 'timeout'])
+  })
+
+  it("never lets a caller the backstop settles at the deadline swallow another caller's real failure", async () => {
+    // The shared request answers 500. B receives it; A's own response-side
+    // middleware is still waiting when the endpoint's deadline passes, so the
+    // backstop settles A with 'timeout'. Two failures, two reports: the
+    // backstop's Result may carry only the round trip's DEADLINE token.
+    const f = controllable(); vi.stubGlobal('fetch', f.fn)
+    const { api, kinds } = timed(30)
+    const a = api.get({ id: '1' }, { middleware: [slowAfter(60)] })
+    const b = api.get({ id: '1' })
+    await flush()
+    expect(f.fn).toHaveBeenCalledTimes(1)
+    f.calls[0].respond(500)
+    expect((await b).error?.kind).toBe('http')
+    expect((await a).error?.kind).toBe('timeout')
+    await new Promise(r => setTimeout(r, 70))
+    expect(kinds).toEqual(['http', 'timeout'])
+  })
 })
 
 // ---------------------------------------------------------------------------

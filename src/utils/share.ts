@@ -16,9 +16,10 @@
 // a marker for a Result that joined instead of sending (`markJoined`). Both
 // clients' cores record their part in a round trip as a `SharedRound`, and
 // apply the same two rules to it: which token an error carries (`narrowTag`),
-// and the stamp on the Result (`stampShared`). Those rules live here, once,
-// so the two pipelines — parallel on purpose, see architecture.md — cannot
-// drift apart on them.
+// and the stamp on the Result (`stampShared`) — the backstop's Result
+// included (`stampPreempted`). Those rules live here, once, so the two
+// pipelines — parallel on purpose, see architecture.md — cannot drift apart
+// on them.
 // =============================================================================
 
 import type { Exchange } from './exchange.js'
@@ -209,6 +210,36 @@ export function stampShared<R extends { error: object | null }>(result: R, round
   if (round.tag !== undefined && result.error) tagShared(result.error, round.tag)
   if (round.joined) markJoined(result)
   return result
+}
+
+/**
+ * The stamp on a Result the backstop built (utils/backstop.ts): the call's
+ * own `signal` aborted while its chain was still pending — typically a
+ * response-side middleware awaiting work of its own (remote logging, an
+ * IndexedDB write) after `next()` — so the call settles without that chain.
+ * `round` is the last shared round trip the call took part in, if any.
+ *
+ * That settlement is this caller giving up on `signal`, and `narrowTag`'s
+ * rule for a give-up decides its token: the deadline token when `signal`
+ * aborted with the endpoint's or client's deadline — the same one a hung
+ * shared request has, so under a hang every caller's backstop is that one
+ * failure — and none otherwise. Never the main token: whatever the round
+ * trip answered reached the chain the backstop gave up on, and a caller
+ * still waiting reports it on its own (spec §4.3). A joined caller keeps its
+ * `, shared` mark: it sent nothing, whoever ended its call.
+ */
+export function stampPreempted<R extends { error: object | null }>(
+  result: R,
+  round: SharedRound | undefined,
+  signal: AbortSignal,
+  endpointDeadline: AbortSignal | undefined
+): R {
+  if (round === undefined) return result
+  // A copy: `round` belongs to the attempt, whose own stamp may still read it
+  // if the stuck chain resumes (its Result is discarded either way).
+  const preempted: SharedRound = { token: round.token, deadlineToken: round.deadlineToken, joined: round.joined }
+  narrowTag(preempted, false, signal, endpointDeadline)
+  return stampShared(result, preempted)
 }
 
 /**

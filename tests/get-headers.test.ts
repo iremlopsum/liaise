@@ -29,4 +29,26 @@ describe('getHeaders', () => {
     const split = createGraphQL({ endpoint: 'https://x.test/graphql', queries: { getX: op } })
     expect(split.query.getX.getHeaders()).toEqual({ 'x-op': 'q' })
   })
+
+  it('merges every HeadersInit shape: a Headers instance and tuple pairs', () => {
+    const mixed = createApi({
+      baseUrl: 'https://x.test',
+      headers: new Headers({ 'X-Client': 'web', 'X-A': '0' }),
+      requests: { get: defineRequest<{ ok: boolean }>()({ method: 'GET', path: '/x', headers: [['X-A', '1']] }) },
+    })
+    expect(mixed.get.getHeaders()).toEqual({ 'x-client': 'web', 'x-a': '1' })
+  })
+
+  it('joins a name repeated within one source as Headers does, and a later source replaces it', () => {
+    const repeated = createApi({
+      baseUrl: 'https://x.test',
+      headers: [['X-Tag', 'a'], ['X-Tag', 'b']],
+      requests: {
+        get: defineRequest<{ ok: boolean }>()({ method: 'GET', path: '/x' }),
+        over: defineRequest<{ ok: boolean }>()({ method: 'GET', path: '/y', headers: { 'X-Tag': 'c' } }),
+      },
+    })
+    expect(repeated.get.getHeaders()).toEqual({ 'x-tag': 'a, b' })
+    expect(repeated.over.getHeaders()).toEqual({ 'x-tag': 'c' })
+  })
 })

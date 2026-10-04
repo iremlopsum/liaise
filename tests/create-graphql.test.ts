@@ -1146,6 +1146,51 @@ describe('share (5.1.0)', () => {
     await Promise.all([g.query.getX({ id: '1' }), g.query.getX({ id: '1' })])
     expect(fetchMock).toHaveBeenCalledTimes(1)
   })
+
+  it('reports a shared 200 with GraphQL errors to onError once', async () => {
+    const fetchMock = slow({ data: null, errors: [{ message: 'boom' }] }); vi.stubGlobal('fetch', fetchMock)
+    const kinds: string[] = []
+    const g = createGraphQL({ endpoint, onError: e => { kinds.push(e.kind) }, operations: { getX: opX() } })
+    const rs = await Promise.all([g.getX({ id: '1' }), g.getX({ id: '1' }), g.getX({ id: '1' })])
+    await new Promise(r => setTimeout(r, 0))
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    expect(rs.map(r => r.error?.kind)).toEqual(['http', 'http', 'http'])
+    expect(kinds).toEqual(['http'])
+  })
+
+  // REST: "own give-up landing after a shared failure has answered: the
+  // failure still reports once". The validator runs once per caller, after the
+  // round trip has answered, and aborts the first caller's own signal (with a
+  // TimeoutError, which onError does not drop) before refusing the value.
+  it('decodes a shared schema refusal per caller and reports it once', async () => {
+    const fetchMock = slow({ data: { x: 1 } }); vi.stubGlobal('fetch', fetchMock)
+    const ac = new AbortController()
+    const validate = vi.fn(() => {
+      if (!ac.signal.aborted) ac.abort(new DOMException('gave up', 'TimeoutError'))
+      return { issues: [{ message: 'refused' }] }
+    })
+    const schema = { '~standard': { version: 1 as const, vendor: 'test', validate } }
+    const kinds: string[] = []
+    const g = createGraphQL({
+      endpoint,
+      onError: e => { kinds.push(e.kind) },
+      operations: { getX: new Operation<{ id?: string }, { x: number }>({ operation: gql`query X($id: String) { x(id: $id) }`, share: true, schema }) },
+    })
+    const [a, b] = await Promise.all([g.getX({ id: '1' }, { signal: ac.signal }), g.getX({ id: '1' })])
+    await new Promise(r => setTimeout(r, 0))
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    expect(validate).toHaveBeenCalledTimes(2)
+    expect(ac.signal.aborted).toBe(true)
+    expect(a.error?.kind).toBe('parse')
+    expect(b.error?.kind).toBe('parse')
+    expect(kinds).toEqual(['parse'])
+  })
+
+  it('throws at createGraphQL when a split-client query sets both share and dedupe', () => {
+    expect(() => createGraphQL({ endpoint, queries: {
+      x: new Operation({ operation: gql`query { x }`, share: true, dedupe: true }),
+    } })).toThrow(/share and dedupe/)
+  })
 })
 
 // ---------------------------------------------------------------------------
@@ -1409,6 +1454,52 @@ describe('share (5.1.0) — one report per hung shared operation', () => {
     expect((a.error?.body as DOMException).name).toBe('AbortError') // what fetch threw, as unshared
     await flushShare()
     expect(kinds).toEqual(['timeout'])
+  })
+
+  // REST: the slow response-side middleware rows. A middleware awaiting a
+  // macrotask after next() outlives the backstop's grace period, so the
+  // backstop settles every caller; its Result is still the one hung
+  // operation's deadline, and carries that token — never the main one.
+  const slowAfter = (ms: number): Middleware => async (_ctx, next) => {
+    const result = await next()
+    await new Promise(r => setTimeout(r, ms))
+    return result
+  }
+
+  it('reports a hung shared operation once when every caller has slow response-side middleware', async () => {
+    const f = controllableGql(); vi.stubGlobal('fetch', f.fn)
+    const { g, kinds } = timed(30, [slowAfter(5)])
+    const [a, b] = await Promise.all([g.getX({ id: '1' }), g.getX({ id: '1' })])
+    expect(f.fn).toHaveBeenCalledTimes(1)
+    expect(a.error?.kind).toBe('timeout')
+    expect(b.error?.kind).toBe('timeout')
+    await new Promise(r => setTimeout(r, 20))
+    expect(kinds).toEqual(['timeout'])
+  })
+
+  it("still reports per caller a per-call timeout the backstop settles: it is each caller's own", async () => {
+    const f = controllableGql(); vi.stubGlobal('fetch', f.fn)
+    const { g, kinds } = timed(0, [slowAfter(5)])
+    const [a, b] = await Promise.all([g.getX({ id: '1' }, { timeout: 30 }), g.getX({ id: '1' }, { timeout: 30 })])
+    expect(f.fn).toHaveBeenCalledTimes(1)
+    expect(a.error?.kind).toBe('timeout')
+    expect(b.error?.kind).toBe('timeout')
+    await new Promise(r => setTimeout(r, 20))
+    expect(kinds).toEqual(['timeout', 'timeout'])
+  })
+
+  it("never lets a caller the backstop settles at the deadline swallow another caller's real failure", async () => {
+    const f = controllableGql(); vi.stubGlobal('fetch', f.fn)
+    const { g, kinds } = timed(30)
+    const a = g.getX({ id: '1' }, { middleware: [slowAfter(60)] })
+    const b = g.getX({ id: '1' })
+    await flushShare()
+    expect(f.fn).toHaveBeenCalledTimes(1)
+    f.calls[0].respond(500, { errors: [{ message: 'down' }] })
+    expect((await b).error?.kind).toBe('http')
+    expect((await a).error?.kind).toBe('timeout')
+    await new Promise(r => setTimeout(r, 70))
+    expect(kinds).toEqual(['http', 'timeout'])
   })
 })
 

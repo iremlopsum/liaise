@@ -862,7 +862,7 @@ const api = createApi({
 [liaise] ← createUser ERROR 422 (89ms)
 ```
 
-- **Each call logs once, with its final outcome.** The logger runs outside all your middleware, so a call that `retryMiddleware` retries still logs one pair of lines.
+- **Each call logs once, with its final outcome.** The logger runs outside all your middleware, so a call that `retryMiddleware` retries still logs one pair of lines. A call held past its `timeout` by a stuck middleware logs its end at the deadline, when the [timeout backstop](#timeout-backstop) ends it.
 - **`log: { data: true }` also prints each call's data, or its `error.body` on failure** ([Log options](#log-options)). `data` is off by default, because responses often hold personal data and tokens, and a long list makes the console slow.
 - **A call that joined a [shared](#sharing-identical-requests) request ends with `, shared`**, as in `[liaise] ← getUser OK (138ms, shared)`. Its answer came from a request another call sent.
 - **To log one endpoint or one call, use `logMiddleware`** in that level's `middleware`. It takes the same options ([Log options](#log-options)):

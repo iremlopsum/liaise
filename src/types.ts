@@ -702,9 +702,11 @@ export interface ApiConfig<TRequests extends Record<string, unknown>> {
   /**
    * Log every call to the console: `true`, or `{ enabled, data }`. Off by
    * default. Pass an environment flag to switch it per environment, e.g.
-   * `log: import.meta.env.DEV`. The logger runs outside all other middleware,
-   * so each call logs once with its final outcome; a call that joined a shared
-   * request is tagged `, shared`.
+   * `log: import.meta.env.DEV`. The logger is not a middleware: it wraps the
+   * whole call, outside all middleware and the timeout backstop, so each call
+   * logs once, with its final outcome — after retries, and at its deadline
+   * when a stuck middleware leaves the backstop to end it. A call that joined
+   * a shared request is tagged `, shared`.
    */
   log?: boolean | LogOptions
 
@@ -943,9 +945,11 @@ export interface GraphQLBaseConfig {
   /**
    * Log every call to the console: `true`, or `{ enabled, data }`. Off by
    * default. Pass an environment flag to switch it per environment, e.g.
-   * `log: import.meta.env.DEV`. The logger runs outside all other middleware,
-   * so each call logs once with its final outcome; a call that joined a shared
-   * request is tagged `, shared`.
+   * `log: import.meta.env.DEV`. The logger is not a middleware: it wraps the
+   * whole call, outside all middleware and the timeout backstop, so each call
+   * logs once, with its final outcome — after retries, and at its deadline
+   * when a stuck middleware leaves the backstop to end it. A call that joined
+   * a shared request is tagged `, shared`.
    */
   log?: boolean | LogOptions
 

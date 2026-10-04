@@ -72,4 +72,9 @@ describe('timeoutSignalFor', () => {
     expect(timeoutSignalFor(0, 100, 50)).toBeUndefined()
     expect(timeoutSignalFor(undefined, undefined, undefined)).toBeUndefined()
   })
+
+  it('treats a negative value as no deadline, at the client level and as a stop to the fallback', () => {
+    expect(timeoutSignalFor(undefined, undefined, -1)).toBeUndefined()
+    expect(timeoutSignalFor(undefined, -1, 50)).toBeUndefined()
+  })
 })

@@ -350,7 +350,9 @@ const passThrough: Middleware = (_ctx, next) => next()
  * also prints each call's data (`console.table` for objects and arrays,
  * `console.log` otherwise, `error.body` on failure). `enabled: false` makes it
  * a pass-through. A call that joined a shared request is tagged `, shared`.
- * The client-level `log` option installs the same logger outermost.
+ * The client-level `log` option prints the same lines, but is not a
+ * middleware: it wraps the whole call, so it also logs a call the timeout
+ * backstop ends while a middleware is stuck.
  *
  * **Usage note:**
  *

@@ -44,8 +44,8 @@ import { composeMiddleware } from './middleware.js'
 import { buildUrl, joinUrl, FragmentError } from './utils/path-params.js'
 import { serializeBody } from './utils/serialize.js'
 import { DedupeTracker } from './utils/dedupe.js'
-import { loggerFor } from './utils/log.js'
-import { ShareTracker, requestKey, narrowTag, stampShared } from './utils/share.js'
+import { callLoggerFor } from './utils/log.js'
+import { ShareTracker, requestKey, narrowTag, stampShared, stampPreempted } from './utils/share.js'
 import type { SharedRound } from './utils/share.js'
 import { mergeHeaders, headersRecord } from './utils/headers.js'
 import { abortKind, propagatesReason } from './utils/abort-kind.js'
@@ -413,8 +413,11 @@ export function createApi<TRequests extends Record<string, Request<any, any>>>(
   // Destructure the config for convenience. Default globalMiddleware to an
   // empty array so we don't need null checks throughout the function.
   const { baseUrl, requests, middleware: globalMiddleware = [], headers: globalHeaders, onError, timeout: clientTimeout } = config
-  // Outermost, so each call logs once with its final outcome. Null when off.
-  const logger = loggerFor(config.log)
+  // Not a middleware: each call prints its start line before its chain runs
+  // and its end line from the post-execution hook, with the Result the caller
+  // receives — the backstop's too — so it logs once, with its final outcome
+  // (utils/log.ts). Null when off.
+  const logger = callLoggerFor(config.log)
 
   /**
    * Calls the consumer's `onError`, swallowing anything it throws.
@@ -586,10 +589,11 @@ export function createApi<TRequests extends Record<string, Request<any, any>>>(
           // This matches the "most general to most specific" convention.
           // Global middleware (auth, logging) wraps everything. Per-request
           // middleware (validation, caching) wraps the specific endpoint.
-          // Per-call middleware (one-off customizations) is innermost.
+          // Per-call middleware (one-off customizations) is innermost. The
+          // client's `log` is not in this list: it wraps the whole call, at
+          // Steps 8 and 9.
           // -----------------------------------------------------------------
           const allMiddleware: Middleware[] = [
-            ...(logger ? [logger] : []),
             ...globalMiddleware,
             ...(request.config.middleware ?? []),
             ...(options.middleware ?? [])
@@ -641,6 +645,10 @@ export function createApi<TRequests extends Record<string, Request<any, any>>>(
           own(operation, options.signal)
           const callerSignal: AbortSignal | undefined = operation
           let dedupeController: AbortController | undefined
+          // Under share, the last attempt's part in a round trip, for the
+          // backstop (Step 8): a call it settles at the endpoint's deadline
+          // after waiting on a shared request is that request's failure too.
+          let lastRound: SharedRound | undefined
 
           // -----------------------------------------------------------------
           // Step 3: Define the core fetch function
@@ -1061,6 +1069,7 @@ export function createApi<TRequests extends Record<string, Request<any, any>>>(
           const core: (ctx: MiddlewareContext) => Promise<Result<unknown>> = request.config.share === true
             ? async ctx => {
               const round: SharedRound = { joined: false }
+              lastRound = round
               // An error derived from the shared round trip carries one of its
               // tokens, so onError hears about one failed shared request once;
               // a Result that joined is marked for the logger (stampShared,
@@ -1165,14 +1174,30 @@ export function createApi<TRequests extends Record<string, Request<any, any>>>(
           // settling with the abort Result itself. See utils/backstop.ts for
           // why the grace period exists. `guard` stops a middleware that
           // resumes after that from sending a request nobody is waiting on.
-          // Under share nothing changes: a caller waiting on a shared round
-          // trip is waiting inside core(), on its own signal, like any other.
+          //
+          // Under share, a caller waiting on a shared round trip is waiting
+          // inside core(), on its own signal, like any other — but the Result
+          // the backstop builds goes through the same rule as one core built
+          // (stampPreempted, utils/share.ts). Without it, a hung shared
+          // request reported once per caller whenever a response-side
+          // middleware awaited a macrotask after next(): the backstop beat
+          // that middleware to every caller with an untagged timeout.
           // -----------------------------------------------------------------
           const backstop = createBackstop<Result<unknown>>(signal =>
-            buildFailedResult(signal.reason, signal, 'abort', context.request.url)
+            stampPreempted(
+              buildFailedResult(signal.reason, signal, 'abort', context.request.url),
+              lastRound,
+              signal,
+              endpointDeadline
+            )
           )
           backstop.watch(callerSignal)
           const composed = composeMiddleware(allMiddleware, backstop.guard(core), options.skipMiddleware ?? [])
+          // The client's `log`: the start line now, before any middleware
+          // runs, and the end line from the post-execution hook below — after
+          // the backstop, not inside it as a middleware would be, so a call
+          // the backstop settles still logs its end, at its deadline, once.
+          const logEnd = logger?.(context)
           // composeMiddleware has no guard of its own, and execute()'s try/catch
           // only covers the synchronous setup above — so an async middleware
           // that throws escapes as a rejection and breaks the library's one
@@ -1200,18 +1225,22 @@ export function createApi<TRequests extends Record<string, Request<any, any>>>(
           }
 
           // -----------------------------------------------------------------
-          // Step 9: Post-execution hooks (dedupe cleanup, release, onError)
+          // Step 9: Post-execution hooks (log end line, dedupe cleanup, release, onError)
           // -----------------------------------------------------------------
           // After the middleware chain completes (with any result) — or the
           // backstop settles on its behalf — we run this exactly once:
-          // a. Clear the dedupe tracker for this endpoint (if dedupe is enabled)
+          // a. Print the `log` end line, with the final Result
+          // b. Clear the dedupe tracker for this endpoint (if dedupe is enabled)
           //    so the next call starts fresh without aborting a completed request
-          // b. Release this run's merged signals (releaseAll above) — always,
+          // c. Release this run's merged signals (releaseAll above) — always,
           //    whether or not dedupe is on
-          // c. Fire the onError callback if the final result has an error
+          // d. Fire the onError callback if the final result has an error
           //    (only fires on final error — if retry middleware recovered, no fire)
           // -----------------------------------------------------------------
           return backstop.follow(resultPromise, (result, preempted) => {
+            // First, so the end line comes before anything onError prints.
+            logEnd?.(result)
+
             // Clean up dedupe tracking after the request completes.
             // This must happen before onError so that onError handlers can
             // immediately fire a new request without triggering a dedupe abort.
@@ -1258,9 +1287,14 @@ export function createApi<TRequests extends Record<string, Request<any, any>>>(
           }, (err: unknown) => {
             // Only reachable with a signal-shaped value whose `reason` throws —
             // a fake `CallOptions.signal` from plain JS — so the backstop could
-            // not build its Result. Never throws holds regardless.
+            // not build its Result. Never throws holds regardless. This is the
+            // call's final Result too, so it gets the end line (a no-op if the
+            // hook above printed one before something in it threw).
             releaseAll()
-            return failedResult(err, undefined, 'abort')
+            const result = buildFailedResult(err, undefined, 'abort')
+            logEnd?.(result)
+            fireOnError(result.error as ApiError)
+            return result
           })
         } catch (err) {
           // -----------------------------------------------------------------
