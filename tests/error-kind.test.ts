@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, afterEach } from 'vitest'
 import { createApi } from '../src/create-api.js'
 import { Request } from '../src/request.js'
+import type { Middleware } from '../src/types.js'
 import { abortKind } from '../src/utils/abort-kind.js'
 
 const api = (extra = {}) => createApi({
@@ -57,6 +58,18 @@ describe('ApiError.kind', () => {
     const second = client.g()
     expect((await first).error?.kind).toBe('abort')
     await second
+  })
+
+  it('is "middleware" with status 0 when a middleware throws', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('{}', { status: 200 })))
+    const boom: Middleware = async () => { throw new Error('boom') }
+    const client = createApi({
+      baseUrl: '', middleware: [boom],
+      requests: { g: new Request<Record<string, never>, unknown>({ method: 'GET', path: '/g' }) },
+    })
+    const r = await client.g()
+    expect(r.error?.kind).toBe('middleware')
+    expect(r.error?.status).toBe(0)
   })
 
   it('is "network" for a synchronous setup failure', async () => {

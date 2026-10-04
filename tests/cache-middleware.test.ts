@@ -738,3 +738,35 @@ describe('cacheMiddleware key: who asked, and where', () => {
     expect(fetchMock).toHaveBeenCalledTimes(2)
   })
 })
+
+describe('cacheMiddleware defaults (the README option table)', () => {
+  const setup = () => {
+    let calls = 0
+    vi.stubGlobal('fetch', async () => { calls++; return mockJsonResponse({}) })
+    const getUser = new Request<{ id: string }, unknown>({ method: 'GET', path: '/users/:id', middleware: [cacheMiddleware()] })
+    return { api: createApi({ baseUrl: '', requests: { getUser } }), calls: () => calls }
+  }
+
+  it('serves an entry for 5 minutes and not past it', async () => {
+    const now = vi.spyOn(Date, 'now')
+    const { api, calls } = setup()
+    now.mockReturnValue(0)
+    await api.getUser({ id: '1' })
+    now.mockReturnValue(5 * 60_000 - 1)
+    await api.getUser({ id: '1' })
+    expect(calls()).toBe(1)
+    now.mockReturnValue(5 * 60_000 + 1)
+    await api.getUser({ id: '1' })
+    expect(calls()).toBe(2)
+  })
+
+  it('keeps 50 entries and drops the oldest at the 51st', async () => {
+    const { api, calls } = setup()
+    for (let i = 0; i < 51; i++) await api.getUser({ id: String(i) })
+    expect(calls()).toBe(51)
+    await api.getUser({ id: '50' }) // newest, still cached
+    expect(calls()).toBe(51)
+    await api.getUser({ id: '0' }) // oldest, dropped
+    expect(calls()).toBe(52)
+  })
+})

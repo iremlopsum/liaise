@@ -232,3 +232,34 @@ describe('dedupe', () => {
     expect(second.error).toBeNull()
   })
 })
+
+describe('a middleware that replaces ctx.request.signal', () => {
+  it('still ends a caller-cancelled call as "abort", but fetch is not aborted by the caller', async () => {
+    const own = new AbortController()
+    let fetchSignal: AbortSignal | undefined
+    // Never settles on its own; rejects only if the signal fetch received aborts.
+    mockFetch.mockImplementation((_u: string, init: RequestInit) => new Promise((_res, rej) => {
+      fetchSignal = init.signal as AbortSignal
+      fetchSignal.addEventListener('abort', () => rej(fetchSignal!.reason))
+    }))
+    const replace = async (ctx: { request: { signal?: AbortSignal } }, next: () => Promise<unknown>) => {
+      ctx.request.signal = own.signal
+      return next()
+    }
+    const api = createApi({
+      baseUrl: '',
+      middleware: [replace as never],
+      requests: { g: new Request<Record<string, never>, unknown>({ method: 'GET', path: '/g' }) },
+    })
+    const caller = new AbortController()
+    const p = api.g({}, { signal: caller.signal })
+    await new Promise(r => setTimeout(r, 5))
+    caller.abort()
+    const r = await p
+    expect(r.error?.kind).toBe('abort')
+    // fetch received the middleware's signal, and the caller's cancel did not abort it
+    expect(fetchSignal).toBe(own.signal)
+    expect(fetchSignal!.aborted).toBe(false)
+    own.abort()
+  })
+})
