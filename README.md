@@ -19,6 +19,13 @@ Formerly published as `@iremlopsum/apify`; switching takes two steps, see [MIGRA
 - [The problem it solves](#the-problem-it-solves)
 - [Quick start](#quick-start)
 - [How it fits together](#how-it-fits-together)
+- [Guide](#guide)
+  - [Defining endpoints](#defining-endpoints)
+  - [Handling errors](#handling-errors)
+  - [Sending data](#sending-data)
+  - [Reading responses](#reading-responses)
+  - [Validating responses](#validating-responses)
+  - [Cancelling, deadlines and stale requests](#cancelling-deadlines-and-stale-requests)
 - [REST API](#rest-api)
 - [GraphQL Client](#graphql-client)
 - [Testing](#testing)
@@ -33,11 +40,11 @@ Formerly published as `@iremlopsum/apify`; switching takes two steps, see [MIGRA
 
 | With plain fetch | liaise | See |
 | ---------------- | ------ | --- |
-| Typing fast in a search box shows old results. A slow early search lands last. | `dedupe` cancels the older call. | [Stale requests](#quick-start) |
+| Typing fast in a search box shows old results. A slow early search lands last. | `dedupe` cancels the older call. | [Stale requests](#cancelling-deadlines-and-stale-requests) |
 | Five components load the same data, or five 401s each refresh the token. That's five identical requests. | `share` sends one and hands everyone the answer. | [Sharing requests](#quick-start) |
-| A 500 counts as success, offline throws, a hung server waits forever. | Every call returns `{ data, error }`. `error.kind` names the failure. | [Handling errors](#quick-start) |
-| Retries run straight past your timeout. | `timeout` covers the whole operation, retries included. | [Deadlines](#quick-start) |
-| The backend changes a field and the page crashes three components later. | A schema checks the response. A bad shape is an error you handle. | [Validating responses](#quick-start) |
+| A 500 counts as success, offline throws, a hung server waits forever. | Every call returns `{ data, error }`. `error.kind` names the failure. | [Handling errors](#handling-errors) |
+| Retries run straight past your timeout. | `timeout` covers the whole operation, retries included. | [Deadlines](#cancelling-deadlines-and-stale-requests) |
+| The backend changes a field and the page crashes three components later. | A schema checks the response. A bad shape is an error you handle. | [Validating responses](#validating-responses) |
 
 ### Before and after
 
@@ -73,7 +80,7 @@ async function submit(order: { items: string[] }) {
 
 `api.placeOrder` is an endpoint defined like the ones in [Quick start](#quick-start), with `timeout: 5000` so a hung server gives up after five seconds.
 
-The `switch` leaves out `'abort'`, because nothing here cancels a call, and `'middleware'`, which points at a bug in your own code ([all six kinds](#quick-start)).
+The `switch` leaves out `'abort'`, because nothing here cancels a call, and `'middleware'`, which points at a bug in your own code ([all six kinds](#handling-errors)).
 
 ### Why another API client?
 
@@ -128,7 +135,7 @@ if (error) {
 
 ### Next
 
-- [Handling errors](#quick-start)
+- [Handling errors](#handling-errors)
 - [Add an auth header and refresh the token on a 401](#quick-start)
 - [Use with TanStack Query](#quick-start)
 - [Use with React](#quick-start)
@@ -203,84 +210,470 @@ import type {
 } from 'liaise'
 ```
 
-## REST API
+## Guide
 
-### Request
+Each section starts with the problem it solves, then shows the smallest example, then lists the rules.
 
-Each API endpoint is represented by a `Request` instance. The class is a typed config container -- it stores the recipe for how an endpoint should be called, but does not execute anything on its own.
+### Defining endpoints
+
+You describe each endpoint once, with its method, its path, and the types of its params and response. Every call to it is then checked against that description.
 
 ```ts
-import { Request } from 'liaise'
+import { createApi, defineRequest } from 'liaise'
 
-const listItems = new Request<{ page: number; limit: number }, Item[]>({
+type Repo = { id: number; name: string }
+
+// The first type is the response. The second is the params the path doesn't name.
+const listRepos = defineRequest<Repo[], { page?: number }>()({
   method: 'GET',
-  path: '/items'
+  path: '/orgs/:org/repos',
+})
+
+const api = createApi({ baseUrl: 'https://api.example.com', requests: { listRepos } })
+
+await api.listRepos({ org: 'acme' })           // GET /orgs/acme/repos
+await api.listRepos({ org: 'acme', page: 2 })  // GET /orgs/acme/repos?page=2
+await api.listRepos({ page: 2 })               // ✗ compile error: org is required
+```
+
+- **The path names the required params.** Each `:name` in the path becomes a required param of type `string | number`. Its value is filled into the URL and left out of the query string and the body.
+- **Every other param goes in the second type argument.** For `GET` and `DELETE`, these params go in the query string. For `POST`, `PUT` and `PATCH`, they go in a JSON body. [Sending data](#sending-data) covers what each one can hold.
+- **`bodyAs` flips that default.** Use it for an API that does it the other way round:
+
+  ```ts
+  type Job = { id: string }
+
+  // A DELETE that takes a JSON body
+  const bulkDelete = defineRequest<{ deleted: number }, { ids: string[] }>()({
+    method: 'DELETE',
+    path: '/items',
+    bodyAs: 'body',
+  })
+
+  // A POST that sends its params in the query string
+  const triggerJob = defineRequest<Job, { priority: number }>()({
+    method: 'POST',
+    path: '/jobs/trigger',
+    bodyAs: 'query',
+  })
+  ```
+
+- **A path param must have a usable value.** It must be a non-empty string, a finite number, a bigint or a boolean. `undefined`, `null`, `''`, an object, an array, a `Date` and `NaN` are refused before anything is sent, with an error naming the param.
+- That catches the most common mistake: calling before an id has loaded. `getItem({ id: undefined })` returns an error instead of fetching `/items/undefined`.
+- **An endpoint with no params** is called with no arguments. With `defineRequest<{ status: string }>()({ method: 'GET', path: '/health' })`, both `api.health()` and `api.health({})` work.
+- **`responseType`** says how to read the response body. It defaults to `'json'`. The options are under [Reading responses](#reading-responses).
+- **`responseType: 'none'` needs the response type `undefined`.** Anything else is a compile error, because `data` is always `undefined` for an endpoint that sends no body:
+
+  ```ts
+  defineRequest<undefined>()({ method: 'POST', path: '/ping', responseType: 'none' })  // ✓
+  defineRequest<Repo>()({ method: 'POST', path: '/ping', responseType: 'none' })       // ✗
+  ```
+
+- **A `#` in the path is a compile error.** A URL fragment is never sent to the server, so `path: '/docs#section'` is refused where you write it. [URL fragments](#url-fragments) has the details.
+
+**Why two calls.** `defineRequest<Repo[]>()({ ... })` is two calls because TypeScript can't infer some type arguments while you write others. The first call takes the response type you write, and the second infers the params from the path. In a single call, writing the response type would quietly turn the path checking off.
+
+#### Without defineRequest
+
+`new Request<TParams, TResponse>(config)` is the class that `defineRequest` builds. You write the params type yourself, covering path, query and body params together, and nothing checks it against the path:
+
+```ts
+import { createApi, Request } from 'liaise'
+
+type User = { id: string; name: string }
+
+const getUser = new Request<{ userId: string }, User>({ method: 'GET', path: '/users/:id' })
+const api = createApi({ baseUrl: 'https://api.example.com', requests: { getUser } })
+
+await api.getUser({ userId: '42' })
+// Compiles. The call then returns an error, because the path has no :userId and :id is never filled in.
+```
+
+Use `new Request` when the config isn't a literal, for example when you build it at runtime, or when you don't want the path checked. It is not deprecated. For an endpoint with no params, write `Record<string, never>` as `TParams`.
+
+### Handling errors
+
+Plain fetch reports failures three different ways. A 500 resolves like a success, being offline throws, and a hung server never answers. In liaise every call returns `{ data, error }`, and `error.kind` names what went wrong.
+
+```ts
+import { createApi, defineRequest } from 'liaise'
+
+type User = { id: string; name: string }
+
+const getUser = defineRequest<User>()({ method: 'GET', path: '/users/:id', timeout: 5000 })
+const api = createApi({ baseUrl: 'https://api.example.com', requests: { getUser } })
+
+async function loadUser(id: string) {
+  const { data, error } = await api.getUser({ id })
+
+  if (error) {
+    switch (error.kind) {
+      case 'http':       // the server answered with a non-2xx status
+        if (error.status === 401) redirectToLogin()
+        else show(`The server said no (${error.status})`)
+        break
+      case 'network':    // no response arrived
+        show("You're offline. Try again.")
+        break
+      case 'timeout':    // the 5 second deadline passed
+        show('This is taking too long.')
+        break
+      case 'abort':      // you cancelled the call, so there is nothing to show
+        break
+      case 'parse':      // a 2xx body that didn't parse or failed the schema
+      case 'middleware': // your own middleware threw
+        report(error)
+        break
+    }
+    return
+  }
+
+  show(`Hello, ${data.name}`) // data is a User here
+}
+```
+
+`show`, `redirectToLogin` and `report` stand for your own code.
+
+| `kind` | What happened | `status` | What you usually do | Reported to `onError`? |
+| ------ | ------------- | -------- | ------------------- | ---------------------- |
+| `'http'` | The server answered with a non-2xx status. | The response's status | Handle it by status, or show it | Yes |
+| `'network'` | No response arrived, because you're offline or DNS or CORS failed. Params liaise refuses before sending also land here. | `0` | Show an offline message, or retry | Yes |
+| `'timeout'` | Your [`timeout`](#set-a-deadline-with-timeout) passed. | `0` | Say it's slow | Yes |
+| `'abort'` | The call was cancelled by your signal, or replaced by a newer [`dedupe`](#drop-stale-calls-with-dedupe) call. | `0` | Ignore it | **No** |
+| `'parse'` | A 2xx body didn't parse as its `responseType`, or failed your [schema](#validating-responses). | The response's status | Report it | Yes |
+| `'middleware'` | Your middleware threw. | `0` | Fix your code | Yes |
+
+- **Check `error` first.** After `if (error) return`, `data` has your response type, so you never write `data!`.
+- For an endpoint that sends no body, declare `responseType: 'none'`. Widening the type to `| null` doesn't work, because an empty body is a `'parse'` error. See [Reading responses](#reading-responses).
+- **Branch on `error.kind`.** Four kinds share `status: 0`, and each needs different handling.
+- **A non-2xx response is always `'http'`**, even when its body doesn't parse. liaise checks the status before it reads the body, so a 500 with broken JSON is still a 500.
+- **`response` is for the status and headers.** liaise has already read its body to produce `data` or `error.body`, so `response.json()` throws "Body has already been read". A `Response` you build yourself for `successResult()` in tests keeps its body.
+- Every field of `error` is listed under [`ApiError`](#apierror).
+
+#### Trying again with retry()
+
+Every `Result` carries `retry()`, which runs the same call again. It goes through all your middleware, so an auth header is set again and logging runs again:
+
+```ts
+const { error, retry } = await api.getUser({ id: '42' })
+
+if (error?.status === 401) {
+  await refreshToken()
+  const second = await retry() // a fresh call through every middleware
+}
+```
+
+#### Reporting errors with onError
+
+`onError` on `createApi` is one place to send every error to your tracker.
+
+```ts
+const api = createApi({
+  baseUrl: 'https://api.example.com',
+  requests: { getUser },
+  onError: (error) => logToTracker(error),
 })
 ```
 
-The two type parameters drive the entire type system:
+- It runs once per call, after all your middleware has finished. A call that a retry middleware rescues from a 500 never reaches it.
+- It isn't called for `'abort'`. A cancellation you asked for isn't a failure. A `'timeout'` is reported, because it's a deadline you missed.
+- It only watches. The caller gets the same `Result` either way.
 
-- `TParams` -- the shape of the params object the caller must provide (path params, query params, and body params combined).
-- `TResponse` -- the shape of the successful response data. This becomes the type of `result.data`.
+### Sending data
 
-When an endpoint takes no params, use `Record<string, never>` and the generated method will accept an optional (or omitted) params argument:
+You pass one params object, and liaise puts each field where it belongs: in the path, the query string or the body. You never build a URL by hand.
 
 ```ts
-const health = new Request<Record<string, never>, { status: string }>({
+import { createApi, defineRequest } from 'liaise'
+
+type Item = { id: string; name: string }
+
+const listItems = defineRequest<Item[], { page: number; tags: string[] }>()({
   method: 'GET',
-  path: '/health'
+  path: '/orgs/:org/items',
+})
+const createItem = defineRequest<Item, { name: string }>()({
+  method: 'POST',
+  path: '/orgs/:org/items',
 })
 
-// Both work:
-await api.health()
-await api.health({})
+const api = createApi({ baseUrl: 'https://api.example.com', requests: { listItems, createItem } })
+
+await api.listItems({ org: 'acme', page: 2, tags: ['a', 'b'] })
+// GET /orgs/acme/items?page=2&tags=a&tags=b
+
+await api.createItem({ org: 'acme', name: 'Lamp' })
+// POST /orgs/acme/items, with the JSON body {"name":"Lamp"}
 ```
 
-#### Path parameters
+Which params go in the query string and which in the body is set per endpoint, under [Defining endpoints](#defining-endpoints).
 
-Use `:param` syntax in the path. Matching keys from the params object are substituted into the URL and excluded from the query string or body:
+#### Query strings
+
+| Params | Query string |
+| ------ | ------------ |
+| `{ page: 1, limit: 20 }` | `?page=1&limit=20` |
+| `{ tags: ['a', 'b'] }` | `?tags=a&tags=b` |
+| `{ filter: null }` | _(left out)_ |
+| `{ filter: undefined }` | _(left out)_ |
+| `{ meta: { nested: true } }` | Refused |
+| `{ since: new Date() }` | Refused |
+
+- **Arrays** become repeated keys (`tags=a&tags=b`), the format most server frameworks read.
+- **`null` and `undefined`** are left out.
+- **A nested object is refused.** There is no standard way to put one in a query string (brackets, dots and JSON are all in use), so liaise doesn't guess. Flatten it first.
+- **A `Date` is refused too.** APIs expect ISO 8601 or epoch milliseconds, so convert it yourself with `date.toISOString()` or `date.getTime()`.
+- A refused param sends nothing. You get an error `Result` with `kind: 'network'` and a `TypeError` in `error.body` that names the param.
+
+#### Request bodies
+
+liaise serializes the body from what you pass, and sets `Content-Type` for you unless you set one yourself.
+
+| You pass | Body sent | Content-Type |
+| -------- | --------- | ------------ |
+| `null`/`undefined` | `null` | _(none)_ |
+| `string` | as-is | `text/plain` |
+| `FormData` | as-is | _(the browser sets the multipart boundary)_ |
+| `URLSearchParams` | as-is | `application/x-www-form-urlencoded` |
+| `Blob` | as-is | `application/octet-stream` |
+| `ArrayBuffer` | as-is | `application/octet-stream` |
+| Typed array, `DataView`, `Buffer` | as-is (sent as binary) | `application/octet-stream` |
+| `ReadableStream` | as-is (a streaming upload; `duplex: 'half'` is set for you) | `application/octet-stream` |
+| Plain object | `JSON.stringify()` | `application/json` |
+
+A `ReadableStream` body can be sent only once. A retry, from middleware or from `result.retry()`, returns an error telling you to read the stream into a `Blob` or `ArrayBuffer` first ([details](#stream-bodies)).
+
+#### What params can be
+
+| You pass | What happens |
+| -------- | ------------ |
+| Plain object | Split into path params, query string and body |
+| `Map` with string keys | Same as the object it spells |
+| Class instance with fields | Same as a plain object (split by those fields even if the class also defines `toJSON()`; `toJSON()` is used only when there are no own fields) |
+| Class instance with only `toJSON()` | Sent as its JSON (body only; refused on a request whose params go in the query string) |
+| Typed array, `DataView`, `Buffer`, `ReadableStream` | Sent as the body, as in the table above (refused on a request whose params go in the query string) |
+| `Set`, a bare `Date`, a `Map` with non-string keys, a class with no fields | Refused: an error `Result` (`kind: 'network'`) naming the type. Nothing is sent. |
+
+A `Map`, `Set` or class with private state nested inside a JSON body is sent as `{}`, because that is what `JSON.stringify` does. Convert it first.
+
+Headers, including your own `Content-Type`, follow the [three levels of settings](#three-levels-of-settings).
+
+### Reading responses
+
+A response can be JSON, text or a file. You say which with `responseType`, and liaise reads the body for you.
 
 ```ts
-const getItem = new Request<{ orgId: string; id: string }, Item>({
-  method: 'GET',
-  path: '/orgs/:orgId/items/:id'
+import { createApi, defineRequest } from 'liaise'
+
+type User = { id: string; name: string }
+
+// JSON is the default.
+const getUser = defineRequest<User>()({ method: 'GET', path: '/users/:id' })
+
+// A file comes back as a Blob.
+const downloadFile = defineRequest<Blob>()({ method: 'GET', path: '/files/:id', responseType: 'blob' })
+
+// A 204 No Content has no body, so data is undefined.
+const deleteUser = defineRequest<undefined>()({
+  method: 'DELETE',
+  path: '/users/:id',
+  responseType: 'none',
 })
 
-// Calls GET /orgs/acme/items/42
-await api.getItem({ orgId: 'acme', id: '42' })
-```
-
-A path parameter must be a non-empty string, a finite number, a bigint or a boolean. Anything else (`undefined`, `null`, `''`, an object, an array, a `Date`, `NaN`) is refused before the request is sent, with an error Result naming the parameter. This catches the common front-end mistake of calling before an id has loaded: `getItem({ orgId: 'acme', id: undefined })` returns an error instead of fetching `/orgs/acme/items/undefined`.
-
-#### `responseType`
-
-Controls how the response body is parsed. Defaults to `'json'`.
-
-```ts
-const downloadFile = new Request<{ id: string }, Blob>({
-  method: 'GET',
-  path: '/files/:id',
-  responseType: 'blob'
+const api = createApi({
+  baseUrl: 'https://api.example.com',
+  requests: { getUser, downloadFile, deleteUser },
 })
 ```
 
-See [Response parsing](#response-parsing) for all options.
+| `responseType` | How the body is read | `data` |
+| -------------- | -------------------- | ------ |
+| `'json'` (default) | `response.text()`, then `JSON.parse()` | the parsed value |
+| `'text'` | `response.text()` | `string` |
+| `'blob'` | `response.blob()` | `Blob` |
+| `'arrayBuffer'` | `response.arrayBuffer()` | `ArrayBuffer` |
+| `'formData'` | `response.formData()` | `FormData` |
+| `'none'` | not read (the stream is cancelled) | `undefined` |
 
-#### `dedupe`
+- **An empty body under `'json'` is a `'parse'` error.** You declared JSON and the server sent none, so no value could honestly match your type. The error has the response's own status (a 204 reports 204), the `response`, and `''` in `error.body`.
+- **A literal `null` body is not empty.** It is valid JSON, so the call succeeds with `data: null`.
+- **`'none'` is for an endpoint that sends no body on success**, such as a `DELETE` that answers 204, or 200 with an empty body. liaise reads nothing, `data` is `undefined`, and a body the server sends anyway is discarded. Its stream is cancelled, which frees the connection.
+- **Declare `'none'` with the response type `undefined`.** `defineRequest` enforces this ([Defining endpoints](#defining-endpoints)). With `new Request` it is only a convention, and `data` is `undefined` at runtime whatever type you wrote.
+- **A non-2xx body is still read into `error.body`**, because an error body usually explains what went wrong. Under `'none'` it is read as JSON, and `error.body` is `null` when it isn't JSON:
 
-When `true`, firing a new call to this endpoint auto-cancels any previous in-flight call. Useful for search-as-you-type or rapidly changing filters:
+  ```ts
+  const { error } = await api.deleteUser({ id: '42' })
+  if (error) {
+    // A 409 { "error": "already deleted" } lands in error.body,
+    // even though deleteUser declares responseType: 'none'.
+    console.error(error.status, error.body)
+  }
+  ```
+
+### Validating responses
+
+TypeScript trusts the type you write, and nothing checks it at runtime. When the backend changes a field, the page crashes three components later. Give the endpoint a schema, and the response is checked before you see it.
 
 ```ts
-const searchUsers = new Request<{ q: string }, User[]>({
+import { createApi, defineRequest } from 'liaise'
+import { z } from 'zod'
+
+const getUser = defineRequest()({
+  method: 'GET',
+  path: '/users/:id',
+  schema: z.object({ id: z.string(), name: z.string() }),
+})
+
+const api = createApi({ baseUrl: 'https://api.example.com', requests: { getUser } })
+
+const { data, error } = await api.getUser({ id: '42' })
+//      ^? { id: string; name: string } | null
+```
+
+Valibot and ArkType work the same way:
+
+```ts
+import * as v from 'valibot'
+import { type } from 'arktype'
+
+const withValibot = defineRequest()({
+  method: 'GET',
+  path: '/users/:id',
+  schema: v.object({ id: v.string(), name: v.string() }),
+})
+
+const withArkType = defineRequest()({
+  method: 'GET',
+  path: '/users/:id',
+  schema: type({ id: 'string', name: 'string' }),
+})
+```
+
+- **Any [Standard Schema](https://standardschema.dev) validator works.** liaise doesn't depend on any of them. Standard Schema is only an interface, so you bring the validator you already use.
+- **The schema supplies the response type.** You write no type argument, so there's no second type to keep in sync.
+- **`data` is the schema's output.** A schema that transforms changes what you receive, so `data` can differ from the raw response:
+
+  ```ts
+  const getUser = defineRequest()({
+    method: 'GET',
+    path: '/users/:id',
+    schema: z.object({
+      id: z.string(),
+      createdAt: z.coerce.date(),        // the wire sends a string
+      role: z.string().default('user'),  // absent on the wire
+    }),
+  })
+
+  const { data } = await api.getUser({ id: '42' })
+  data.createdAt   // a real Date
+  data.role        // 'user' when the server left it out
+  ```
+
+- **A response the schema refuses is a `'parse'` error.** Nothing is thrown. `error.body` holds the validator's issues, and `error.status` is the response's own status, since the server answered fine:
+
+  ```ts
+  const { error } = await api.getUser({ id: '42' })
+  if (error?.kind === 'parse') {
+    console.error(error.body)  // the validator's issues
+  }
+  ```
+
+- A validator that throws is a `'parse'` error too, with the thrown value in `error.body`.
+- **Only a 2xx body is validated.** A non-2xx body is diagnostic and often a different shape, so it is left alone.
+- **The GraphQL `Operation` takes `schema` too**, and validates the response's `data`. There the response type stays explicit, because only `defineRequest` infers it:
+
+  ```ts
+  import { Operation, gql } from 'liaise'
+
+  const UserSchema = z.object({ id: z.string(), name: z.string() })
+
+  const me = new Operation<Record<string, never>, z.infer<typeof UserSchema>>({
+    operation: gql`query { me { id name } }`,
+    schema: UserSchema,
+  })
+  ```
+
+### Cancelling, deadlines and stale requests
+
+Sometimes you no longer need a call, because the user left the page or typed a newer search. Sometimes a call takes too long. You can end a call with a signal, a deadline, or `dedupe`, and each one ends it with an error you can tell apart.
+
+#### Cancel with a signal
+
+Pass an `AbortSignal` in the call options:
+
+```ts
+import { createApi, defineRequest } from 'liaise'
+
+type User = { id: string; name: string }
+
+const getUser = defineRequest<User>()({ method: 'GET', path: '/users/:id' })
+const api = createApi({ baseUrl: 'https://api.example.com', requests: { getUser } })
+
+const controller = new AbortController()
+const pending = api.getUser({ id: '42' }, { signal: controller.signal })
+
+controller.abort()
+
+const { error } = await pending
+// error.kind === 'abort', error.status === 0, error.body is a DOMException named 'AbortError'
+```
+
+A cancellation you asked for isn't reported to [`onError`](#reporting-errors-with-onerror). How liaise tells your cancellation apart from other failures is under [Abort classification](#abort-classification).
+
+#### Set a deadline with timeout
+
+`timeout` is in milliseconds, and you set it on the endpoint or on one call:
+
+```ts
+import { retryMiddleware } from 'liaise/middleware'
+
+type Report = { total: number }
+
+const getReport = defineRequest<Report>()({ method: 'GET', path: '/report', timeout: 3000 })
+
+const api = createApi({
+  baseUrl: 'https://api.example.com',
+  requests: { getReport },
+  middleware: [retryMiddleware(3)],
+})
+
+const { error } = await api.getReport()
+// After 3 seconds, however many retries are left: error.kind === 'timeout', error.status === 0
+```
+
+- **`timeout` is one deadline for the whole call.** It covers every middleware, every retry and every wait between retries. `timeout: 3000` with three retries still answers within three seconds.
+- **A call's `timeout` replaces the endpoint's.** `timeout: 0` on a call turns the endpoint's deadline off. Zero, a negative number or no `timeout` at all means no deadline, which is the default.
+- **`result.retry()` starts a fresh deadline.** The retried call isn't charged for time the first one used.
+- If you want a separate limit for each attempt instead, see [Per-attempt timeout](#per-attempt-timeout).
+- Under [`share`](#sharing), the endpoint's `timeout` belongs to the one shared request, and a caller can't extend it.
+
+#### Drop stale calls with dedupe
+
+`dedupe: true` makes each new call to an endpoint cancel the one still running. Use it for search-as-you-type and fast-changing filters, where only the latest answer matters:
+
+```ts
+const searchUsers = defineRequest<User[], { q: string }>()({
   method: 'GET',
   path: '/users/search',
-  dedupe: true
+  dedupe: true,
 })
 
-// If a second call starts before the first finishes, the first is aborted
-await api.searchUsers({ q: 'hel' })
-await api.searchUsers({ q: 'hello' }) // previous call is auto-cancelled
+const api = createApi({ baseUrl: 'https://api.example.com', requests: { searchUsers } })
+
+// Typing fast: each call cancels the one before it.
+api.searchUsers({ q: 'h' })    // ends with kind 'abort'
+api.searchUsers({ q: 'he' })   // ends with kind 'abort'
+api.searchUsers({ q: 'hel' })  // this one completes
 ```
+
+- **It works per endpoint.** A call to one endpoint never cancels a call to another.
+- **A replaced call ends with `kind: 'abort'`**, so your code can ignore it, and it isn't reported to `onError`.
+- **It works together with your own signal and a `timeout`.** Whichever fires first ends the call.
+- It can't be combined with [`share`](#sharing), which does the opposite.
+
+All three still end the call when a middleware is stuck on work of its own that ignores the signal, such as a token refresh that never settles. [Timeout backstop](#timeout-backstop) explains how.
+
+## REST API
 
 #### `share`
 
@@ -299,151 +692,6 @@ await Promise.all([
   api.getProduct({ id: '42' })
 ])
 ```
-
-#### `bodyAs`
-
-Overrides the default body serialization strategy. By default, GET/DELETE serialize params as query strings and POST/PUT/PATCH serialize params as a JSON body. Use `bodyAs` to invert that:
-
-```ts
-// DELETE endpoint that expects a JSON body
-const bulkDelete = new Request<{ ids: string[] }, { deleted: number }>({
-  method: 'DELETE',
-  path: '/items',
-  bodyAs: 'body'
-})
-
-// POST endpoint that sends params as query string
-const triggerJob = new Request<{ priority: number }, Job>({
-  method: 'POST',
-  path: '/jobs/trigger',
-  bodyAs: 'query'
-})
-```
-
-### `defineRequest`
-
-`new Request<TParams, TResponse>` makes you restate what the path already says,
-and nothing checks the two against each other:
-
-```ts
-// The params are restated by hand, and nothing checks them against the path:
-const getUser = new Request<{ userId: string }, User>({ method: 'GET', path: '/users/:id' })
-
-api.getUser({ userId: '42' })  // compiles — then fails at runtime: buildUrl finds
-                               // no `:userId` to substitute, `:id` survives, and
-                               // the unresolved-token check throws
-```
-
-`defineRequest` infers the params from the path literal instead:
-
-```ts
-import { defineRequest } from 'liaise'
-
-const getUser = defineRequest<User>()({ method: 'GET', path: '/users/:id' })
-
-api.getUser({ id: '42' })      // ✓
-api.getUser({ id: 42 })        // ✓ — numbers are encoded
-api.getUser({ userId: '42' })  // ✗ Object literal may only specify known properties
-```
-
-Params the path does not name — query or body fields — go in the second type
-argument:
-
-```ts
-const listRepos = defineRequest<Repo[], { page?: number }>()({
-  method: 'GET',
-  path: '/orgs/:org/repos',
-})
-
-api.listRepos({ org: 'acme' })            // ✓ page is optional
-api.listRepos({ org: 'acme', page: 2 })   // ✓
-api.listRepos({ page: 2 })                // ✗ org is required
-```
-
-It also enforces the `responseType: 'none'` convention that `new Request` can
-only document:
-
-```ts
-defineRequest<undefined>()({ method: 'POST', path: '/ping', responseType: 'none' })  // ✓
-defineRequest<User>()({ method: 'POST', path: '/ping', responseType: 'none' })       // ✗
-```
-
-**Why two calls.** TypeScript has no partial type-argument inference: if the response
-type and the config were arguments to one call, supplying the response type explicitly
-would stop the path from being inferred, and the checking would quietly do nothing.
-Splitting them keeps the response type explicit and the path inferred. Calling it
-wrong is a compile error, not a silent one.
-
-`new Request(...)` is unchanged and not deprecated — use it when the config is
-not a literal, or when you do not want the path checked.
-
-### Response validation
-
-Pass any [Standard Schema](https://standardschema.dev) validator — Zod, Valibot,
-ArkType — and the response is checked before you see it. liaise takes no
-dependency on one; Standard Schema is an interface, not a package.
-
-```ts
-import { z } from 'zod'
-
-const getUser = defineRequest()({
-  method: 'GET',
-  path: '/users/:id',
-  schema: z.object({ id: z.string(), name: z.string() }),
-})
-
-const { data, error } = await api.getUser({ id: '42' })
-//      ^? { id: string; name: string } | null
-```
-
-The schema supplies the response type, so there is no type argument to write —
-and no second place for it to drift out of date.
-
-**`data` is the schema's output.** A schema that transforms changes what you
-receive:
-
-```ts
-const getUser = defineRequest()({
-  method: 'GET',
-  path: '/users/:id',
-  schema: z.object({
-    id: z.string(),
-    createdAt: z.coerce.date(),        // the wire sends a string
-    role: z.string().default('user'),  // absent on the wire
-  }),
-})
-
-const { data } = await api.getUser({ id: '42' })
-data.createdAt   // a real Date
-data.role        // 'user' when the server omitted it
-```
-
-That is the point of validating through a schema rather than merely checking
-one — but it does mean `data` is no longer byte-identical to the response.
-
-A response the schema refuses is an error `Result`, never a throw:
-
-```ts
-const { error } = await api.getUser({ id: '42' })
-if (error?.kind === 'parse') {
-  console.error(error.body)  // the validator's issues
-  error.status               // the response's own status — the server was fine
-}
-```
-
-Only the **success** body is validated. A non-2xx body is diagnostic and often a
-different shape, so it is left alone.
-
-Schemas work on the GraphQL client too, validating the response's `data`:
-
-```ts
-const me = new Operation<{}, User>({
-  operation: gql`query { me { id name } }`,
-  schema: UserSchema,
-})
-```
-
-There the response type stays explicit — only `defineRequest` infers it.
 
 ### Pagination
 
@@ -496,207 +744,6 @@ to every request, so one signal cancels the whole crawl.
 
 `paginate` yields pages, not items. Flattening would mean deciding which field
 holds the array, which is the convention-guessing `next` exists to avoid.
-
-### Query strings
-
-For GET and DELETE requests (or any request with `bodyAs: 'query'`), params that are not consumed by path substitution are serialized as a query string using `URLSearchParams`.
-
-A `baseUrl` may carry its own query string — a fixed API key, say. Its params
-are merged ahead of the call's:
-
-```ts
-const api = createApi({
-  baseUrl: 'https://api.example.com/v1?key=abc',
-  requests: { search: new Request<{ q: string }, Hit[]>({ method: 'GET', path: '/search' }) },
-})
-
-await api.search({ q: 'hello' })
-// GET https://api.example.com/v1/search?key=abc&q=hello
-```
-
-Merging **accumulates**, it does not override: a call param whose key the base
-already used produces both, `?key=abc&key=xyz`, and which one wins is the
-server's decision. This differs from headers, where a per-call value replaces a
-global one — because array params already serialize as repeated keys
-(`tags=a&tags=b`), so collapsing duplicates would break them. If a base-level
-param needs to vary per call, set it from middleware rather than the `baseUrl`.
-
-**A `#fragment` is refused.** A fragment is never sent to the server, so one in
-a `path` or `baseUrl` cannot do what it appears to — and before 4.2.1 it
-silently discarded the query string. It is now an error naming the offending
-value, rather than being stripped, so the dead code does not stay in your
-template.
-
-Since 4.4.0 a fragment in a [`defineRequest`](#definerequest) `path` **literal**
-is also a compile error, so the endpoint is rejected where it is declared rather
-than on every call:
-
-```ts
-defineRequest<Doc>()({ method: 'GET', path: '/docs#section' })
-//                                          ^ Property '__fragmentInPath' is missing:
-//                                            a URL fragment is never sent to the server
-```
-
-The check reads the literal, so a path assembled at runtime — or a
-`RequestConfig`-typed variable — still compiles and is caught by the runtime
-error instead. `new Request` takes no path literal, so it has no equivalent
-check; this is one of the things `defineRequest` buys you.
-
-**A `#` inside a param *value* is not a fragment** and is never refused — it is
-escaped to `%23` and sent as ordinary data:
-
-```ts
-await api.getDoc({ id: 'a#b' })   // → GET /docs/a%23b
-await api.search({ tag: 'a#b' })  // → GET /search?tag=a%23b
-```
-
-Only a `#` written into a `path` or `baseUrl` is refused, because that one was
-never going to reach the server.
-
-| Input                          | Output                      |
-| ------------------------------ | --------------------------- |
-| `{ page: 1, limit: 20 }`      | `?page=1&limit=20`          |
-| `{ tags: ['a', 'b'] }`        | `?tags=a&tags=b`            |
-| `{ filter: null }`            | _(omitted)_                 |
-| `{ filter: undefined }`       | _(omitted)_                 |
-| `{ meta: { nested: true } }`  | **TypeError** (see below)   |
-| `{ since: new Date() }`       | **TypeError**: convert it first (`toISOString()` or `getTime()`) |
-
-**Arrays** use repeated keys (`tags=a&tags=b`), which is the most widely supported format across server frameworks.
-
-**`null` and `undefined`** values are silently omitted from the query string.
-
-**Nested objects** throw a `TypeError` with a descriptive message. Flatten the structure before passing. This is intentional -- there is no universal standard for serializing nested objects in query strings (brackets, dots, JSON), so the library refuses to guess.
-
-**A `Date`** is refused too, with a message that names it. ISO 8601 and epoch milliseconds are both common on real APIs, so convert it yourself: `since: date.toISOString()` or `since: date.getTime()`.
-
-### Result
-
-Every API call returns a `Result<TResponse>` instead of throwing. It's a discriminated union on `error`, not a plain interface:
-
-```ts
-interface SuccessResult<TResponse> {
-  data: TResponse                          // parsed response
-  error: null
-  response: Response                       // always present on success
-  retry: () => Promise<Result<TResponse>>
-}
-
-interface ErrorResult<TResponse> {
-  data: null
-  error: ApiError                          // structured error, see below
-  response: Response | null                // present for HTTP/parse failures, null for network/abort/timeout
-  retry: () => Promise<Result<TResponse>>
-}
-
-type Result<TResponse> = SuccessResult<TResponse> | ErrorResult<TResponse>
-```
-
-Check `error` first, then use `data` with confidence: `if (error) return` (or any other narrowing check on `error`) narrows `data` to `TResponse` for the rest of the function -- no `data!` assertion needed. That narrowing is only as accurate as `TResponse` itself, though: an endpoint that answers `204` or an empty `200` (a `DELETE`, most commonly) doesn't return a body at all -- declare it with `responseType: 'none'` and `TResponse` of `undefined`, rather than widening `TResponse` to `| null`, which since 4.0.0 does not work
-at all -- an empty body under `'json'` is a `'parse'` error -- see [Response parsing](#response-parsing) below. Branch on `error.kind` rather than `error.status` — `'network'`, `'abort'` and `'timeout'` all carry `status: 0`, but they call for different handling:
-
-```ts
-const { data, error, response, retry } = await api.getUser({ id: '42' })
-
-if (error) {
-  switch (error.kind) {
-    case 'network':
-      // fetch itself failed -- user is probably offline
-      break
-    case 'timeout':
-      // the whole-operation deadline fired; report it
-      reportTimeout(error)
-      break
-    case 'abort':
-      // this call was cancelled (dedupe supersede, or your own signal) -- usually ignore it
-      break
-    case 'parse':
-      // a 2xx response arrived but its body didn't parse as `responseType`
-      console.error('unparseable response', error.status, error.body)
-      break
-    case 'middleware':
-      // a middleware threw -- a bug in your own pipeline, not a transient failure
-      console.error('middleware threw', error.body)
-      break
-    case 'http':
-      if (error.status === 401) redirectToLogin()
-      else console.error(error.status, error.body)
-      break
-  }
-  return
-}
-
-// error is null here, so `data` is narrowed to `User` -- no assertion needed
-// (this assumes getUser always answers with a body; an endpoint that
-// doesn't -- a DELETE returning 204, most commonly -- should use
-// responseType: 'none' instead, see the empty-body note above)
-console.log(data.name)
-```
-
-`response`'s body has already been consumed by the time you see it -- the library reads it to produce `data` (or `error.body`), so calling `response.json()` yourself throws "Body has already been read". Use `data`/`error.body`; `response` is for status, headers, and redirect metadata. (This applies only to results the library produces itself -- a `Response` you construct for `successResult()` in `testing.ts` still has a readable body.)
-
-#### `retry()`
-
-The `retry` function re-executes the exact same request through the full middleware chain. Auth tokens are re-injected, logging fires again, everything runs fresh. This is useful for retry-after-refresh patterns:
-
-```ts
-const { data, error, retry } = await api.getUser({ id: '42' })
-
-if (error?.status === 401) {
-  await refreshToken()
-  const retried = await retry()
-  // retried goes through the full middleware chain again
-}
-```
-
-#### `ApiError`
-
-The error object on failed calls. It is not a subclass of `Error` -- it is a structured container for API-level error details.
-
-| Property     | Type      | Description                                                       |
-| ------------ | --------- | ----------------------------------------------------------------- |
-| `status`     | `number`  | HTTP status code (e.g., 404, 500). `0` for network errors, aborts, and timeouts. |
-| `kind`       | `'http' \| 'network' \| 'abort' \| 'timeout' \| 'parse' \| 'middleware'` | What category of failure this is. See below. Required -- constructing an `ApiError` yourself (e.g. in custom middleware) must supply it. |
-| `statusText` | `string`  | HTTP status text (e.g., 'Not Found'). `''` for network errors.    |
-| `body`       | `unknown` | Parsed response body -- but for `'parse'`, one of: the thrown exception (a malformed body), the raw response text (an empty body, or a GraphQL response carrying no data), a schema's issues array (the response failed validation), or a value a schema threw. The native Error for network failures. |
-| `headers`    | `Headers` | Response headers. Empty `Headers` for network errors.             |
-| `request`    | `object`  | `{ method, url, params }` -- metadata about the failed request; `url` is the resolved, path-substituted address, falling back to the route template only when it could not be built. |
-| `partialData` | `unknown` (optional) | GraphQL data returned alongside `{ errors }` (partial success). Lives here, not on `Result.data`, so the `Result` stays a clean union: `data` is non-null iff `error` is null. `undefined` for every REST error and for GraphQL responses carrying no data. |
-
-`kind` exists because `status` alone cannot tell some outcomes apart: an HTTP error (`'http'`), a `fetch` failure with no response (`'network'`), a cancellation — your own signal, a dedupe supersede, or a whole-operation deadline firing — (`'abort'`/`'timeout'`), a 2xx (or non-2xx) body that failed to parse (`'parse'`), and a middleware that threw instead of the request itself failing (`'middleware'`) all need different handling, but `'network'`, `'abort'`, and `'timeout'` all carry `status: 0`.
-
-`'parse'` is for a **2xx** response that arrived but whose body failed to parse according to `responseType` -- you get the real `status`, a non-null `response`, and `kind: 'parse'`. A **non-2xx** response with an unparseable body is unaffected and still reports `kind: 'http'` -- the status code is checked before the body is parsed, so a 500 with a broken JSON body is still a 500, and `retryMiddleware`'s default 5xx retry still applies to it. An **empty** body under `'json'` is also `'parse'` -- see [Response
-parsing](#response-parsing). GraphQL applies the same rule to a 2xx response
-carrying neither `data` nor `errors`. An optional [`schema`](#response-validation) on the request adds two more `'parse'` producers: a **2xx** body the schema refuses (`error.body` is its issues array) and a validator that throws (`error.body` is the thrown value) -- both only for the success body, never for a non-2xx one, which is never validated.
-
-`'middleware'` means a middleware threw rather than the request itself failing -- a bug in your own pipeline you'd fix, not a transient failure you'd retry. A middleware that propagates the library's own abort/timeout signal (verbatim, or wrapped one level as `.cause`) is classified `'abort'`/`'timeout'` instead, by provenance rather than by the reason's name -- see [Cancellation](#cancellation).
-
-You can use `instanceof` to check if a value is an `ApiError`:
-
-```ts
-import { ApiError } from 'liaise'
-
-if (error instanceof ApiError) {
-  // ...
-}
-```
-
-### Error handling with `onError`
-
-The `onError` callback in `createApi` fires after the full middleware chain completes whenever the final result has an error. If a retry middleware recovers a 5xx to a 200, `onError` does not fire.
-
-```ts
-const api = createApi({
-  baseUrl: '/api',
-  requests: { getUser, createUser },
-  onError: (error) => {
-    if (error.status === 401) redirectToLogin()
-    Sentry.captureException(error)
-  }
-})
-```
-
-This fires for `kind: 'http'`, `'network'`, `'timeout'`, `'parse'`, and `'middleware'`. **It does not fire for `kind: 'abort'`** — a cancellation the library caused deliberately (your own `AbortSignal` firing, or a request superseded by `dedupe`) is not a failure worth reporting to an error tracker, unlike a `'timeout'`, which is a deadline you actually missed. The caller still gets the abort back in the `Result` either way; only the report to this callback is suppressed. It is a global hook for side effects (logging, telemetry, redirects) -- it does not change the result returned to the caller.
 
 ### Middleware
 
@@ -808,7 +855,7 @@ const api = createApi({
 
 Under `dedupe: true` your signal is merged rather than discarded: the request is cancelled by whichever fires first -- your signal, or a newer call superseding this one. The dedupe signal is installed by the core fetch, so middleware reading `ctx.request.signal` before `next()` sees the caller's signal, not the dedupe one.
 
-**Pass `ctx.request.signal` on to any async work your middleware does itself** -- a token refresh, a lookup, a queue. The library will not wait for that work past the call's deadline or the caller's abort either way (see [Timeout](#timeout)), but a promise cannot be cancelled from outside: handing it the signal is the only thing that actually *stops* the work, instead of leaving it running in the background with its result discarded.
+**Pass `ctx.request.signal` on to any async work your middleware does itself** -- a token refresh, a lookup, a queue. The library will not wait for that work past the call's deadline or the caller's abort either way (see [Timeout backstop](#timeout-backstop)), but a promise cannot be cancelled from outside: handing it the signal is the only thing that actually *stops* the work, instead of leaving it running in the background with its result discarded.
 
 #### Writing custom middleware
 
@@ -982,204 +1029,6 @@ const { data } = await api.getUser({ id: '42' }, { skipMiddleware: [getUserCache
 
 Options: `ttl` (milliseconds, default 5 min), `maxSize` (max entries, default 50), `debug` (log hits/misses to console, default false). Only successful results are cached — errors always hit the network again.
 
-### Content types
-
-Request bodies are automatically serialized based on the input type. The `Content-Type` header is set for you unless you explicitly provide one.
-
-| Input type        | Body output        | Content-Type                          |
-| ----------------- | ------------------ | ------------------------------------- |
-| `null`/`undefined` | `null`             | _(none)_                              |
-| `string`          | as-is              | `text/plain`                          |
-| `FormData`        | as-is              | _(browser sets multipart boundary)_   |
-| `URLSearchParams` | as-is              | `application/x-www-form-urlencoded`   |
-| `Blob`            | as-is              | `application/octet-stream`            |
-| `ArrayBuffer`     | as-is              | `application/octet-stream`            |
-| Typed array, `DataView`, `Buffer` | as-is (sent as binary) | `application/octet-stream` |
-| `ReadableStream`  | as-is (streaming upload; `duplex: 'half'` is set for you) | `application/octet-stream` |
-| Plain object      | `JSON.stringify()` | `application/json`                    |
-
-A `ReadableStream` body can be sent once. A retry (`retryMiddleware`, `result.retry()`) returns an error Result telling you to read the stream into a `Blob` or `ArrayBuffer` first. Under `retryMiddleware` that is the Result you end up with: after a 5xx, the final Result is the "cannot resend" `TypeError` (status 0), so the original 503 is not in it.
-
-#### What params can be
-
-| You pass | What happens |
-| -------- | ------------ |
-| Plain object | Decomposed into path tokens, query string and body |
-| `Map` with string keys | Same as the object it spells |
-| Class instance with fields | Same as a plain object (decomposed by those fields even if the class also defines `toJSON()`; `toJSON()` is used only when there are no own fields) |
-| Class instance with only `toJSON()` | Sent as its JSON (body only; refused on a request whose params go in the query string) |
-| Typed array, `DataView`, `Buffer`, `ReadableStream` | Sent as the body, as in the table above (refused on a request whose params go in the query string) |
-| `Set`, a bare `Date`, a `Map` with non-string keys, a class with no fields | Refused: an error Result (`kind: 'network'`) naming the type. Nothing is sent. |
-
-A `Map`, `Set` or class with private state nested inside a JSON body is sent as `{}`, because that is what `JSON.stringify` does. Convert it first.
-
-Headers you set yourself, including `Content-Type`, follow the [three levels of settings](#three-levels-of-settings).
-
-### Response parsing
-
-The `responseType` option on a `Request` determines how the response body is parsed:
-
-| `responseType`  | Method called          | Return type    |
-| --------------- | ---------------------- | -------------- |
-| `'json'`        | `response.text()` then `JSON.parse()` | parsed object  |
-| `'text'`        | `response.text()`      | `string`       |
-| `'blob'`        | `response.blob()`      | `Blob`         |
-| `'arrayBuffer'` | `response.arrayBuffer()` | `ArrayBuffer` |
-| `'formData'`    | `response.formData()`  | `FormData`     |
-| `'none'`        | *(not read -- stream cancelled)* | `undefined` |
-
-The default is `'json'`. An **empty body under `'json'` is an error**, not a
-`null`: you declared JSON and the server sent none, so there is no value that
-could honestly satisfy `TResponse`. You get `kind: 'parse'` with the
-response's own status (a `204` reports `204`), a non-null `response`, and the
-raw body text -- always `''` for this case -- in `error.body`:
-
-```ts
-const { data, error } = await api.deleteUser({ id: '42' })
-// 204 No Content, responseType left at the 'json' default:
-// error.kind === 'parse', error.status === 204, data === null
-```
-
-A literal `null` body is **not** empty -- `JSON.parse("null")` is valid JSON,
-and that response still succeeds with `data: null`.
-
-**`responseType: 'none'`** is the declaration for an endpoint that returns no
-body on success -- a `204`, or a `200` with an empty body, most commonly a
-`DELETE`:
-
-```ts
-const deleteUser = new Request<{ id: string }, undefined>({
-  method: 'DELETE',
-  path: '/users/:id',
-  responseType: 'none',
-})
-```
-
-No body is read on a successful (2xx) response: `data` is `undefined`, and any body the server sends anyway is discarded -- its stream is cancelled, so a keep-alive connection is released rather than held open by an unread body. Declare `TResponse` as `undefined` when using `responseType: 'none'` -- but this is a convention, not a compile-time guarantee: `new Request<{ id: string }, User>({ responseType: 'none' })` compiles clean, and if the two disagree, `data` is `undefined` at runtime behind whatever type you declared.
-
-`'none'` only describes the **success** shape. A non-2xx response is still read and parsed as JSON for `error.body` -- an error body is diagnostic (a message, a code) and worth reading even when the caller wants nothing back on success:
-
-```ts
-const { error } = await api.deleteUser({ id: '42' })
-if (error) {
-  // A 409 { "error": "already deleted" } still lands in error.body here,
-  // even though deleteUser declares responseType: 'none'.
-  console.error(error.status, error.body)
-}
-```
-
-(3.0.0's advice for this case was to widen the endpoint's `TResponse` to
-`| null`. That advice is superseded: `responseType: 'none'` declares "no body"
-rather than "body or null", and since 4.0.0 the `| null` workaround no longer
-works at all -- the empty body is an error before `TResponse` is ever
-consulted. See [MIGRATION.md](./MIGRATION.md#upgrading-to-400).)
-
-### Cancellation
-
-#### Manual abort via `AbortSignal`
-
-Pass an `AbortSignal` through `CallOptions` to cancel a request:
-
-```ts
-const controller = new AbortController()
-
-const promise = api.getItems({ page: 1 }, {
-  signal: controller.signal
-})
-
-// Cancel the request
-controller.abort()
-
-const { error } = await promise
-// error.status === 0, error.kind === 'abort', error.body is a DOMException with name 'AbortError'
-```
-
-A cancellation you caused yourself is not reported to `onError` (`kind: 'abort'` is the one kind that's suppressed there) -- see [Error handling with `onError`](#error-handling-with-onerror). It is classified by **provenance**, not by sniffing the thrown value's shape: whatever a middleware or `fetch` actually throws, if it happened because *this request's own signal* aborted, the `Result` is `kind: 'abort'` (or `'timeout'` for a deadline) regardless of the reason's name or type -- a caller-supplied custom abort reason (`controller.abort(new Error('unmounted'))`, or a plain string) still classifies as `'abort'`, not `'network'`.
-
-Aborting settles the call even while a middleware is still awaiting work of its own that ignores the signal -- the same backstop that bounds `timeout`, described under [Timeout](#timeout).
-
-#### Auto-cancel via `dedupe`
-
-When a `Request` has `dedupe: true`, each new call automatically aborts the previous in-flight call for that endpoint. Identity is per `Request` instance -- different endpoints do not interfere with each other.
-
-```ts
-const searchUsers = new Request<{ q: string }, User[]>({
-  method: 'GET',
-  path: '/users/search',
-  dedupe: true
-})
-
-const api = createApi({
-  baseUrl: '/api',
-  requests: { searchUsers }
-})
-
-// Rapid calls -- only the last one completes
-api.searchUsers({ q: 'h' })    // aborted by next call
-api.searchUsers({ q: 'he' })   // aborted by next call
-api.searchUsers({ q: 'hel' })  // this one completes
-```
-
-Dedupe and manual abort signals work together. If both are active, the request is cancelled if either fires.
-
-### Timeout
-
-Set `timeout` (milliseconds) on a `Request` or per-call to abort a request that takes too long:
-
-```ts
-const getUser = new Request<{ id: string }, User>({
-  method: 'GET',
-  path: '/users/:id',
-  timeout: 5000
-})
-
-const { error } = await api.getUser({ id: '42' })
-// error.status === 0, error.kind === 'timeout' if it fired
-```
-
-**`timeout` is a whole-operation deadline, not a per-attempt budget.** It covers the entire middleware chain, including every retry and every backoff delay. `timeout: 5000` combined with `retryMiddleware(3)` still means "an answer within 5 seconds" for the call as a whole — not five seconds for each individual attempt. This is a deliberate choice, and it **differs from axios, XHR, and `got`**, all of which apply a timeout per attempt and therefore let a retrying request run for a multiple of the configured timeout. Know which behavior you're assuming before you tune the number.
-
-If you want a per-attempt budget instead — the axios-style behavior — write a small signal-replacing middleware and place it *inside* the retry middleware, so a fresh signal is installed on every attempt:
-
-```ts
-const perAttempt = (ms: number): Middleware => async (ctx, next) => {
-  ctx.request.signal = AbortSignal.timeout(ms)
-  return next()
-}
-
-const api = createApi({
-  baseUrl: '/api',
-  requests: { getUser },
-  middleware: [retryMiddleware(3), perAttempt(5000)]
-})
-```
-
-Because middleware order is outermost-to-innermost, `retryMiddleware(3)` re-invokes everything below it — including `perAttempt(5000)` — on every retry, so each attempt gets its own fresh 5-second budget instead of sharing one.
-
-A few more details:
-
-- `CallOptions.timeout` overrides `RequestConfig.timeout` for a single call; a per-call `timeout: 0` disables a per-request timeout rather than falling back to it.
-- A timeout produces an error with `status: 0` and `kind: 'timeout'` — distinguishable from a caller-initiated cancellation (`kind: 'abort'`) and from a genuine network failure (`kind: 'network'`).
-- `result.retry()` always starts a fresh deadline. A retried call is not charged against the original budget.
-- Non-positive or omitted `timeout` disables it entirely (the default).
-- `timeout` composes with `dedupe: true` — the deadline is merged with the dedupe signal rather than discarded by it.
-- Under `share: true` the two timeouts have different owners. `RequestConfig.timeout` belongs to the *operation*: it bounds the one shared request for every caller, measured from when that request started, so a single caller can neither extend it nor disable it with a per-call `timeout: 0`. `CallOptions.timeout` bounds only the caller that passed it — see [Sharing](#sharing).
-
-**The deadline bounds middleware that never looks at the signal, too.** A middleware that awaits something of its own before calling `next()` — a token refresh, say — cannot hold the call past its `timeout`, even if that work never settles:
-
-```ts
-const auth: Middleware = async (ctx, next) => {
-  const token = await user.getIdToken()   // stalls on a bad network
-  ctx.request.headers.set('Authorization', `Bearer ${token}`)
-  return next()
-}
-// With timeout: 45_000, the call still settles at ~45s: kind 'timeout', status 0.
-```
-
-When the deadline passes, the chain gets one macrotask to answer by itself. That is enough for everything that already responds to the abort — `fetch` rejecting, a middleware rethrowing the reason, a fallback middleware that turns a timeout into a cached response — so all of those keep their own `Result` exactly as before. A chain still pending after that is waiting on something the signal does not reach, and the call settles with the same `Result` an aborted `fetch` would have produced: `kind: 'timeout'`, `status: 0`, reported to `onError` once. A caller's own `signal` works the same way, with `kind: 'abort'`, which is not reported.
-
-A promise cannot be cancelled, so the stalled middleware keeps running. Whatever it eventually returns or throws is discarded — no second `Result`, no second `onError` — and if it calls `next()` after the call has settled, no request is sent: `next()` hands back the `Result` the caller already has. To stop the work itself, pass `ctx.request.signal` into it (see [`MiddlewareContext`](#middlewarecontext)).
-
 ### Sharing
 
 Set `share: true` on a `Request` to coalesce identical concurrent calls onto a single in-flight request, instead of each caller firing its own:
@@ -1207,7 +1056,7 @@ const [a, b] = await Promise.all([
 - A per-call `headers` or `middleware` — these change *what* is requested, so handing that caller another caller's response would be a real bug, not just a missed optimization. A call carrying either always gets its own, unshared request.
 - Params that cannot be keyed soundly, at any depth: a BigInt, an `ArrayBuffer`, `Blob`, `FormData` or `URLSearchParams`, a circular structure, or an object with no enumerable state (a class instance keeping its state in private fields, an `Error`). Two different values of these kinds would otherwise risk one key, and one caller could receive the response meant for the other's payload. Declining to share is always safe; handing back the wrong response never is. A `Date`, `Map`, `Set` or typed array is keyed by its content and shares normally, and a raw `string` keys distinguishably, so a string-param endpoint is coalesced like any other.
 
-**What does *not* disable sharing:** a per-call `signal` or `timeout`. These bound *who is still waiting*, not *what is being asked for*, so they're tracked with a per-caller refcount instead: each sharer's own signal/timeout only removes that caller from the wait list. The underlying request keeps running for everyone else, and is only aborted once every sharer — including the one that gave up — has stopped waiting. A sharer that gives up gets an error `Result` (`kind: 'timeout'` or `kind: 'abort'`), reported to `onError` exactly as the identical non-shared call would be — which means a `'timeout'` give-up reports and an `'abort'` give-up does not (see [Error handling with `onError`](#error-handling-with-onerror)).
+**What does *not* disable sharing:** a per-call `signal` or `timeout`. These bound *who is still waiting*, not *what is being asked for*, so they're tracked with a per-caller refcount instead: each sharer's own signal/timeout only removes that caller from the wait list. The underlying request keeps running for everyone else, and is only aborted once every sharer — including the one that gave up — has stopped waiting. A sharer that gives up gets an error `Result` (`kind: 'timeout'` or `kind: 'abort'`), reported to `onError` exactly as the identical non-shared call would be — which means a `'timeout'` give-up reports and an `'abort'` give-up does not (see [Reporting errors with onError](#reporting-errors-with-onerror)).
 
 **A per-*request* `timeout` is different: it belongs to the operation.** `RequestConfig.timeout` bounds the single shared request itself, measured from when that request started — not from when each caller joined it. Every sharer is therefore bounded by it, a late joiner cannot extend it, and a caller passing `timeout: 0` cannot switch it off for everyone else. Without that, a steadily arriving stream of joiners would keep one socket open indefinitely against a deadline that was supposed to cap it.
 
@@ -1321,7 +1170,7 @@ if (error) {
 
 A `{"data": null, "errors": [...]}` response is unchanged -- it's still `kind: 'http'`, with any partial result in `error.partialData`, since the GraphQL-errors branch runs first. See [MIGRATION.md](./MIGRATION.md#upgrading-to-400).
 
-Operations support `dedupe: true` in the same way `Request` does — see [Auto-cancel via `dedupe`](#auto-cancel-via-dedupe).
+Operations support `dedupe: true` in the same way `Request` does — see [Drop stale calls with dedupe](#drop-stale-calls-with-dedupe).
 
 ### Middleware
 
@@ -1489,3 +1338,152 @@ Bug reports, fixes and ideas are welcome. See [CONTRIBUTING.md](./CONTRIBUTING.m
 ## License
 
 MIT
+
+## Reference (in progress)
+
+These facts are waiting for the final Reference section.
+
+### Result type
+
+```ts
+interface SuccessResult<TResponse> {
+  data: TResponse                          // parsed response
+  error: null
+  response: Response                       // always present on success
+  retry: () => Promise<Result<TResponse>>
+}
+
+interface ErrorResult<TResponse> {
+  data: null
+  error: ApiError                          // structured error, see below
+  response: Response | null                // present for HTTP/parse failures, null for network/abort/timeout
+  retry: () => Promise<Result<TResponse>>
+}
+
+type Result<TResponse> = SuccessResult<TResponse> | ErrorResult<TResponse>
+```
+
+### ApiError
+
+The error object on failed calls. It is not a subclass of `Error` -- it is a structured container for API-level error details.
+
+| Property     | Type      | Description                                                       |
+| ------------ | --------- | ----------------------------------------------------------------- |
+| `status`     | `number`  | HTTP status code (e.g., 404, 500). `0` for network errors, aborts, and timeouts. |
+| `kind`       | `'http' \| 'network' \| 'abort' \| 'timeout' \| 'parse' \| 'middleware'` | What category of failure this is. See below. Required -- constructing an `ApiError` yourself (e.g. in custom middleware) must supply it. |
+| `statusText` | `string`  | HTTP status text (e.g., 'Not Found'). `''` for network errors.    |
+| `body`       | `unknown` | Parsed response body -- but for `'parse'`, one of: the thrown exception (a malformed body), the raw response text (an empty body, or a GraphQL response carrying no data), a schema's issues array (the response failed validation), or a value a schema threw. The native Error for network failures. |
+| `headers`    | `Headers` | Response headers. Empty `Headers` for network errors.             |
+| `request`    | `object`  | `{ method, url, params }` -- metadata about the failed request; `url` is the resolved, path-substituted address, falling back to the route template only when it could not be built. |
+| `partialData` | `unknown` (optional) | GraphQL data returned alongside `{ errors }` (partial success). Lives here, not on `Result.data`, so the `Result` stays a clean union: `data` is non-null iff `error` is null. `undefined` for every REST error and for GraphQL responses carrying no data. |
+
+You can use `instanceof` to check if a value is an `ApiError`:
+
+```ts
+import { ApiError } from 'liaise'
+
+if (error instanceof ApiError) {
+  // ...
+}
+```
+
+### baseUrl query merging
+
+A `baseUrl` may carry its own query string — a fixed API key, say. Its params
+are merged ahead of the call's:
+
+```ts
+const api = createApi({
+  baseUrl: 'https://api.example.com/v1?key=abc',
+  requests: { search: new Request<{ q: string }, Hit[]>({ method: 'GET', path: '/search' }) },
+})
+
+await api.search({ q: 'hello' })
+// GET https://api.example.com/v1/search?key=abc&q=hello
+```
+
+Merging **accumulates**, it does not override: a call param whose key the base
+already used produces both, `?key=abc&key=xyz`, and which one wins is the
+server's decision. This differs from headers, where a per-call value replaces a
+global one — because array params already serialize as repeated keys
+(`tags=a&tags=b`), so collapsing duplicates would break them. If a base-level
+param needs to vary per call, set it from middleware rather than the `baseUrl`.
+
+### URL fragments
+
+**A `#fragment` is refused.** A fragment is never sent to the server, so one in
+a `path` or `baseUrl` cannot do what it appears to. It is an error naming the offending
+value, rather than being stripped, so the dead code does not stay in your
+template.
+
+A fragment in a [`defineRequest`](#defining-endpoints) `path` **literal**
+is also a compile error, so the endpoint is rejected where it is declared rather
+than on every call:
+
+```ts
+defineRequest<Doc>()({ method: 'GET', path: '/docs#section' })
+//                                          ^ Property '__fragmentInPath' is missing:
+//                                            a URL fragment is never sent to the server
+```
+
+The check reads the literal, so a path assembled at runtime — or a
+`RequestConfig`-typed variable — still compiles and is caught by the runtime
+error instead. `new Request` takes no path literal, so it has no equivalent
+check; this is one of the things `defineRequest` buys you.
+
+**A `#` inside a param *value* is not a fragment** and is never refused — it is
+escaped to `%23` and sent as ordinary data:
+
+```ts
+await api.getDoc({ id: 'a#b' })   // → GET /docs/a%23b
+await api.search({ tag: 'a#b' })  // → GET /search?tag=a%23b
+```
+
+Only a `#` written into a `path` or `baseUrl` is refused, because that one was
+never going to reach the server.
+
+### Timeout backstop
+
+**The deadline bounds middleware that never looks at the signal, too.** A middleware that awaits something of its own before calling `next()` — a token refresh, say — cannot hold the call past its `timeout`, even if that work never settles:
+
+```ts
+const auth: Middleware = async (ctx, next) => {
+  const token = await user.getIdToken()   // stalls on a bad network
+  ctx.request.headers.set('Authorization', `Bearer ${token}`)
+  return next()
+}
+// With timeout: 45_000, the call still settles at ~45s: kind 'timeout', status 0.
+```
+
+When the deadline passes, the chain gets one macrotask to answer by itself. That is enough for everything that already responds to the abort — `fetch` rejecting, a middleware rethrowing the reason, a fallback middleware that turns a timeout into a cached response — so all of those keep their own `Result` exactly as before. A chain still pending after that is waiting on something the signal does not reach, and the call settles with the same `Result` an aborted `fetch` would have produced: `kind: 'timeout'`, `status: 0`, reported to `onError` once. A caller's own `signal` works the same way, with `kind: 'abort'`, which is not reported.
+
+A promise cannot be cancelled, so the stalled middleware keeps running. Whatever it eventually returns or throws is discarded — no second `Result`, no second `onError` — and if it calls `next()` after the call has settled, no request is sent: `next()` hands back the `Result` the caller already has. To stop the work itself, pass `ctx.request.signal` into it (see [`MiddlewareContext`](#middlewarecontext)).
+
+### Abort classification
+
+A cancellation is classified by **provenance**, not by sniffing the thrown value's shape: whatever a middleware or `fetch` actually throws, if it happened because *this request's own signal* aborted, the `Result` is `kind: 'abort'` (or `'timeout'` for a deadline) regardless of the reason's name or type -- a caller-supplied custom abort reason (`controller.abort(new Error('unmounted'))`, or a plain string) still classifies as `'abort'`, not `'network'`.
+
+A middleware that propagates the library's own abort/timeout signal (verbatim, or wrapped one level as `.cause`) is classified `'abort'`/`'timeout'` instead of `'middleware'`, by provenance rather than by the reason's name.
+
+### Stream bodies
+
+Under `retryMiddleware`, the "cannot resend" error is the Result you end up with: after a 5xx, the final Result is the "cannot resend" `TypeError` (status 0), so the original 503 is not in it.
+
+### Per-attempt timeout
+
+If you want a per-attempt budget instead — the axios-style behavior — write a small signal-replacing middleware and place it *inside* the retry middleware, so a fresh signal is installed on every attempt:
+
+```ts
+const perAttempt = (ms: number): Middleware => async (ctx, next) => {
+  ctx.request.signal = AbortSignal.timeout(ms)
+  return next()
+}
+
+const api = createApi({
+  baseUrl: '/api',
+  requests: { getUser },
+  middleware: [retryMiddleware(3), perAttempt(5000)]
+})
+```
+
+Because middleware order is outermost-to-innermost, `retryMiddleware(3)` re-invokes everything below it — including `perAttempt(5000)` — on every retry, so each attempt gets its own fresh 5-second budget instead of sharing one.
