@@ -32,6 +32,12 @@ Formerly published as `@iremlopsum/apify`; switching takes two steps, see [MIGRA
   - [Pagination](#pagination)
   - [GraphQL](#graphql)
   - [Testing your code](#testing-your-code)
+- [Recipes](#recipes)
+  - [Add an auth header and refresh the token on a 401](#add-an-auth-header-and-refresh-the-token-on-a-401)
+  - [Search as you type](#search-as-you-type)
+  - [Use with TanStack Query](#use-with-tanstack-query)
+  - [Use with React](#use-with-react)
+  - [Load the current user into a store](#load-the-current-user-into-a-store)
 - [Philosophy](#philosophy)
 - [API Reference](#api-reference)
 - [Contributing](#contributing)
@@ -139,9 +145,9 @@ if (error) {
 ### Next
 
 - [Handling errors](#handling-errors)
-- [Add an auth header and refresh the token on a 401](#quick-start)
-- [Use with TanStack Query](#quick-start)
-- [Use with React](#quick-start)
+- [Add an auth header and refresh the token on a 401](#add-an-auth-header-and-refresh-the-token-on-a-401)
+- [Use with TanStack Query](#use-with-tanstack-query)
+- [Use with React](#use-with-react)
 
 ## How it fits together
 
@@ -1182,6 +1188,161 @@ vi.spyOn(api, 'getUser').mockResolvedValue(errorResult(404, { message: 'not foun
 ```
 
 More of the stub's behaviour, such as how it handles a signal, is under [liaise/testing behaviours](#liaisetesting-behaviours).
+
+## Recipes
+
+Each recipe below is a complete example that runs against a test, so you can paste it as it is.
+
+### Add an auth header and refresh the token on a 401
+
+With rotating refresh tokens, five requests that all get a 401 at once must not refresh five times: the first refresh invalidates the token the other four send, and the user is logged out.
+
+<!-- tested: auth-refresh -->
+```ts
+import { createApi, defineRequest, type Middleware } from 'liaise'
+
+type Tokens = { access: string; refresh: string }
+type Order = { id: string; total: number }
+
+let tokens: Tokens = { access: 'expired', refresh: 'r1' }
+
+const auth: Middleware = async (ctx, next) => {
+  if (ctx.requestName === 'refresh') return next()
+
+  const sentWith = tokens.access
+  ctx.request.headers.set('Authorization', `Bearer ${sentWith}`)
+  const result = await next()
+  if (result.error?.status !== 401) return result
+
+  // Refresh only if nobody has done it since this call was sent. Every call
+  // that gets here at the same moment joins one refresh request (share: true).
+  if (tokens.access === sentWith) {
+    const refreshed = await api.refresh({ token: tokens.refresh })
+    if (refreshed.error) return result // refresh failed: keep the 401
+    tokens = refreshed.data
+  }
+  ctx.request.headers.set('Authorization', `Bearer ${tokens.access}`)
+  return next() // send the call again with the new token
+}
+
+const api = createApi({
+  baseUrl: '/api',
+  middleware: [auth],
+  requests: {
+    refresh: defineRequest<Tokens, { token: string }>()({
+      method: 'POST',
+      path: '/auth/refresh',
+      share: true,
+    }),
+    getOrders: defineRequest<Order[]>()({ method: 'GET', path: '/orders' }),
+  },
+})
+```
+
+`share: true` on `refresh` is what makes the five calls wait for one refresh. The `requestName` check stops the refresh call from passing through its own middleware.
+
+### Search as you type
+
+Each keystroke starts a request, and a slow answer to an early one can arrive after a fast answer to a later one. `dedupe` makes sure only the latest search is shown.
+
+`Repo` is your result type; `render` and `showError` stand for your UI code.
+
+<!-- tested: search-as-you-type -->
+```ts
+import { createApi, defineRequest } from 'liaise'
+
+const search = defineRequest<Repo[], { q: string }>()({
+  method: 'GET',
+  path: '/search',
+  dedupe: true, // a new call cancels the one still in flight
+})
+const api = createApi({ baseUrl: '/api', requests: { search } })
+
+async function onInput(q: string) {
+  const { data, error } = await api.search({ q })
+  if (error?.kind === 'abort') return // a newer search replaced this one
+  if (error) return showError(error)
+  render(data)
+}
+```
+
+The older call settles with an `abort` error, which you skip. Only the newest search reaches `render`.
+
+### Use with TanStack Query
+
+liaise never throws. TanStack Query expects a failing query function to throw, so `unwrap` converts at that one boundary. `api` is the client from [Quick start](#quick-start).
+
+<!-- tested: tanstack-query -->
+```ts
+import type { Result } from 'liaise'
+
+// TanStack Query expects a failed query to throw. Do it here, at your edge.
+async function unwrap<T>(call: Promise<Result<T>>): Promise<T> {
+  const { data, error } = await call
+  if (error) throw error
+  return data
+}
+
+export const userQuery = (id: string) => ({
+  queryKey: ['user', id],
+  // TanStack's signal cancels the request when the query is no longer needed.
+  queryFn: ({ signal }: { signal: AbortSignal }) => unwrap(api.getUser({ id }, { signal })),
+})
+
+// React:  useQuery(userQuery(id))
+// Vue:    useQuery(computed(() => userQuery(id.value)))
+// Svelte: createQuery(() => userQuery(id))
+// Solid:  useQuery(() => userQuery(id()))
+```
+
+The same options object works with every TanStack adapter; the comments show the call in each. These comment lines aren't executed by the test.
+
+### Use with React
+
+With React's `useEffect` and `useState` (import them from `react`). `api` and `User` are from [Quick start](#quick-start).
+
+<!-- tested: react-effect -->
+```ts
+function useUser(id: string) {
+  const [state, setState] = useState<{ user?: User; failed?: boolean }>({})
+
+  useEffect(() => {
+    const controller = new AbortController()
+    api.getUser({ id }, { signal: controller.signal }).then(({ data, error }) => {
+      if (error?.kind === 'abort') return // unmounted, or id changed
+      setState(error ? { failed: true } : { user: data })
+    })
+    return () => controller.abort() // cancel when the component goes away
+  }, [id])
+
+  return state
+}
+```
+
+Aborting on cleanup means a fast navigation never writes stale data into a component that has moved on.
+
+### Load the current user into a store
+
+The header, sidebar and avatar each check the store on first render, find it empty, and each ask for the user. `User` is your type.
+
+<!-- tested: store-me -->
+```ts
+import { createApi, defineRequest } from 'liaise'
+
+const me = defineRequest<User>()({ method: 'GET', path: '/me', share: true })
+const api = createApi({ baseUrl: '/api', requests: { me } })
+
+// Any store works the same way: Zustand, Pinia, Redux or a plain object.
+const store = { user: null as User | null }
+
+async function loadUser() {
+  if (store.user) return // empty on first render, for every component
+  const { data } = await api.me() // callers at the same moment join one request
+  if (data) store.user = data
+}
+```
+
+TanStack Query dedupes this case too; this recipe is for apps using a plain store.
 
 ## Philosophy
 
