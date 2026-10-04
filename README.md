@@ -38,6 +38,11 @@ Formerly published as `@iremlopsum/apify`; switching takes two steps, see [MIGRA
   - [Use with TanStack Query](#use-with-tanstack-query)
   - [Use with React](#use-with-react)
   - [Load the current user into a store](#load-the-current-user-into-a-store)
+  - [One /me per page view on the server](#one-me-per-page-view-on-the-server)
+  - [Retry a flaky backend within one deadline](#retry-a-flaky-backend-within-one-deadline)
+  - [Give each attempt its own timeout](#give-each-attempt-its-own-timeout)
+  - [Report errors to Sentry](#report-errors-to-sentry)
+  - [Upload and download files](#upload-and-download-files)
 - [Philosophy](#philosophy)
 - [API Reference](#api-reference)
 - [Contributing](#contributing)
@@ -659,7 +664,7 @@ const { error } = await api.getReport()
 - **`timeout` is one deadline for the whole call.** It covers every middleware, every retry and every wait between retries. `timeout: 3000` with three retries still answers within three seconds.
 - **A call's `timeout` replaces the endpoint's.** `timeout: 0` on a call turns the endpoint's deadline off. Zero, a negative number or no `timeout` at all means no deadline, which is the default.
 - **`result.retry()` starts a fresh deadline.** The retried call isn't charged for time the first one used.
-- If you want a separate limit for each attempt instead, see [Per-attempt timeout](#per-attempt-timeout).
+- If you want a separate limit for each attempt instead, see [Give each attempt its own timeout](#give-each-attempt-its-own-timeout).
 - Under [`share`](#sharing-identical-requests), the endpoint's `timeout` belongs to the one shared request, and a caller can't extend it.
 
 #### Drop stale calls with dedupe
@@ -735,7 +740,7 @@ Two rarer cases have their own notes: [`retry()` on a shared result](#retry-on-a
 
 Sharing is decided before middleware runs. A header that a middleware adds, such as the current user's token, is not part of the match. With one client serving every user, one user's call can join another user's call and receive that user's response.
 
-Create one client per incoming request, as in [One /me per page view on the server](#quick-start). Otherwise, don't set `share` on an endpoint whose answer depends on who is asking.
+Create one client per incoming request, as in [One /me per page view on the server](#one-me-per-page-view-on-the-server). Otherwise, don't set `share` on an endpoint whose answer depends on who is asking.
 
 ### Retries, caching and logging
 
@@ -1344,6 +1349,147 @@ async function loadUser() {
 
 TanStack Query dedupes this case too; this recipe is for apps using a plain store.
 
+### One /me per page view on the server
+
+On the server there's no store. A page's loaders run in parallel and each one needs the current user. `User` and `IncomingRequest` stand for your types; `cookie` stands for however you pass the user's identity.
+
+<!-- tested: server-loaders -->
+```ts
+import { createApi, defineRequest } from 'liaise'
+
+const me = defineRequest<User>()({ method: 'GET', path: '/me', share: true })
+
+// One client per incoming request: that page's loaders share one /me call,
+// and one user's call can never join another user's.
+function apiFor(req: IncomingRequest) {
+  return createApi({
+    baseUrl: 'https://users.internal',
+    headers: { cookie: req.headers.cookie ?? '' },
+    requests: { me },
+  })
+}
+
+async function renderPage(req: IncomingRequest) {
+  const api = apiFor(req)
+  const [header, cart] = await Promise.all([
+    api.me().then(r => r.data?.name),   // header loader
+    api.me().then(r => r.data?.cartId), // cart loader
+  ])
+  return { header, cart }
+}
+```
+
+The client is created per request so that one user's call can never join another's; see [On a server](#on-a-server). Inside React Server Components, React's `cache()` does this too.
+
+### Retry a flaky backend within one deadline
+
+Use this when a backend sometimes fails with a 5xx, a rate limit or a dropped connection, and you still want an answer within a fixed time.
+
+<!-- tested: flaky-backend -->
+```ts
+import { createApi, defineRequest } from 'liaise'
+import { retryMiddleware } from 'liaise/middleware'
+
+const retry = retryMiddleware({
+  max: 3,
+  // Retry server errors, rate limits and dropped connections. Not 4xx.
+  retryOn: r => {
+    const e = r.error
+    return !!e && (e.status >= 500 || e.status === 429 || e.kind === 'network')
+  },
+})
+
+const api = createApi({
+  baseUrl: '/api',
+  middleware: [retry],
+  requests: {
+    // timeout covers every attempt and every wait between them.
+    getReport: defineRequest<Report>()({ method: 'GET', path: '/report', timeout: 3000 }),
+  },
+})
+```
+
+With `timeout: 3000`, the caller gets an answer within three seconds however many retries are left. See [Cancelling, deadlines and stale requests](#cancelling-deadlines-and-stale-requests).
+
+### Give each attempt its own timeout
+
+liaise's `timeout` is one deadline for the whole call. If you want axios-style limits per attempt instead, put a middleware *inside* the retry. `getUser` is the endpoint from [Quick start](#quick-start).
+
+<!-- tested: per-attempt-timeout -->
+```ts
+import { createApi } from 'liaise'
+import type { Middleware } from 'liaise'
+import { retryMiddleware } from 'liaise/middleware'
+
+// A fresh time limit for each attempt, instead of one for the whole call.
+const perAttempt = (ms: number): Middleware => async (ctx, next) => {
+  ctx.request.signal = AbortSignal.timeout(ms)
+  return next()
+}
+
+const api = createApi({
+  baseUrl: '/api',
+  requests: { getUser },
+  // Order matters: retry wraps perAttempt, so every attempt gets its own 5 s.
+  middleware: [
+    retryMiddleware({ retryOn: r => r.error?.kind === 'timeout' || (r.error?.status ?? 0) >= 500 }),
+    perAttempt(5_000),
+  ],
+})
+```
+
+Timeouts aren't retried by default; the `retryOn` above opts in. Because the middleware replaces `ctx.request.signal`, a caller's own cancel still ends the call as `'abort'`, but the request itself keeps running until the per-attempt signal fires (see [Signals in middleware](#signals-in-middleware)).
+
+### Report errors to Sentry
+
+Send every unexpected failure to your error tracker from one place. `Sentry` stands for your error tracker; `getUser` is the [Quick start](#quick-start) endpoint.
+
+<!-- tested: report-errors -->
+```ts
+import { createApi } from 'liaise'
+
+const api = createApi({
+  baseUrl: '/api',
+  requests: { getUser },
+  // Called once per failed call, after retries. Never for 'abort': you cancelled it.
+  onError: error => {
+    if (error.kind === 'http' && error.status < 500) return // expected 4xx, not a bug
+    Sentry.captureException(error, {
+      extra: { kind: error.kind, url: error.request.url, status: error.status },
+    })
+  },
+})
+```
+
+Use a middleware instead when you need timing, or the request before it's sent, or want to report for some endpoints only. [Writing middleware](#writing-middleware) has the middleware version.
+
+### Upload and download files
+
+Send a file with `FormData` and read one back as a `Blob`.
+
+<!-- tested: files -->
+```ts
+import { createApi, defineRequest } from 'liaise'
+
+// Upload: pass FormData as the params. liaise sends it as-is, and the
+// runtime sets the multipart Content-Type with its boundary.
+const uploadAvatar = defineRequest<{ url: string }, FormData>()({
+  method: 'POST',
+  path: '/avatar',
+})
+
+// Download: ask for a Blob instead of JSON.
+const downloadFile = defineRequest<Blob>()({
+  method: 'GET',
+  path: '/files/:id',
+  responseType: 'blob',
+})
+
+const api = createApi({ baseUrl: '/api', requests: { uploadAvatar, downloadFile } })
+```
+
+Call it with `api.uploadAvatar(form)` and `api.downloadFile({ id })`. Other body types (a `Blob`, a `ReadableStream`) are listed under [Sending data](#sending-data).
+
 ## Philosophy
 
 ### Never throws
@@ -1563,25 +1709,6 @@ A middleware that propagates the library's own abort/timeout signal (verbatim, o
 ### Stream bodies
 
 Under `retryMiddleware`, the "cannot resend" error is the Result you end up with: after a 5xx, the final Result is the "cannot resend" `TypeError` (status 0), so the original 503 is not in it.
-
-### Per-attempt timeout
-
-If you want a per-attempt budget instead — the axios-style behavior — write a small signal-replacing middleware and place it *inside* the retry middleware, so a fresh signal is installed on every attempt:
-
-```ts
-const perAttempt = (ms: number): Middleware => async (ctx, next) => {
-  ctx.request.signal = AbortSignal.timeout(ms)
-  return next()
-}
-
-const api = createApi({
-  baseUrl: '/api',
-  requests: { getUser },
-  middleware: [retryMiddleware(3), perAttempt(5000)]
-})
-```
-
-Because middleware order is outermost-to-innermost, `retryMiddleware(3)` re-invokes everything below it — including `perAttempt(5000)` — on every retry, so each attempt gets its own fresh 5-second budget instead of sharing one.
 
 ### Share key and refcount
 
