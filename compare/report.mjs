@@ -10,7 +10,7 @@ const timingRows = new Set(['hang', 'deadline'])
 const results = JSON.parse(readFileSync(new URL('./results.json', import.meta.url), 'utf8'))
 const esc = s => String(s).replaceAll('|', '\\|')
 const table = (head, rows) => [`| ${head.map(esc).join(' | ')} |`, `| ${head.map((_, i) => (i ? ':--' : '---')).join(' | ')} |`, ...rows.map(r => `| ${r.map(esc).join(' | ')} |`)].join('\n')
-const handWritten = n => typeof n === 'string' && n.startsWith('hand-written')
+const handWritten = n => typeof n === 'string' && /\bhand-written\b/.test(n)
 
 function cell(s, name, variant) {
   const r = s.results[name]

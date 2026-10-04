@@ -49,13 +49,13 @@ export const scenarios = [
       if (!offered(c, 'getWithDeadline')) return notOffered
       const r = await observe(() => c.getWithDeadline('/s/slow-503'), { expected: { ok: true }, waitMs: 15_000 })
       const attempts = server.counts.get('GET /s/slow-503') ?? 0
-      return { outcome: `after ${(r.ms / 1000).toFixed(1)}s: ${r.outcome} (${attempts} ${attempts === 1 ? 'attempt' : 'attempts'})`, ms: r.ms }
+      return { outcome: `after ${(r.ms / 1000).toFixed(1)}s: ${r.outcome}, ${attempts} ${attempts === 1 ? 'attempt' : 'attempts'}`, ms: r.ms }
     }) },
   { id: 'missing-param', title: 'Path param is undefined',
     run: v => withServer(v, async (c, server) => {
       const r = await observe(() => c.getUser(undefined))
       const sent = [...server.counts.keys()].some(k => k.startsWith('GET /s/users/'))
-      if (!sent && /^(throws|error result)/.test(r.outcome)) return { ...r, outcome: `refused before sending (${r.outcome})` }
+      if (!sent && /^(throws|error result)/.test(r.outcome)) return { ...r, outcome: `refused before sending: ${r.outcome}` }
       return { ...r, outcome: r.outcome.replace(/^resolves with (.*)$/, (_, j) => { try { return `requests ${JSON.parse(j).requested}` } catch { return r.outcome } }) }
     }) },
   { id: 'wrong-shape', title: 'Response is missing a field the type promises',

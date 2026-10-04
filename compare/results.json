@@ -35,7 +35,7 @@
           },
           "configured": {
             "outcome": "throws Error",
-            "ms": 18
+            "ms": 17
           }
         },
         "axios": {
@@ -51,7 +51,7 @@
           },
           "default": {
             "outcome": "throws AxiosError",
-            "ms": 14
+            "ms": 13
           },
           "configured": {
             "outcome": "throws AxiosError",
@@ -71,11 +71,11 @@
           },
           "default": {
             "outcome": "throws HTTPError",
-            "ms": 926
+            "ms": 928
           },
           "configured": {
             "outcome": "throws HTTPError",
-            "ms": 927
+            "ms": 929
           }
         },
         "ofetch": {
@@ -91,11 +91,11 @@
           },
           "default": {
             "outcome": "throws FetchError",
-            "ms": 23
+            "ms": 22
           },
           "configured": {
             "outcome": "throws FetchError",
-            "ms": 24
+            "ms": 23
           }
         },
         "liaise": {
@@ -158,7 +158,7 @@
           },
           "default": {
             "outcome": "throws AxiosError (name: Error)",
-            "ms": 8
+            "ms": 7
           },
           "configured": {
             "outcome": "throws AxiosError (name: Error)",
@@ -178,11 +178,11 @@
           },
           "default": {
             "outcome": "throws NetworkError",
-            "ms": 914
+            "ms": 915
           },
           "configured": {
             "outcome": "throws NetworkError",
-            "ms": 914
+            "ms": 916
           }
         },
         "ofetch": {
@@ -249,7 +249,7 @@
           },
           "default": {
             "outcome": "still waiting after 15s",
-            "ms": 15001
+            "ms": 15000
           }
         },
         "axios": {
@@ -265,7 +265,7 @@
           },
           "configured": {
             "outcome": "throws AxiosError",
-            "ms": 3007
+            "ms": 3005
           },
           "default": {
             "outcome": "still waiting after 15s",
@@ -285,7 +285,7 @@
           },
           "configured": {
             "outcome": "throws TimeoutError",
-            "ms": 3006
+            "ms": 3005
           },
           "default": {
             "outcome": "throws TimeoutError",
@@ -305,11 +305,11 @@
           },
           "configured": {
             "outcome": "throws FetchError",
-            "ms": 3005
+            "ms": 3003
           },
           "default": {
             "outcome": "still waiting after 15s",
-            "ms": 15001
+            "ms": 15000
           }
         },
         "liaise": {
@@ -325,11 +325,11 @@
           },
           "configured": {
             "outcome": "error result (timeout)",
-            "ms": 3005
+            "ms": 3003
           },
           "default": {
             "outcome": "still waiting after 15s",
-            "ms": 15000
+            "ms": 15002
           }
         }
       }
@@ -352,11 +352,11 @@
           },
           "default": {
             "outcome": "throws SyntaxError",
-            "ms": 13
+            "ms": 10
           },
           "configured": {
             "outcome": "throws SyntaxError",
-            "ms": 13
+            "ms": 10
           }
         },
         "axios": {
@@ -372,11 +372,11 @@
           },
           "default": {
             "outcome": "wrong data",
-            "ms": 14
+            "ms": 11
           },
           "configured": {
             "outcome": "throws AxiosError (name: SyntaxError)",
-            "ms": 14
+            "ms": 11
           }
         },
         "ky": {
@@ -392,11 +392,11 @@
           },
           "default": {
             "outcome": "throws SyntaxError",
-            "ms": 15
+            "ms": 11
           },
           "configured": {
             "outcome": "throws SyntaxError",
-            "ms": 17
+            "ms": 12
           }
         },
         "ofetch": {
@@ -412,11 +412,11 @@
           },
           "default": {
             "outcome": "wrong data",
-            "ms": 16
+            "ms": 13
           },
           "configured": {
             "outcome": "throws SyntaxError",
-            "ms": 16
+            "ms": 13
           }
         },
         "liaise": {
@@ -432,11 +432,11 @@
           },
           "default": {
             "outcome": "error result (parse)",
-            "ms": 16
+            "ms": 13
           },
           "configured": {
             "outcome": "error result (parse)",
-            "ms": 16
+            "ms": 13
           }
         }
       }
@@ -459,11 +459,11 @@
           },
           "default": {
             "outcome": "throws SyntaxError",
-            "ms": 7
+            "ms": 8
           },
           "configured": {
             "outcome": "resolves with undefined",
-            "ms": 7
+            "ms": 8
           }
         },
         "axios": {
@@ -543,7 +543,7 @@
           },
           "configured": {
             "outcome": "resolves with undefined",
-            "ms": 9
+            "ms": 8
           }
         }
       }
@@ -566,11 +566,11 @@
           },
           "configured": {
             "outcome": "shows \"rea\"",
-            "ms": 24
+            "ms": 26
           },
           "default": {
             "outcome": "shows \"r\"",
-            "ms": 311
+            "ms": 306
           }
         },
         "axios": {
@@ -586,11 +586,11 @@
           },
           "configured": {
             "outcome": "shows \"rea\"",
-            "ms": 24
+            "ms": 25
           },
           "default": {
             "outcome": "shows \"r\"",
-            "ms": 311
+            "ms": 307
           }
         },
         "ky": {
@@ -606,11 +606,11 @@
           },
           "configured": {
             "outcome": "shows \"rea\"",
-            "ms": 23
+            "ms": 25
           },
           "default": {
             "outcome": "shows \"r\"",
-            "ms": 311
+            "ms": 310
           }
         },
         "ofetch": {
@@ -626,11 +626,11 @@
           },
           "configured": {
             "outcome": "shows \"rea\"",
-            "ms": 23
+            "ms": 25
           },
           "default": {
             "outcome": "shows \"r\"",
-            "ms": 312
+            "ms": 310
           }
         },
         "liaise": {
@@ -646,11 +646,11 @@
           },
           "configured": {
             "outcome": "shows \"rea\"",
-            "ms": 25
+            "ms": 26
           },
           "default": {
             "outcome": "shows \"r\"",
-            "ms": 312
+            "ms": 311
           }
         }
       }
@@ -693,7 +693,7 @@
           },
           "default": {
             "outcome": "5 refresh calls, 1/5 succeed",
-            "ms": 58
+            "ms": 59
           },
           "configured": {
             "outcome": "1 refresh call, 5/5 succeed",
@@ -713,11 +713,11 @@
           },
           "default": {
             "outcome": "5 refresh calls, 1/5 succeed",
-            "ms": 60
+            "ms": 61
           },
           "configured": {
             "outcome": "1 refresh call, 5/5 succeed",
-            "ms": 360
+            "ms": 367
           }
         },
         "ofetch": {
@@ -733,7 +733,7 @@
           },
           "default": {
             "outcome": "5 refresh calls, 1/5 succeed",
-            "ms": 58
+            "ms": 59
           },
           "configured": {
             "outcome": "1 refresh call, 5/5 succeed",
@@ -757,7 +757,7 @@
           },
           "configured": {
             "outcome": "1 refresh call, 5/5 succeed",
-            "ms": 70
+            "ms": 71
           }
         }
       }
@@ -779,11 +779,11 @@
             "getWithAuth": "hand-written: naive refresh on 401, retry once"
           },
           "default": {
-            "outcome": "after 1.0s: wrong data (1 attempt)",
-            "ms": 1008
+            "outcome": "after 1.0s: wrong data, 1 attempt",
+            "ms": 1009
           },
           "configured": {
-            "outcome": "after 3.0s: throws TimeoutError (3 attempts)",
+            "outcome": "after 3.0s: throws TimeoutError, 3 attempts",
             "ms": 3002
           }
         },
@@ -799,12 +799,12 @@
             "getWithAuth": "hand-written: naive refresh on 401, retry once"
           },
           "default": {
-            "outcome": "after 1.0s: throws AxiosError (1 attempt)",
+            "outcome": "after 1.0s: throws AxiosError, 1 attempt",
             "ms": 1010
           },
           "configured": {
-            "outcome": "after 3.0s: throws CanceledError (3 attempts)",
-            "ms": 3003
+            "outcome": "after 3.0s: throws CanceledError, 3 attempts",
+            "ms": 3002
           }
         },
         "ky": {
@@ -819,12 +819,12 @@
             "getWithAuth": "hand-written: naive refresh on 401, retry once"
           },
           "configured": {
-            "outcome": "after 3.0s: throws TimeoutError (3 attempts)",
-            "ms": 3005
+            "outcome": "after 3.0s: throws TimeoutError, 3 attempts",
+            "ms": 3002
           },
           "default": {
-            "outcome": "after 3.9s: throws HTTPError (3 attempts)",
-            "ms": 3919
+            "outcome": "after 3.9s: throws HTTPError, 3 attempts",
+            "ms": 3924
           }
         },
         "ofetch": {
@@ -839,12 +839,12 @@
             "getWithAuth": "hand-written: naive refresh on 401, retry once"
           },
           "default": {
-            "outcome": "after 2.0s: throws FetchError (2 attempts)",
-            "ms": 2020
+            "outcome": "after 2.0s: throws FetchError, 2 attempts",
+            "ms": 2019
           },
           "configured": {
-            "outcome": "after 3.0s: throws FetchError (3 attempts)",
-            "ms": 3004
+            "outcome": "after 3.0s: throws FetchError, 3 attempts",
+            "ms": 3003
           }
         },
         "liaise": {
@@ -859,12 +859,12 @@
             "getWithAuth": "hand-written: same refresh middleware, without share"
           },
           "default": {
-            "outcome": "after 1.0s: error result (http) (1 attempt)",
-            "ms": 1013
+            "outcome": "after 1.0s: error result (http), 1 attempt",
+            "ms": 1012
           },
           "configured": {
-            "outcome": "after 3.0s: error result (timeout) (3 attempts)",
-            "ms": 3004
+            "outcome": "after 3.0s: error result (timeout), 3 attempts",
+            "ms": 3003
           }
         }
       }
@@ -887,11 +887,11 @@
           },
           "default": {
             "outcome": "requests /s/users/undefined",
-            "ms": 8
+            "ms": 6
           },
           "configured": {
             "outcome": "requests /s/users/undefined",
-            "ms": 8
+            "ms": 7
           }
         },
         "axios": {
@@ -907,11 +907,11 @@
           },
           "default": {
             "outcome": "requests /s/users/undefined",
-            "ms": 8
+            "ms": 7
           },
           "configured": {
             "outcome": "requests /s/users/undefined",
-            "ms": 8
+            "ms": 7
           }
         },
         "ky": {
@@ -927,7 +927,7 @@
           },
           "default": {
             "outcome": "requests /s/users/undefined",
-            "ms": 8
+            "ms": 7
           },
           "configured": {
             "outcome": "requests /s/users/undefined",
@@ -947,11 +947,11 @@
           },
           "default": {
             "outcome": "requests /s/users/undefined",
-            "ms": 9
+            "ms": 8
           },
           "configured": {
             "outcome": "requests /s/users/undefined",
-            "ms": 9
+            "ms": 8
           }
         },
         "liaise": {
@@ -966,11 +966,11 @@
             "getWithAuth": "hand-written: same refresh middleware, without share"
           },
           "default": {
-            "outcome": "refused before sending (error result (network))",
+            "outcome": "refused before sending: error result (network)",
             "ms": 3
           },
           "configured": {
-            "outcome": "refused before sending (error result (network))",
+            "outcome": "refused before sending: error result (network)",
             "ms": 3
           }
         }
@@ -1078,7 +1078,7 @@
           },
           "configured": {
             "outcome": "error result (parse)",
-            "ms": 5
+            "ms": 4
           }
         }
       }

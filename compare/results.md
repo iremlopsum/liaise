@@ -8,13 +8,13 @@ Run on 2026-10-04, Node v22.18.0, darwin arm64. Versions: fetch v22.18.0, axios 
 | --- | :-- | :-- | :-- | :-- | :-- |
 | Server answers 500 | throws Error* | throws AxiosError | throws HTTPError | throws FetchError | error result (http) |
 | Server unreachable | throws TypeError* | throws AxiosError (name: Error) | throws NetworkError | throws FetchError | error result (network) |
-| Server never answers | throws TimeoutError, 3002 ms* | throws AxiosError, 3007 ms | throws TimeoutError, 3006 ms | throws FetchError, 3005 ms | error result (timeout), 3005 ms |
+| Server never answers | throws TimeoutError, 3002 ms* | throws AxiosError, 3005 ms | throws TimeoutError, 3005 ms | throws FetchError, 3003 ms | error result (timeout), 3003 ms |
 | 200 with broken JSON | throws SyntaxError* | throws AxiosError (name: SyntaxError) | throws SyntaxError | throws SyntaxError | error result (parse) |
 | 204 with no body, on a JSON call | resolves with undefined* | resolves with "" | resolves with undefined | resolves with undefined | resolves with undefined |
 | Search as you type: which results stay on screen | shows "rea"* | shows "rea"* | shows "rea"* | shows "rea"* | shows "rea" |
 | Five requests get a 401 at once | 1 refresh call, 5/5 succeed* | 1 refresh call, 5/5 succeed* | 1 refresh call, 5/5 succeed* | 1 refresh call, 5/5 succeed* | 1 refresh call, 5/5 succeed* |
-| Slow 503s, 3 s deadline, 3 retries: when does the caller hear back | after 3.0s: throws TimeoutError (3 attempts)* | after 3.0s: throws CanceledError (3 attempts)* | after 3.0s: throws TimeoutError (3 attempts) | after 3.0s: throws FetchError (3 attempts) | after 3.0s: error result (timeout) (3 attempts) |
-| Path param is undefined | requests /s/users/undefined | requests /s/users/undefined | requests /s/users/undefined | requests /s/users/undefined | refused before sending (error result (network)) |
+| Slow 503s, 3 s deadline, 3 retries: when does the caller hear back | after 3.0s: throws TimeoutError, 3 attempts* | after 3.0s: throws CanceledError, 3 attempts* | after 3.0s: throws TimeoutError, 3 attempts | after 3.0s: throws FetchError, 3 attempts* | after 3.0s: error result (timeout), 3 attempts |
+| Path param is undefined | requests /s/users/undefined | requests /s/users/undefined | requests /s/users/undefined | requests /s/users/undefined | refused before sending: error result (network) |
 | Response is missing a field the type promises | — | — | throws SchemaValidationError | — | error result (parse) |
 
 \* needed hand-written code, described in the notes.
@@ -31,8 +31,8 @@ Run on 2026-10-04, Node v22.18.0, darwin arm64. Versions: fetch v22.18.0, axios 
 | 204 with no body, on a JSON call | throws SyntaxError | resolves with "" | throws SyntaxError | resolves with undefined | error result (parse) |
 | Search as you type: which results stay on screen | shows "r" | shows "r" | shows "r" | shows "r" | shows "r" |
 | Five requests get a 401 at once | 5 refresh calls, 1/5 succeed* | 5 refresh calls, 1/5 succeed* | 5 refresh calls, 1/5 succeed* | 5 refresh calls, 1/5 succeed* | 5 refresh calls, 1/5 succeed* |
-| Slow 503s, 3 s deadline, 3 retries: when does the caller hear back | after 1.0s: wrong data (1 attempt) | after 1.0s: throws AxiosError (1 attempt) | after 3.9s: throws HTTPError (3 attempts) | after 2.0s: throws FetchError (2 attempts) | after 1.0s: error result (http) (1 attempt) |
-| Path param is undefined | requests /s/users/undefined | requests /s/users/undefined | requests /s/users/undefined | requests /s/users/undefined | refused before sending (error result (network)) |
+| Slow 503s, 3 s deadline, 3 retries: when does the caller hear back | after 1.0s: wrong data, 1 attempt | after 1.0s: throws AxiosError, 1 attempt | after 3.9s: throws HTTPError, 3 attempts | after 2.0s: throws FetchError, 2 attempts | after 1.0s: error result (http), 1 attempt |
+| Path param is undefined | requests /s/users/undefined | requests /s/users/undefined | requests /s/users/undefined | requests /s/users/undefined | refused before sending: error result (network) |
 | Response is missing a field the type promises | wrong data | wrong data | wrong data | wrong data | wrong data |
 
 \* needed hand-written code, described in the notes.
