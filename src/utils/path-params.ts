@@ -153,16 +153,41 @@ export class FragmentError extends TypeError {
 }
 
 /**
+ * Why `value` cannot fill a path segment, or `null` when it can.
+ *
+ * A segment is filled with `String(value)`, which never fails — it just turns
+ * a mistake into a plausible-looking URL ('/users/undefined', '/users/null',
+ * '/users/', '/users/[object Object]'). Those requests reach a real server and
+ * come back as a 404 or, worse, as someone else's data. Accepted: non-empty
+ * strings, finite numbers, bigints and booleans. A Date gets its own hint,
+ * matching the query-string rule: ISO and epoch are both common, so the
+ * caller picks.
+ */
+function unusableSegment(value: unknown): string | null {
+  if (value === undefined) return 'undefined'
+  if (value === null) return 'null'
+  if (value === '') return 'an empty string'
+  if (typeof value === 'number' && !Number.isFinite(value)) return String(value)
+  if (value instanceof Date) return 'a Date (convert it first, e.g. date.toISOString() or date.getTime())'
+  if (Array.isArray(value)) return 'an array'
+  if (typeof value === 'object') return 'an object'
+  if (typeof value === 'function' || typeof value === 'symbol') return `a ${typeof value}`
+  return null
+}
+
+/**
  * Substitutes `:param` tokens in the path with matching values from params,
  * optionally appends remaining params as a query string.
  *
  * This is the main URL construction function used by the request engine.
  * It handles the full lifecycle from path template to final URL.
  *
- * **Path param matching** uses regex with a word-boundary lookahead to prevent
- * partial matches. For example, a param key `id` will match `:id` but NOT
- * `:idExtra`. This is achieved by requiring that the character after the param
- * name is either a non-alphanumeric-underscore character or end of string.
+ * **Path param matching** scans the template once for `:name` tokens
+ * (`[a-zA-Z0-9_]+`, greedy), so a param key `id` fills `:id` but never part of
+ * `:idExtra`. A token is filled only from a non-empty string, a finite number,
+ * a bigint or a boolean; `undefined`, `null`, `''`, objects, arrays and Dates
+ * throw a TypeError naming the param, so a call is never sent to
+ * '/users/undefined'.
  *
  * **Query string rules** (when `asQuery` is true):
  * - Primitives: `{ page: 1 }` → `?page=1`
@@ -228,12 +253,27 @@ export function buildUrl(baseUrl: string, path: string, params: Record<string, u
   // every occurrence. encodeURIComponent escapes ':' to '%3A', so a value can
   // never produce a token of its own.
   // -------------------------------------------------------------------------
+  //
+  // A token is filled only from a value that makes a real segment (see
+  // `unusableSegment`). Before 5.0.2 String(value) went in unchecked, so
+  // { id: undefined } built '/users/undefined' and the call was sent — the
+  // component-rendered-before-the-id-loaded bug. A bad value is recorded here
+  // and thrown after Phase 0b, so a fragment still wins when both are wrong.
+  // -------------------------------------------------------------------------
   const lookup = new Map(Object.entries(params))
   const consumed = new Set<string>()
+  const unusable: string[] = []
   resolvedPath = resolvedPath.replace(/:([a-zA-Z0-9_]+)/g, (token: string, name: string) => {
     if (!lookup.has(name)) return token
     consumed.add(name)
-    return encodeURIComponent(String(lookup.get(name)))
+    const value = lookup.get(name)
+    const problem = unusableSegment(value)
+    if (problem) {
+      // Record once per name: a repeated token ('/a/:id/b/:id') is one mistake.
+      if (!unusable.some(entry => entry.startsWith(`"${name}"`))) unusable.push(`"${name}" is ${problem}`)
+      return token
+    }
+    return encodeURIComponent(String(value))
   })
   for (const [key, value] of lookup) {
     if (!consumed.has(key)) remaining[key] = value
@@ -284,6 +324,16 @@ export function buildUrl(baseUrl: string, path: string, params: Record<string, u
   // module rather than fail on the one call that used it. For a library whose
   // first promise is "runtime-agnostic", that trade is not worth one regex.
   // -------------------------------------------------------------------------
+  // A param that was provided but cannot make a segment is the more specific
+  // mistake, so it is reported before "unresolved" (which it would otherwise
+  // also trip, since its token was left in place).
+  if (unusable.length > 0) {
+    throw new TypeError(
+      `Path parameter ${unusable.join(', ')} in path "${path}", so the call was not sent. ` +
+      'A path parameter must be a non-empty string, a finite number or a boolean.'
+    )
+  }
+
   const unresolved = resolvedPath
     .split('/')
     .map(segment => /^:[a-zA-Z0-9_]+/.exec(segment)?.[0])

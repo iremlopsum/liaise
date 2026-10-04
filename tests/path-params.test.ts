@@ -410,3 +410,47 @@ describe('Date in a query string', () => {
       .toThrow(/A Date cannot be sent in a query string as is/)
   })
 })
+
+// -----------------------------------------------------------------------------
+// 5.0.2: a path token is filled only from a value that makes a real segment.
+// Before, String(value) went in unchecked: { id: undefined } built /users/undefined
+// and the call was sent — the classic "component rendered before the id loaded" bug.
+// -----------------------------------------------------------------------------
+describe('path param values that cannot make a segment are refused', () => {
+  it.each([
+    ['undefined', undefined, /"id" is undefined/],
+    ['null', null, /"id" is null/],
+    ['an empty string', '', /"id" is an empty string/],
+    ['NaN', NaN, /"id" is NaN/],
+    ['Infinity', Infinity, /"id" is Infinity/],
+    ['an object', { a: 1 }, /"id" is an object/],
+    ['an array', [1, 2], /"id" is an array/],
+    ['a Date', new Date(0), /"id" is a Date.*toISOString\(\)/],
+  ])('refuses %s', (_name, value, message) => {
+    expect(() => buildUrl('/api', '/users/:id', { id: value })).toThrow(TypeError)
+    expect(() => buildUrl('/api', '/users/:id', { id: value })).toThrow(message)
+  })
+
+  it.each([
+    ['a string', 'abc', '/api/users/abc'],
+    ['a number', 42, '/api/users/42'],
+    ['zero', 0, '/api/users/0'],
+    ['a boolean', false, '/api/users/false'],
+    ['a bigint', 10n, '/api/users/10'],
+  ])('still fills the token from %s', (_name, value, url) => {
+    expect(buildUrl('/api', '/users/:id', { id: value }).url).toBe(url)
+  })
+
+  it('names every bad param at once', () => {
+    expect(() => buildUrl('/api', '/orgs/:org/users/:id', { org: '', id: undefined }))
+      .toThrow(/"org" is an empty string.*"id" is undefined/)
+  })
+
+  it('leaves a bad value that is not a path token to the query/body rules', () => {
+    expect(buildUrl('/api', '/users', { id: undefined }, true).url).toBe('/api/users')
+  })
+
+  it('still refuses a fragment first when both are wrong', () => {
+    expect(() => buildUrl('/api', '/users/:id#top', { id: undefined })).toThrow(/fragment/i)
+  })
+})
