@@ -1,6 +1,8 @@
 // Turns results.json into results.md, and with `--splice <readme>` into the README's comparison block.
 import { readFileSync, writeFileSync } from 'node:fs'
 
+// Absolute, so links into compare/ also work on npm, which doesn't ship compare/.
+const REPO = 'https://github.com/iremlopsum/liaise/blob/main/compare'
 const START = '<!-- compare:start -->', END = '<!-- compare:end -->'
 const names = ['fetch', 'axios', 'ky', 'ofetch', 'liaise']
 const methodFor = { 'http-500': 'getJson', offline: 'getJson', hang: 'getJson', 'broken-json': 'getJson', 'empty-204': 'getJson',
@@ -35,8 +37,8 @@ function liaiseDefaultSentence() {
   const parts = []
   if (hangBad) parts.push(`has no timeout (${others.length ? `only ${others.join(' and ')} ${others.length === 1 ? 'has one' : 'have one'} by default` : 'no library here has one by default'})`)
   if (emptyBad) parts.push(`treats a 204 on a JSON call as ${/parse/.test(empty) ? 'a parse error' : 'an error'}`)
-  if (!parts.length) return 'Out of the box, liaise handles the hang and 204 rows without a failure. See Table B in [compare/results.md](compare/results.md).'
-  return `Out of the box, liaise ${parts.join(' and ')}. See Table B in [compare/results.md](compare/results.md).`
+  if (!parts.length) return `Out of the box, liaise handles the hang and 204 rows without a failure. See Table B in [compare/results.md](${REPO}/results.md).`
+  return `Out of the box, liaise ${parts.join(' and ')}. See Table B in [compare/results.md](${REPO}/results.md).`
 }
 const fmt = x => `${x.median.toLocaleString('en-US')} (${x.min.toLocaleString('en-US')}–${x.max.toLocaleString('en-US')})`
 const overheadTable = () => table(['Library', 'Sequential', 'Concurrent (50 in flight)'], names.map(n => [n, fmt(results.overhead[n].sequential), fmt(results.overhead[n].concurrent)]))
@@ -59,7 +61,9 @@ const versions = names.map(n => `${n} ${meta.versions[n]}`).join(', ')
 const months = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December']
 const readableDate = iso => { const [y, m, d] = iso.split('-').map(Number); return `${d} ${months[m - 1]} ${y}` }
 // The owner's disclaimer: the comparison is a dated snapshot of other people's libraries.
-const disclaimer = `Measured on ${readableDate(meta.date)} against axios ${meta.versions.axios}, ky ${meta.versions.ky} and ofetch ${meta.versions.ofetch}. Other libraries change. Rerun \`npm run compare\` in \`compare/\` for current results.`
+const contenders = names.filter(n => n !== 'fetch' && n !== 'liaise').map(n => `${n} ${meta.versions[n]}`)
+const contenderList = contenders.length > 1 ? `${contenders.slice(0, -1).join(', ')} and ${contenders.at(-1)}` : contenders.join('')
+const disclaimer = `Measured on ${readableDate(meta.date)} against ${contenderList}. Other libraries change. Rerun it with \`npm run build\` in the repo root, then \`npm install && npm run compare\` in \`compare/\`.`
 const full = `# Comparison results
 
 ${disclaimer}
@@ -111,7 +115,7 @@ ${disclaimer}
 
 ${outcomes('configured')}
 
-\\* needed hand-written code, described in the [notes](compare/results.md#notes). — means the library has no built-in option.
+\\* needed hand-written code, described in the [notes](${REPO}/results.md#notes). — means the library has no built-in option.
 
 ${liaiseDefaultSentence()}
 
@@ -121,7 +125,7 @@ fetch is built into the runtime; its row is the call site only, the floor rather
 
 ${overheadLine()}
 
-Out-of-the-box results, request overhead in full and the notes: [compare/results.md](compare/results.md).
+Out-of-the-box results, request overhead in full and the notes: [compare/results.md](${REPO}/results.md).
 
 `
   writeFileSync(file, readme.slice(0, a) + block + readme.slice(b))

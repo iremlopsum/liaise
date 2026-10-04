@@ -1,6 +1,6 @@
 # Comparison results
 
-Measured on 4 October 2026 against axios 1.20.0, ky 2.1.0 and ofetch 1.5.1. Other libraries change. Rerun `npm run compare` in `compare/` for current results.
+Measured on 4 October 2026 against axios 1.20.0, ky 2.1.0 and ofetch 1.5.1. Other libraries change. Rerun it with `npm run build` in the repo root, then `npm install && npm run compare` in `compare/`.
 
 Run on 2026-10-04, Node v22.18.0, darwin arm64. Versions: fetch v22.18.0, axios 1.20.0, ky 2.1.0, ofetch 1.5.1, liaise 5.0.2.
 

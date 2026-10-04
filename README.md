@@ -1516,11 +1516,11 @@ liaise is a good fit when you have:
 
 ### How it compares
 
-[`compare/`](compare/) runs fetch, axios, ky, ofetch and liaise through ten failure scenarios against a local server, and records what the calling code gets back. [compare/README.md](compare/README.md) explains the fairness rules and how to rerun it.
+[`compare/`](https://github.com/iremlopsum/liaise/blob/main/compare) runs fetch, axios, ky, ofetch and liaise through ten failure scenarios against a local server, and records what the calling code gets back. [compare/README.md](https://github.com/iremlopsum/liaise/blob/main/compare/README.md) explains the fairness rules.
 
 <!-- compare:start -->
 
-Measured on 4 October 2026 against axios 1.20.0, ky 2.1.0 and ofetch 1.5.1. Other libraries change. Rerun `npm run compare` in `compare/` for current results.
+Measured on 4 October 2026 against axios 1.20.0, ky 2.1.0 and ofetch 1.5.1. Other libraries change. Rerun it with `npm run build` in the repo root, then `npm install && npm run compare` in `compare/`.
 
 | Scenario | fetch | axios | ky | ofetch | liaise |
 | --- | :-- | :-- | :-- | :-- | :-- |
@@ -1535,9 +1535,9 @@ Measured on 4 October 2026 against axios 1.20.0, ky 2.1.0 and ofetch 1.5.1. Othe
 | Path param is undefined | requests /s/users/undefined | requests /s/users/undefined | requests /s/users/undefined | requests /s/users/undefined | refused before sending: error result (network) |
 | Response is missing a field the type promises | — | — | throws SchemaValidationError | — | error result (parse) |
 
-\* needed hand-written code, described in the [notes](compare/results.md#notes). — means the library has no built-in option.
+\* needed hand-written code, described in the [notes](https://github.com/iremlopsum/liaise/blob/main/compare/results.md#notes). — means the library has no built-in option.
 
-Out of the box, liaise has no timeout (only ky has one by default) and treats a 204 on a JSON call as a parse error. See Table B in [compare/results.md](compare/results.md).
+Out of the box, liaise has no timeout (only ky has one by default) and treats a 204 on a JSON call as a parse error. See Table B in [compare/results.md](https://github.com/iremlopsum/liaise/blob/main/compare/results.md).
 
 | Library | gzip (kB) | brotli (kB) |
 | --- | :-- | :-- |
@@ -1552,15 +1552,15 @@ fetch is built into the runtime; its row is the call site only, the floor rather
 
 Request overhead on localhost, sequential (median requests per second): fetch 16,797, axios 13,691, ky 13,742, ofetch 16,230, liaise 16,414.
 
-Out-of-the-box results, request overhead in full and the notes: [compare/results.md](compare/results.md).
+Out-of-the-box results, request overhead in full and the notes: [compare/results.md](https://github.com/iremlopsum/liaise/blob/main/compare/results.md).
 
 <!-- compare:end -->
 
-With enough of your own code, every library gets the right result in almost every row. The difference is how much you write. Counting the cells marked `*`, fetch needs 8, axios 3, ofetch 3, ky 2 and liaise 1. liaise gets there with options, and returns each failure as a value instead of throwing. It is the only one that refuses an undefined path param before sending the request.
+With enough of your own code, every library gets the right result in almost every row. The difference is how much you write. Counting the cells marked `*`, fetch needs 8, axios 3, ofetch 3, ky 2 and liaise 1. liaise needs code only for the token refresh, and returns each failure as a value instead of throwing. It is the only one that refuses an undefined path param before sending the request.
 
-ky is the closest alternative. It matches liaise on the deadline, token refresh and schema rows. For the missing default timeout, a `timeout` option on `createApi` is planned. In size, liaise is larger than ofetch and smaller than ky and axios.
+ky is the closest alternative. Apart from throwing instead of returning errors, it differs from liaise in two rows of the table. Its search as you type needs code, and it sends the undefined path param. Out of the box, ky is the only one that times out, and it retries, as ofetch does. In size, liaise is larger than ofetch and smaller than ky and axios.
 
-In request overhead, liaise ties fetch and ofetch. axios and ky handle about 17% fewer requests per second. Overhead is measured in microseconds; on a real network each request takes milliseconds.
+In request overhead, liaise ties fetch and ofetch. axios and ky handle about 17% fewer requests per second than liaise. Overhead is measured in microseconds; on a real network each request takes milliseconds.
 
 ### Where it runs
 
