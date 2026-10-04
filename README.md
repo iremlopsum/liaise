@@ -1701,6 +1701,7 @@ api.getUser.getHeaders() // { 'x-api-version': '2', 'x-client': 'web' }
 
 - **It leaves out per-call headers, headers a middleware sets, and the `Content-Type` liaise picks from the body.** Those exist only once a call happens.
 - **It returns a new plain object each time.** Changing it changes nothing.
+- **An invalid configured header gives `{}`.** A value with a character outside Latin-1, or a name with a space, would make a `Headers` object throw, and `getHeaders()` never throws.
 - **GraphQL operations have it too**, including `graphql.query.getCategory.getHeaders()` and `graphql.mutation.updateCategory.getHeaders()` on a client split into queries and mutations.
 
 ### Result and ApiError
@@ -1921,6 +1922,8 @@ Under `share`, two calls join one request when all of these match. They are read
 - The method and the full URL, query string included, exactly as sent.
 - Every header, by lowercase name, except the tracing headers below.
 - The body, when it is absent, a string (every JSON body is one) or `URLSearchParams`. Any other body has no key, so that call sends its own request.
+
+The URL is read as written. A `baseUrl` without a leading slash is resolved by the browser when the request is sent, so give a `share` endpoint an absolute or root-relative `baseUrl`.
 
 The tracing headers are `traceparent`, `tracestate`, `baggage`, `sentry-trace`, `x-request-id` and `x-correlation-id`. They identify a request for tracing and don't change the answer. `baggage` can carry tenant or user IDs, and two calls that differ only there still share. Auth headers and cookies always stay in the key.
 

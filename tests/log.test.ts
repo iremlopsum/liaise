@@ -19,6 +19,11 @@ const make = (log?: unknown) => createApi({
 })
 
 describe('log option', () => {
+  it('log: null from untyped JS is off and does not throw', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => json(users)))
+    await make(null).list()
+    expect(log).not.toHaveBeenCalled()
+  })
   it('is off by default', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => json(users)))
     await make().list()

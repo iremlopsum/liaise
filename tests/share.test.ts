@@ -1636,3 +1636,25 @@ describe('a replaced signal does not hold the shared request', () => {
     expect(onError).not.toHaveBeenCalled()
   })
 })
+
+describe('a middleware that assigns a plain-object headers', () => {
+  afterEach(() => { vi.restoreAllMocks() })
+
+  it('still sends, and different values do not share', async () => {
+    const fetchMock = vi.fn(async () => new Response('{"ok":1}', { status: 200 }))
+    vi.stubGlobal('fetch', fetchMock)
+    let n = 0
+    const mw: Middleware = (ctx, next) => {
+      ctx.request.headers = { authorization: `u${n++}` } as any
+      return next()
+    }
+    const api = createApi({
+      baseUrl: 'https://x.test', middleware: [mw],
+      requests: { g: new Request<{ id: string }, unknown>({ method: 'GET', path: '/g/:id', share: true }) },
+    })
+    const [a, b] = await Promise.all([api.g({ id: '1' }), api.g({ id: '1' })])
+    expect(a.error).toBeNull()
+    expect(b.error).toBeNull()
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+  })
+})

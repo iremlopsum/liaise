@@ -54,6 +54,9 @@ export const TRACING_HEADERS: ReadonlySet<string> = new Set([
  * compared cheaply and safely (an upload), so the call is never shared.
  */
 export function requestKey(name: string, method: string, url: string, headers: Headers, body: unknown): string | null {
+  // A middleware may assign a plain object or tuples to `ctx.request.headers`
+  // (fetch accepts them); only a Headers has forEach.
+  const h = headers instanceof Headers ? headers : new Headers(headers as HeadersInit)
   let bodyKey: unknown
   if (body === null || body === undefined) bodyKey = null
   else if (typeof body === 'string') bodyKey = ['s', body]
@@ -61,7 +64,7 @@ export function requestKey(name: string, method: string, url: string, headers: H
   else return null
 
   const pairs: [string, string][] = []
-  headers.forEach((value, key) => {
+  h.forEach((value, key) => {
     if (!TRACING_HEADERS.has(key)) pairs.push([key, value])
   })
   pairs.sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0))
@@ -102,6 +105,8 @@ export interface Entered {
 /** One caller's view of a shared round trip. */
 export interface Shared {
   outcome: SharedOutcome
+  // `token` and `joined` are what `onEnter` already supplied, repeated here for
+  // callers (and tests) that read them off the resolved value; core does not.
   /** Identity of the round trip — every caller of it gets the same object. */
   token: object
   /** True when this caller joined a request someone else sent. */

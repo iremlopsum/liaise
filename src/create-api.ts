@@ -1348,8 +1348,15 @@ export function createApi<TRequests extends Record<string, Request<any, any>>>(
 
     // Configuration-only headers (no per-call layer): a fresh record each call,
     // so a caller mutating it cannot reach the next caller.
-    ;(api[name] as Function & EndpointExtras).getHeaders = () =>
-      headersRecord(mergeHeaders(globalHeaders, request.config.headers, undefined))
+    // An invalid configured header (a non-Latin-1 value, a name with a space)
+    // makes `new Headers()` throw, and a public entry point never throws: {}.
+    ;(api[name] as Function & EndpointExtras).getHeaders = () => {
+      try {
+        return headersRecord(mergeHeaders(globalHeaders, request.config.headers, undefined))
+      } catch {
+        return {}
+      }
+    }
   }
 
   // Cast the dynamically-built object to the fully-typed Api type.

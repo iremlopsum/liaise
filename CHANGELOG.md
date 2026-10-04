@@ -41,10 +41,12 @@ another. Also adds GraphQL `share`, a `timeout` option, a `log` option and
   data with `data: true`. It wraps the whole call, including a call a deadline ends,
   and a call that joined a shared request is tagged `, shared`. It is not a
   middleware.
-- **`logMiddleware({ enabled, data })`.** The bare `logMiddleware()` form is
+- **`logMiddleware({ enabled, data })`.** `middleware: [logMiddleware]` works
   unchanged.
 - **`getHeaders()` on every generated method**, REST and GraphQL, including the
-  query and mutation split. It returns the headers the call would send.
+  query and mutation split. It returns configuration headers only: the client's merged with the endpoint's, the
+  endpoint winning, names lowercase. Per-call headers, headers a middleware adds and the
+  derived `Content-Type` are not included. An invalid configured header gives `{}`.
 - New type exports: `LogOptions` (core) and `LogMiddleware` (`liaise/middleware`).
 
 ### Changed

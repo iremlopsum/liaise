@@ -665,8 +665,15 @@ export function createGraphQL(config: any): any {
     // sets that). A fresh record each time. The split client reuses this
     // function object, so `gql.query.x` inherits it.
     return Object.assign(method, {
-      getHeaders: (): Record<string, string> =>
-        headersRecord(mergeHeaders(globalHeaders, operation.config.headers, undefined)),
+      // An invalid configured header makes `new Headers()` throw; a public
+      // entry point never throws, so that gives {}.
+      getHeaders: (): Record<string, string> => {
+        try {
+          return headersRecord(mergeHeaders(globalHeaders, operation.config.headers, undefined))
+        } catch {
+          return {}
+        }
+      },
     })
   }
 

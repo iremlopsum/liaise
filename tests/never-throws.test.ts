@@ -401,3 +401,23 @@ describe('a throwing middleware never rejects a GraphQL caller', () => {
     expect(r.error!.kind).toBe('abort')
   })
 })
+
+describe('getHeaders never throws', () => {
+  it('REST: an invalid configured header gives an object', () => {
+    const api = createApi({
+      baseUrl: '', headers: { 'x-bad': '€' },
+      requests: { g: new Request<Record<string, never>, unknown>({ method: 'GET', path: '/g' }) },
+    })
+    expect(() => api.g.getHeaders()).not.toThrow()
+    expect(api.g.getHeaders()).toEqual({})
+  })
+
+  it('GraphQL: an invalid configured header gives an object', () => {
+    const gql = createGraphQL({
+      endpoint: '/graphql', headers: { 'x-bad': '€' },
+      operations: { q: new Operation<Record<string, never>, unknown>({ operation: 'query { a }' }) },
+    })
+    expect(() => gql.q.getHeaders()).not.toThrow()
+    expect(gql.q.getHeaders()).toEqual({})
+  })
+})

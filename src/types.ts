@@ -995,6 +995,8 @@ export type EndpointExtras = {
    * plain object on every call. Read-only: changing it changes nothing.
    * Per-call headers, headers a middleware adds and the Content-Type liaise
    * derives from the body are not included: they only exist once a call happens.
+   * An invalid configured header (a non-Latin-1 value, a name with a space)
+   * gives `{}` rather than a throw.
    */
   getHeaders(): Record<string, string>
 }

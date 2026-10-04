@@ -9,7 +9,9 @@ For the full record of what changed in each release, see [CHANGELOG.md](./CHANGE
 
 ## Upgrading to 5.1.0
 
-No code changes needed to compile or run. Upgrade soon if you use `share` on a server
+No code changes needed to run. A hand-built stand-in typed as `typeof api` or `typeof gql`
+(an object literal of `vi.fn()`s, say) no longer compiles, because every method now has
+`getHeaders`; give it `getHeaders: () => ({})`. Upgrade soon if you use `share` on a server
 with middleware that adds per-user credentials: before 5.1.0 one user's response could
 reach another. Twelve behaviours changed under `share`; check this if…
 
@@ -18,7 +20,7 @@ reach another. Twelve behaviours changed under `share`; check this if…
 2. **…you read `logMiddleware` output on a shared endpoint.** It prints a line pair per
    caller, tagged `, shared`.
 3. **…you passed identical per-call `headers` or `middleware` and expected no sharing.**
-   Those calls now share. Per-call headers that differ still do not.
+   Those calls now share when everything else they send matches. Per-call headers that differ still do not.
 4. **…you call `result.retry()` on a shared result.** It uses the caller's own options,
    not the first caller's.
 5. **…code relied on two sharers getting the same object.** JSON and text data are now a

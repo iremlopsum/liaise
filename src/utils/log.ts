@@ -75,8 +75,10 @@ export function createLogger(data: boolean): Middleware {
 
 /** `data` for a `log` setting, or null when logging is off (the default). */
 function dataFor(setting: boolean | LogOptions | undefined): boolean | null {
-  if (setting === undefined || setting === false) return null
-  if (setting === true) return false
+  // `null` and other non-objects only arrive from untyped JS: null is off, any
+  // other truthy non-object counts as `true`.
+  if (setting == null || setting === false) return null
+  if (typeof setting !== 'object') return false
   if (setting.enabled === false) return null
   return setting.data === true
 }
