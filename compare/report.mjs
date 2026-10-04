@@ -64,11 +64,14 @@ const readableDate = iso => { const [y, m, d] = iso.split('-').map(Number); retu
 const contenders = names.filter(n => n !== 'fetch' && n !== 'liaise').map(n => `${n} ${meta.versions[n]}`)
 const contenderList = contenders.length > 1 ? `${contenders.slice(0, -1).join(', ')} and ${contenders.at(-1)}` : contenders.join('')
 const disclaimer = `Measured on ${readableDate(meta.date)} against ${contenderList}. Other libraries change. Rerun it with \`npm run build\` in the repo root, then \`npm install && npm run compare\` in \`compare/\`.`
+// Every scenario runs in Node; in a browser axios switches to its XHR adapter.
+const axiosNote = 'In browsers axios uses XHR, so its results there can differ.'
+const runtimeNote = `Run in Node ${meta.node.replace(/^v/, '')} against a local server. ${axiosNote}`
 const full = `# Comparison results
 
 ${disclaimer}
 
-Run on ${meta.date}, Node ${meta.node}, ${meta.platform}. Versions: ${versions}.
+Run on ${meta.date}, Node ${meta.node}, ${meta.platform}, against a local server. Versions: ${versions}. ${axiosNote}
 
 ## Table A. With each library's documented setup
 
@@ -111,7 +114,7 @@ if (process.argv[2] === '--splice') {
   if (a === -1 || b === -1 || b < a) { console.error(`${file}: missing ${START} / ${END} markers`); process.exit(1) }
   const block = `${START}
 
-${disclaimer}
+${disclaimer} ${runtimeNote}
 
 ${outcomes('configured')}
 

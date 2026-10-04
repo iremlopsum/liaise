@@ -68,10 +68,10 @@ Formerly published as `@iremlopsum/apify`; switching takes two steps, see [MIGRA
 
 | With plain fetch | liaise | See |
 | ---------------- | ------ | --- |
-| Typing fast in a search box shows old results. A slow early search lands last. | `dedupe` cancels the older call. | [Stale requests](#cancelling-deadlines-and-stale-requests) |
+| Typing fast in a search box shows old results. A slow early search lands last. | `dedupe` cancels the older call. | [Stale requests](#drop-stale-calls-with-dedupe) |
 | Five components load the same data, or five 401s each refresh the token. That's five identical requests. | `share` sends one and hands everyone the answer. | [Sharing identical requests](#sharing-identical-requests) |
-| A 500 counts as success, offline throws, a hung server waits forever. | Every call returns `{ data, error }`. `error.kind` names the failure. | [Handling errors](#handling-errors) |
-| Retries run straight past your timeout. | `timeout` covers the whole operation, retries included. | [Deadlines](#cancelling-deadlines-and-stale-requests) |
+| A 500 counts as success, offline throws, a hung server waits forever. | Every call returns `{ data, error }`, and `error.kind` names the failure. With `timeout` set, a hung server becomes an error too. | [Handling errors](#handling-errors) |
+| Retries run straight past your timeout. | `timeout` covers the whole operation, retries included. | [Deadlines](#set-a-deadline-with-timeout) |
 | The backend changes a field and the page crashes three components later. | A schema checks the response. A bad shape is an error you handle. | [Validating responses](#validating-responses) |
 
 ### Before and after
@@ -360,7 +360,7 @@ async function loadUser(id: string) {
 - **Check `error` first.** After `if (error) return`, `data` has your response type, so you never write `data!`.
 - For an endpoint that sends no body, declare `responseType: 'none'`. Widening the type to `| null` doesn't work, because an empty body is a `'parse'` error. See [Reading responses](#reading-responses).
 - **Branch on `error.kind`.** Four kinds share `status: 0`, and each needs different handling.
-- **A non-2xx response is always `'http'`**, even when its body doesn't parse. liaise checks the status before it reads the body, so a 500 with broken JSON is still a 500, and [`retryMiddleware`](#retries-caching-and-logging) still retries it.
+- **A non-2xx response is always `'http'`**, even when its body doesn't parse. liaise checks the status before it reads the body, so a 500 with broken JSON is still a 500, and [`retryMiddleware`](#retry-failed-calls) still retries it.
 - **`response` is for the status and headers.** liaise has already read its body to produce `data` or `error.body`, so `response.json()` throws "Body has already been read". A `Response` you build yourself for `successResult()` in tests keeps its body.
 - Every field of `error` is listed under [`ApiError`](#result-and-apierror).
 
@@ -599,7 +599,7 @@ const withArkType = defineRequest()({
 
 - A validator that throws is a `'parse'` error too, with the thrown value in `error.body`.
 - **Only a 2xx body is validated.** A non-2xx body is diagnostic and often a different shape, so it is left alone.
-- **The GraphQL `Operation` takes `schema` too**, and validates the response's `data`. There the response type stays explicit, because only `defineRequest` infers it:
+- **The GraphQL `Operation` ([GraphQL](#graphql)) takes `schema` too**, and validates the response's `data`. There the response type stays explicit, because only `defineRequest` infers it:
 
   ```ts
   import { Operation, gql } from 'liaise'
@@ -916,43 +916,11 @@ liaise compares by reference (`===`). Store what a factory such as `retryMiddlew
 
 #### What a middleware sees
 
-`ctx.requestName` is the endpoint's key, such as `'getUser'`. `ctx.request` holds the request as it will be sent:
-
-- `method`, and `url` with the path params and query string filled in
-- `path`, the template, such as `/users/:id`
-- `params`, as the caller passed them
-- `headers`, a `Headers` object you can change
-- `body`, already serialized, or `null` when there is none
-- `signal`, the `AbortSignal` that `fetch` receives
-
-The types are under [MiddlewareContext](#middlewarecontext).
+`ctx.requestName` is the endpoint's key, such as `'getUser'`. `ctx.request` holds the request as it will be sent, with the URL filled in and the body serialized. Every field is listed under [MiddlewareContext](#middlewarecontext).
 
 #### Signals in middleware
 
-`ctx.request.signal` combines the caller's `signal` with the call's `timeout`, and is `undefined` when there is neither. liaise reads it when it calls `fetch`, so a middleware can replace it:
-
-```ts
-import { createApi, defineRequest, type Middleware } from 'liaise'
-
-type User = { id: string; name: string }
-
-const getUser = defineRequest<User>()({ method: 'GET', path: '/users/:id' })
-
-const timeout = (ms: number): Middleware => async (ctx, next) => {
-  ctx.request.signal = AbortSignal.timeout(ms)
-  return next()
-}
-
-const api = createApi({
-  baseUrl: 'https://api.example.com',
-  requests: { getUser },
-  middleware: [timeout(5000)],
-})
-```
-
-Your signal is then the only one `fetch` receives, so if the caller cancels, the call still ends with `kind: 'abort'` while the request itself runs on until your signal fires.
-
-A newer call can still cancel this one under [`dedupe`](#drop-stale-calls-with-dedupe), because liaise adds that signal after your middleware runs.
+`ctx.request.signal` combines the caller's `signal` with the call's `timeout`, and is `undefined` when there is neither. liaise reads it when it calls `fetch`, so a middleware can replace it. [Give each attempt its own timeout](#give-each-attempt-its-own-timeout) does this, and says what happens to a caller's cancel. How a replaced signal works with `share` and `dedupe` is under [Signal-replacing middleware](#signal-replacing-middleware).
 
 **Pass `ctx.request.signal` on to async work your middleware does itself**, such as a token refresh, a lookup or a queue. liaise won't wait for that work past the deadline or the caller's cancel ([Timeout backstop](#timeout-backstop)). A promise can't be stopped from outside, so passing the signal is the only way to end the work. Without it, the work keeps running and its result is thrown away.
 
@@ -1302,9 +1270,11 @@ export const userQuery = (id: string) => ({
 
 The same options object works with every TanStack adapter; the comments show the call in each. These comment lines aren't executed by the test.
 
+`error` is the `ApiError` liaise returned, which isn't an `Error` subclass, so it has no `message`. Read `error.kind` and `error.status`. To type it, register `ApiError` as TanStack's `defaultError`.
+
 ### Use with React
 
-With React's `useEffect` and `useState` (import them from `react`). `api` and `User` are from [Quick start](#quick-start).
+This hook uses React's `useEffect` and `useState`, imported from `react`. `api` and `User` are from [Quick start](#quick-start).
 
 <!-- tested: react-effect -->
 ```ts
@@ -1347,7 +1317,7 @@ async function loadUser() {
 }
 ```
 
-TanStack Query dedupes this case too; this recipe is for apps using a plain store.
+[TanStack Query](https://tanstack.com/query/latest/docs/framework/react/overview) dedupes this case too; this recipe is for apps using a plain store.
 
 ### One /me per page view on the server
 
@@ -1379,7 +1349,7 @@ async function renderPage(req: IncomingRequest) {
 }
 ```
 
-The client is created per request so that one user's call can never join another's; see [On a server](#on-a-server). Inside React Server Components, React's `cache()` does this too.
+The client is created per request so that one user's call can never join another's; see [On a server](#on-a-server). Inside React Server Components, React's [`cache()`](https://react.dev/reference/react/cache) does this too.
 
 ### Retry a flaky backend within one deadline
 
@@ -1411,7 +1381,7 @@ const api = createApi({
 })
 ```
 
-With `timeout: 3000`, the caller gets an answer within three seconds however many retries are left. See [Cancelling, deadlines and stale requests](#cancelling-deadlines-and-stale-requests).
+With `timeout: 3000`, the caller gets an answer within three seconds however many retries are left. See [Set a deadline with timeout](#set-a-deadline-with-timeout).
 
 ### Give each attempt its own timeout
 
@@ -1440,7 +1410,7 @@ const api = createApi({
 })
 ```
 
-Timeouts aren't retried by default; the `retryOn` above opts in. Because the middleware replaces `ctx.request.signal`, a caller's own cancel still ends the call as `'abort'`, but the request itself keeps running until the per-attempt signal fires (see [Signals in middleware](#signals-in-middleware)).
+Timeouts aren't retried by default; the `retryOn` above opts in. Because the middleware replaces `ctx.request.signal`, a caller's own cancel still ends the call as `'abort'`, but the request itself keeps running until the per-attempt signal fires.
 
 ### Report errors to Sentry
 
@@ -1463,7 +1433,9 @@ const api = createApi({
 })
 ```
 
-Use a middleware instead when you need timing, or the request before it's sent, or want to report for some endpoints only. [Writing middleware](#writing-middleware) has the middleware version.
+`ApiError` isn't an `Error`, so it carries no stack trace or `message` of its own. Pass the fields you want to see in `extra`, as above.
+
+Use a middleware instead when you need timing, or the request before it's sent, or want to report for some endpoints only. [Example: report server errors](#example-report-server-errors) has the middleware version.
 
 ### Upload and download files
 
@@ -1512,11 +1484,11 @@ liaise is a good fit when you have:
 
 ### How it compares
 
-[`compare/`](https://github.com/iremlopsum/liaise/blob/main/compare) runs fetch, axios, ky, ofetch and liaise through ten failure scenarios against a local server, and records what the calling code gets back. [compare/README.md](https://github.com/iremlopsum/liaise/blob/main/compare/README.md) explains the fairness rules.
+[`compare/`](https://github.com/iremlopsum/liaise/blob/main/compare) runs fetch, axios, ky, ofetch and liaise through ten failure scenarios against a local server, and records what the calling code gets back. [compare/README.md](https://github.com/iremlopsum/liaise/blob/main/compare/README.md) explains the fairness rules. If you maintain one of these libraries and think its setup is unfair, a pull request is welcome.
 
 <!-- compare:start -->
 
-Measured on 4 October 2026 against axios 1.20.0, ky 2.1.0 and ofetch 1.5.1. Other libraries change. Rerun it with `npm run build` in the repo root, then `npm install && npm run compare` in `compare/`.
+Measured on 4 October 2026 against axios 1.20.0, ky 2.1.0 and ofetch 1.5.1. Other libraries change. Rerun it with `npm run build` in the repo root, then `npm install && npm run compare` in `compare/`. Run in Node 22.18.0 against a local server. In browsers axios uses XHR, so its results there can differ.
 
 | Scenario | fetch | axios | ky | ofetch | liaise |
 | --- | :-- | :-- | :-- | :-- | :-- |
@@ -1582,7 +1554,7 @@ Every dependency of liaise would also be a dependency of your app, with more to 
 
 ### Middleware over interceptors
 
-Separate request and response interceptors split one job in two, and the halves can't share state or send the call again. A middleware wraps the whole call, so one function can set a header, read the result, retry, or answer from a cache. The built-in retry, cache and log are ordinary middleware, so anything they do, yours can do too.
+Separate request and response interceptors split one job in two. State both halves need rides on the request config, and resending means calling the client again from inside a hook. A middleware wraps the whole call, so one function can set a header, read the result, retry, or answer from a cache. The built-in retry, cache and log are ordinary middleware, so anything they do, yours can do too.
 
 ### Types by inference
 
@@ -1663,7 +1635,7 @@ The second argument of every call, as in `api.getUser(params, options)`. [`pagin
 | `skipMiddleware` | `Middleware[]` | — | Middleware to leave out of this call, matched by reference ([details](#skipping-a-middleware-for-one-call)). |
 | `headers` | `HeadersInit` | — | Replaces the client's and the endpoint's value for the same header. Turns off `share` for this call. |
 | `signal` | `AbortSignal` | — | Cancels the call, which ends with `kind: 'abort'` ([details](#cancel-with-a-signal)). |
-| `timeout` | `number` (ms) | the endpoint's `timeout` | Replaces the endpoint's deadline for this call. `0` turns it off. Under `share`, it bounds only this caller's wait ([details](#share-key-and-refcount)). |
+| `timeout` | `number` (ms) | the endpoint's `timeout` | Replaces the endpoint's deadline for this call. `0` turns it off. Under `share`, it bounds only this caller's wait ([details](#sharing-identical-requests)). |
 
 A fractional `timeout` is rounded down to whole milliseconds, with a minimum of 1 ms. A value above the timer limit of 2³¹ − 1 ms is capped there. Zero or a negative number means no deadline.
 
@@ -1881,7 +1853,7 @@ Every caller that waits to the end gets the same `Result` object. Its `retry()` 
 
 #### Signal-replacing middleware
 
-A middleware can replace `ctx.request.signal`, as [Signals in middleware](#signals-in-middleware) shows. Under `share`, liaise merges the signal that tracks the callers back in before `fetch`. The shared request is still cancelled once every caller has given up.
+A middleware can replace `ctx.request.signal`, as [Give each attempt its own timeout](#give-each-attempt-its-own-timeout) shows. Under `share`, liaise merges the signal that tracks the callers back in before `fetch`. The shared request is still cancelled once every caller has given up.
 
 Under `dedupe`, liaise merges the dedupe signal into yours the same way, so the request ends when either one fires. The dedupe signal is added when `fetch` is called. A middleware that reads `ctx.request.signal` before `next()` sees only the caller's signal and the deadline.
 
@@ -1912,7 +1884,7 @@ A middleware that rethrows liaise's own abort or timeout reason, as it is or wra
 
 #### baseUrl query merging
 
-A `baseUrl` can carry its own query string, such as a fixed API key. Its params go in front of the call's:
+A `baseUrl` can carry its own query string, such as a fixed `api-version`. Its params go in front of the call's:
 
 ```ts
 import { createApi, defineRequest } from 'liaise'
@@ -1920,13 +1892,15 @@ import { createApi, defineRequest } from 'liaise'
 type Hit = { id: string }
 
 const search = defineRequest<Hit[], { q: string }>()({ method: 'GET', path: '/search' })
-const api = createApi({ baseUrl: 'https://api.example.com/v1?key=abc', requests: { search } })
+const api = createApi({ baseUrl: 'https://api.example.com/v1?api-version=2', requests: { search } })
 
 await api.search({ q: 'hello' })
-// GET https://api.example.com/v1/search?key=abc&q=hello
+// GET https://api.example.com/v1/search?api-version=2&q=hello
 ```
 
-A key that appears in both is sent twice. A call param named `key` gives `?key=abc&key=xyz`, and the server decides which one counts. Headers merge by name, but query params can't, because an array param is already sent as repeated keys (`tags=a&tags=b`). To change a base param on each call, set it in a middleware.
+A key that appears in both is sent twice. A call param named `api-version` gives `?api-version=2&api-version=3`, and the server decides which one counts. Headers merge by name, but query params can't, because an array param is already sent as repeated keys (`tags=a&tags=b`). To change a base param on each call, set it in a middleware.
+
+The full URL, base query included, appears in `ctx.request.url`, `error.request.url` and `logMiddleware`'s output, so anything that logs or reports it sends that query too. Put a secret in a header instead.
 
 #### URL fragments
 
