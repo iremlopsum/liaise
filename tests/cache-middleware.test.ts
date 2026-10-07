@@ -1039,6 +1039,8 @@ describe("the cache key includes a client's own fetch", () => {
     expect(Object.keys(seen!)).toEqual(['request', 'requestName'])
     expect(JSON.stringify(seen)).not.toContain('clientFetch')
     expect(Object.keys({ ...seen })).toEqual(['request', 'requestName'])
+    expect(Reflect.ownKeys({ ...seen! })).toEqual(['request', 'requestName'])
+    expect(Object.getOwnPropertyDescriptor(seen!, Symbol.for('liaise.clientFetch'))?.enumerable).toBe(false)
     expect(clientFetchOf(seen!)).toBe(f)
   })
 })
