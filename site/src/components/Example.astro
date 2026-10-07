@@ -1,0 +1,11 @@
+---
+// Renders a test region by name: the code CI runs, never a copy.
+import { Code } from 'astro:components'
+import { findRegions } from '../../../scripts/examples.mjs'
+interface Props { name: string }
+const { name } = Astro.props
+const { regions } = findRegions(new URL('../../../tests', import.meta.url).pathname)
+const region = regions.get(name)
+if (!region) throw new Error(`<Example name="${name}">: no test region // example:${name}:start`)
+---
+<Code code={region.code} lang="ts" theme="github-dark-default" />

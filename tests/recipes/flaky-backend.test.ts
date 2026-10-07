@@ -5,7 +5,7 @@ let mock: ReturnType<typeof mockFetch>
 beforeEach(() => { vi.spyOn(Math, 'random').mockReturnValue(0) }) // full jitter → no wait
 afterEach(() => { mock.restore(); vi.restoreAllMocks() })
 
-// readme:flaky-backend:start
+// example:flaky-backend:start
 import { createApi, defineRequest } from 'liaise'
 import { retryMiddleware } from 'liaise/middleware'
 
@@ -28,7 +28,7 @@ const api = createApi({
     getReport: defineRequest<Report>()({ method: 'GET', path: '/report', timeout: 3000 }),
   },
 })
-// readme:flaky-backend:end
+// example:flaky-backend:end
 
 it('gets through a 503, a 429 and a dropped connection', async () => {
   mock = mockFetch({

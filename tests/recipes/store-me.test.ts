@@ -11,7 +11,7 @@ const mock = mockFetch({
 mock.install()
 afterEach(() => mock.restore())
 
-// readme:store-me:start
+// example:store-me:start
 import { createApi, defineRequest } from 'liaise'
 
 const me = defineRequest<User>()({ method: 'GET', path: '/me', share: true })
@@ -25,7 +25,7 @@ async function loadUser() {
   const { data } = await api.me() // callers at the same moment join one request
   if (data) store.user = data
 }
-// readme:store-me:end
+// example:store-me:end
 
 it('three components loading at once make one request', async () => {
   await Promise.all([loadUser(), loadUser(), loadUser()])

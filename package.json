@@ -34,7 +34,7 @@
     "test": "vitest",
     "test:run": "vitest run",
     "test:integration": "vitest run --config vitest.integration.ts",
-    "docs:check": "node scripts/check-readme.mjs",
+    "docs:check": "node scripts/check-docs.mjs",
     "typecheck": "tsc --noEmit",
     "test:types": "vitest run --typecheck",
     "sessions": "test -f .claude/sessions.mjs && node .claude/sessions.mjs || echo \"npm run sessions is a local-only helper (gitignored .claude/); nothing to list in this clone\"",

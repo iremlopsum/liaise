@@ -4,7 +4,7 @@ import { mockFetch, jsonResponse } from 'liaise/testing'
 let mock: ReturnType<typeof mockFetch>
 afterEach(() => mock.restore())
 
-// readme:files:start
+// example:files:start
 import { createApi, defineRequest } from 'liaise'
 
 // Upload: pass FormData as the params. liaise sends it as-is, and the
@@ -22,7 +22,7 @@ const downloadFile = defineRequest<Blob>()({
 })
 
 const api = createApi({ baseUrl: '/api', requests: { uploadAvatar, downloadFile } })
-// readme:files:end
+// example:files:end
 
 it('uploads FormData as multipart', async () => {
   let received: FormData | undefined

@@ -27,7 +27,7 @@ const mock = mockFetch({
 beforeEach(() => mock.install())
 afterEach(() => { mock.restore(); state = undefined })
 
-// readme:react-effect:start
+// example:react-effect:start
 function useUser(id: string) {
   const [state, setState] = useState<{ user?: User; failed?: boolean }>({})
 
@@ -42,7 +42,7 @@ function useUser(id: string) {
 
   return state
 }
-// readme:react-effect:end
+// example:react-effect:end
 
 const tick = () => new Promise(r => setTimeout(r, 0))
 
