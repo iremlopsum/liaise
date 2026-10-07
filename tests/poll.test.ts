@@ -187,9 +187,11 @@ describe('poll: edge cases', () => {
 
   it('an every beyond the timer limit is clamped, not fired at once', async () => {
     const api = client()
+    const spy = vi.spyOn(globalThis, 'setTimeout')
     const stop = poll(api.getStats, {}, () => {}, { every: 3e9 })
-    await vi.advanceTimersByTimeAsync(2_000_000_000)
+    await flush()
     expect(mock.calls).toHaveLength(1)
+    expect(spy.mock.calls.at(-1)?.[1]).toBe(2_147_483_647)
     stop()
   })
 })
