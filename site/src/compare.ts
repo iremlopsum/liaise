@@ -1,6 +1,8 @@
 // Everything /compare/ states with a number or a ranking in it, computed from
 // compare/results.json at build time. A cell comes from compare/cells.mjs, the function
 // compare/report.mjs prints the README's table with, so the page and the README can't disagree.
+// The harness also runs plain fetch through the scenarios; the page leaves it out of the matrix
+// (it isn't a library) and shows it only as the baseline for size and overhead.
 import results from '../../compare/results.json'
 import { NAMES, METHOD_FOR, OVERHEAD, cell } from '../../compare/cells.mjs'
 
@@ -24,10 +26,16 @@ const scenario = (id: string) => results.scenarios.find((s) => s.id === id)!
 export const outcome = (id: string, name: string, v: Variant) =>
   (scenario(id).results as Record<string, Record<Variant, Outcome>>)[name][v].outcome
 const THREW_OR_ENDED = /(?:^|: )(throws|error result)\b/
-/** Every library but liaise; fetch counts, as the floor. */
-const others = NAMES.filter((n) => n !== 'liaise')
-/** The libraries a reader would choose between: fetch is the runtime's own. */
-const libraries = NAMES.filter((n) => n !== 'fetch' && n !== 'liaise')
+/** Plain fetch: the runtime's own, measured as the baseline for size and overhead, not a contender. */
+export const BASELINE = 'fetch'
+/** The libraries the matrix compares, in table order. */
+export const CONTENDERS = NAMES.filter((n) => n !== BASELINE)
+/** The libraries liaise is weighed against. */
+const rivals = CONTENDERS.filter((n) => n !== 'liaise')
+/** Everything liaise's overhead is compared with: the libraries and the baseline. */
+const measuredAgainst = NAMES.filter((n) => n !== 'liaise')
+/** How a sentence names a library; plain fetch is never called a library. */
+export const display = (n: string) => (n === BASELINE ? 'plain fetch' : n)
 
 // ── When and against what ────────────────────────────────────────────────────────────────
 const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December']
@@ -98,7 +106,7 @@ export const guideFor = (id: string) => GUIDE[id] ?? '/guide/handling-errors/'
 // ── Hand-written code ────────────────────────────────────────────────────────────────────
 const codeRows = (name: string, v: Variant) => results.scenarios.filter((s) => cell(s, name, v).kind === 'code')
 export const codeCounts = (v: Variant) =>
-  list(NAMES.map((n) => ({ n, k: codeRows(n, v).length })).sort((a, b) => b.k - a.k).map(({ n, k }) => `${n} ${k}`))
+  list(CONTENDERS.map((n) => ({ n, k: codeRows(n, v).length })).sort((a, b) => b.k - a.k).map(({ n, k }) => `${n} ${k}`))
 
 export const liaiseCode = (() => {
   const rows = codeRows('liaise', 'configured').map((s) => `“${s.title}”`)
@@ -107,7 +115,7 @@ export const liaiseCode = (() => {
 })()
 
 export const pathParam = (() => {
-  const refusers = NAMES.filter((n) => /^refused before sending/.test(outcome('missing-param', n, 'configured')))
+  const refusers = CONTENDERS.filter((n) => /^refused before sending/.test(outcome('missing-param', n, 'configured')))
   if (!refusers.length) return ''
   return refusers.length === 1
     ? `${refusers[0]} is the only one that refuses an undefined path param before sending the request.`
@@ -115,12 +123,15 @@ export const pathParam = (() => {
 })()
 
 // ── Size ─────────────────────────────────────────────────────────────────────────────────
-export const sizeRows = [...NAMES, 'liaise + retryMiddleware'].map((name) => ({ name, gzip: kb(sizes[name].gzip), brotli: kb(sizes[name].brotli) }))
+export const sizeRows = [...NAMES, 'liaise + retryMiddleware'].map((name) => ({
+  name, label: name === BASELINE ? `${display(name)} (baseline)` : name, baseline: name === BASELINE,
+  gzip: kb(sizes[name].gzip), brotli: kb(sizes[name].brotli),
+}))
 const place = (m: 'gzip' | 'brotli') => {
   const by = (a: string, b: string) => sizes[a][m] - sizes[b][m]
   return {
-    smaller: libraries.filter((n) => sizes[n][m] < sizes.liaise[m]).sort(by),
-    larger: libraries.filter((n) => sizes[n][m] > sizes.liaise[m]).sort(by),
+    smaller: rivals.filter((n) => sizes[n][m] < sizes.liaise[m]).sort(by),
+    larger: rivals.filter((n) => sizes[n][m] > sizes.liaise[m]).sort(by),
   }
 }
 const placeText = (p: ReturnType<typeof place>) =>
@@ -138,10 +149,11 @@ export const MODES: { id: Mode; label: string; lead: string }[] = [
   { id: 'concurrent', label: `${OVERHEAD.inFlight} in flight`, lead: `With ${OVERHEAD.inFlight} requests in flight` },
 ]
 const rps = (n: string, mode: Mode) => overhead[n][mode]
+export const rpsLabel = (n: string) => (n === BASELINE ? `${display(n)} (baseline)` : n)
 export const rpsCell = (n: string, mode: Mode) => { const x = rps(n, mode); return { median: count(x.median), range: `(${count(x.min)}–${count(x.max)})` } }
 const relative = (mode: Mode) => {
   const base = rps('liaise', mode).median
-  return others.map((n) => ({ n, d: (rps(n, mode).median - base) / base }))
+  return measuredAgainst.map((n) => ({ n, d: (rps(n, mode).median - base) / base }))
 }
 const isNoise = (d: number) => Math.abs(d) < OVERHEAD.noise
 const rangesOverlap = (n: string, mode: Mode) => rps(n, mode).min <= rps('liaise', mode).max && rps('liaise', mode).min <= rps(n, mode).max
@@ -152,8 +164,8 @@ export function overheadSentence(mode: Mode) {
   const ties = rel.filter((r) => isNoise(r.d)).map((r) => r.n)
   const apart = rel.filter((r) => !isNoise(r.d)).sort((a, b) => b.d - a.d)
   const parts = []
-  if (ties.length) parts.push(`liaise ties ${list(ties)}`)
-  if (apart.length) parts.push(apart.map((r, i) => `${r.n} ${i ? '' : 'handles '}about ${pct(r.d)}% ${r.d > 0 ? 'more' : 'fewer'}${i ? '' : ' requests per second than liaise'}`).join(', '))
+  if (ties.length) parts.push(`liaise ties ${list(ties.map(display))}`)
+  if (apart.length) parts.push(apart.map((r, i) => `${display(r.n)} ${i ? '' : 'handles '}about ${pct(r.d)}% ${r.d > 0 ? 'more' : 'fewer'}${i ? '' : ' requests per second than liaise'}`).join(', '))
   return `${lead}, ${parts.join('; ')}.`
 }
 
@@ -163,7 +175,7 @@ export const losses = {
   timeout: (() => {
     const waiting = outcome('hang', 'liaise', 'default')
     if (!/^still waiting/.test(waiting)) return null
-    const timesOut = others.filter((n) => THREW_OR_ENDED.test(outcome('hang', n, 'default')))
+    const timesOut = rivals.filter((n) => THREW_OR_ENDED.test(outcome('hang', n, 'default')))
     const who = timesOut.length === 0 ? 'None of the others times out by default either.'
       : timesOut.length === 1 ? `Only ${timesOut[0]} times out by default.` : `${list(timesOut)} time out by default.`
     return { waiting, who, configured: outcome('hang', 'liaise', 'configured') }
@@ -172,8 +184,8 @@ export const losses = {
   empty204: (() => {
     const own = outcome('empty-204', 'liaise', 'default')
     if (!/^(throws|error result)/.test(own)) return null
-    const throwers = others.filter((n) => /^throws/.test(outcome('empty-204', n, 'default')))
-    const resolvers = others.filter((n) => /^resolves/.test(outcome('empty-204', n, 'default')))
+    const throwers = rivals.filter((n) => /^throws/.test(outcome('empty-204', n, 'default')))
+    const resolvers = rivals.filter((n) => /^resolves/.test(outcome('empty-204', n, 'default')))
     const verb = (xs: string[], v: string) => (xs.length ? `${list(xs)} ${v}${xs.length === 1 ? 's' : ''}` : '')
     return { own, parse: /parse/.test(own), others: [verb(throwers, 'throw'), verb(resolvers, 'resolve')].filter(Boolean).join('; ') }
   })(),
@@ -188,7 +200,7 @@ export const losses = {
   /** Out of the box, others retry the deadline row's 503s and liaise doesn't. */
   retries: (() => {
     const attempts = (n: string) => Number(outcome('deadline', n, 'default').match(/(\d+) attempts?/)?.[1] ?? 0)
-    const retriers = others.filter((n) => attempts(n) > attempts('liaise')).sort((a, b) => attempts(b) - attempts(a))
+    const retriers = rivals.filter((n) => attempts(n) > attempts('liaise')).sort((a, b) => attempts(b) - attempts(a))
     if (!retriers.length) return null
     return { text: `With no options set, ${list(retriers.map((n, i) => `${n}${i ? '' : ' made'} ${attempts(n)}`))} attempts at the slow 503s; liaise made ${attempts('liaise')}.`, retriers }
   })(),
@@ -198,17 +210,18 @@ export const losses = {
     if (!smaller.length) return null
     return { smaller, text: `Gzipped, liaise is ${kb(sizes.liaise.gzip)} kB; ${list(smaller.map((n) => `${n} ${kb(sizes[n].gzip)} kB`))}.` }
   })(),
-  /** Libraries that handle more requests per second than liaise, beyond the noise. */
+  /** A library, or the plain-fetch baseline, handling more requests per second than liaise, beyond the noise. */
   overhead: MODES.map(({ id, lead }) => {
     const ahead = relative(id).filter((r) => r.d >= OVERHEAD.noise)
     if (!ahead.length) return null
     // A median ahead by more than the noise can still sit inside liaise's min–max range.
-    const overlap = ahead.filter((r) => rangesOverlap(r.n, id)).map((r) => r.n)
+    const one = (r: { n: string; d: number }) =>
+      `${display(r.n)} handles about ${pct(r.d)}% more requests per second than liaise${rangesOverlap(r.n, id) ? ' (the ranges overlap)' : ''}`
     return {
       id,
       ahead: ahead.map((r) => r.n),
-      text: `${lead}, ${list(ahead.map((r) => `${r.n} handles about ${pct(r.d)}% more requests per second than liaise`))}.`,
-      overlap: overlap.length ? `The min–max ranges of ${list(overlap)} and liaise overlap.` : '',
+      title: `Fewer requests per second than ${list(ahead.map((r) => (r.n === BASELINE ? 'the plain fetch baseline' : r.n)))}.`,
+      text: `${lead}, ${list(ahead.map(one))}.`,
     }
   }).filter((x) => x !== null),
 }
@@ -222,8 +235,8 @@ const differingRows = (n: string) => results.scenarios.filter((s) =>
   norm(outcome(s.id, n, 'configured')) !== norm(outcome(s.id, 'liaise', 'configured')) || needsCode(s, n) !== needsCode(s, 'liaise'))
 export const ky = (() => {
   const rows = differingRows('ky')
-  const fewest = others.every((n) => n === 'ky' || differingRows(n).length > rows.length)
-  const timesOut = others.filter((n) => THREW_OR_ENDED.test(outcome('hang', n, 'default')))
+  const fewest = rivals.every((n) => n === 'ky' || differingRows(n).length > rows.length)
+  const timesOut = rivals.filter((n) => THREW_OR_ENDED.test(outcome('hang', n, 'default')))
   const retries = losses.retries?.retriers ?? []
   return {
     rows,

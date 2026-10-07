@@ -1,15 +1,15 @@
 ---
 title: "How it compares"
-description: "What the comparison of fetch, axios, ky, ofetch and liaise measures, how it stays fair, and where to read the results."
+description: "What the comparison of axios, ky, ofetch and liaise measures, how it stays fair, and where to read the results."
 order: 2
 ---
 Read this page when you're weighing liaise against another HTTP client. It says what the comparison measures and the rules that keep it fair. The results are on [the comparison page](/compare/): every scenario in both setups, the size and overhead figures, and a section on where liaise loses.
 
 ## What it measures
 
-A harness in the liaise repo runs plain `fetch`, axios, ky, ofetch and liaise through ten failure scenarios against a local server, and records what the calling code gets back. The scenarios are a server error, an unreachable server, a server that never answers, a broken body, an empty body, a search box whose answers arrive out of order, five requests that get a 401 at once, retries under a deadline, an undefined path param, and a response that is missing a field its type promises.
+A harness in the liaise repo runs axios, ky, ofetch and liaise through ten failure scenarios against a local server, and records what the calling code gets back. The scenarios are a server error, an unreachable server, a server that never answers, a broken body, an empty body, a search box whose answers arrive out of order, five requests that get a 401 at once, retries under a deadline, an undefined path param, and a response that is missing a field its type promises.
 
-Each library runs every scenario twice: once set up the way its own docs describe, and once out of the box, with no options. The harness also measures each library's bundle size and the overhead it adds to a request.
+Each library runs every scenario twice: once set up the way its own docs describe, and once out of the box, with no options. The harness also measures each library's bundle size and the overhead it adds to a request, with plain `fetch` measured as the baseline.
 
 ## How it stays fair
 

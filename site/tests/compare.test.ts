@@ -36,7 +36,7 @@ describe('/compare', () => {
     const shown = (s: any, n: string, v: Variant) => { const c = cell(s, n, v); return `${c.text}${KINDS[c.kind as Kind].label}` }
     const kyTable = ky.rows.flatMap((s: any) => ['ky', 'liaise'].map(n => shown(s, n, 'configured')))
     let checked = 0
-    for (const v of VARIANTS) for (const s of data.scenarios) for (const n of NAMES) {
+    for (const v of VARIANTS) for (const s of data.scenarios) for (const n of LIBRARIES) {
       if (kyTable.some(k => k.includes(shown(s, n, v)))) continue
       checked++
       expect(content, `${v}/${s.id}/${n}`).not.toContain(shown(s, n, v))
@@ -66,13 +66,21 @@ const list = (xs: string[]) => (xs.length < 2 ? xs.join('') : `${xs.slice(0, -1)
 const kb = (b: number) => (b / 1024).toFixed(1)
 const scenario = (id: string) => data.scenarios.find((s: any) => s.id === id)
 const outcome = (id: string, name: string, v: Variant): string => scenario(id).results[name][v].outcome
+// The matrix compares libraries; plain fetch is not one (owner, 2026-10-07). It is measured as
+// the baseline for size and overhead. Written out here, not read from site/src/compare.ts, so a
+// fetch column creeping back fails the test.
+const LIBRARIES = ['axios', 'ky', 'ofetch', 'liaise']
+/** Everything liaise's overhead is compared with: the libraries and the plain-fetch baseline. */
 const others = NAMES.filter(n => n !== 'liaise')
-const libraries = NAMES.filter(n => n !== 'fetch' && n !== 'liaise')
+/** The libraries liaise is weighed against. */
+const libraries = LIBRARIES.filter(n => n !== 'liaise')
+const display = (n: string) => (n === 'fetch' ? 'plain fetch' : n)
+const section = (v: Variant) => { const h = html(); const a = h.indexOf(`<section id="cmp-${v}"`); return h.slice(a, h.indexOf('</section>', a)) }
 const distPage = (href: string) => new URL(`../dist/${href.replace(/^\/liaise\//, '')}index.html`, import.meta.url)
 
 describe('/compare from compare/results.json', () => {
   it('renders every cell with the text and kind compare/cells.mjs gives it, in the table and in the cards', () => {
-    for (const v of VARIANTS) for (const s of data.scenarios) for (const n of NAMES) {
+    for (const v of VARIANTS) for (const s of data.scenarios) for (const n of LIBRARIES) {
       const c = cell(s, n, v)
       const buttons = [...html().matchAll(new RegExp(`<button[^>]*\\sdata-cell="${v}/${s.id}/${n}"[^>]*>([\\s\\S]*?)</button>`, 'g'))]
       expect(buttons.length, `${v}/${s.id}/${n}`).toBe(2)
@@ -81,6 +89,26 @@ describe('/compare from compare/results.json', () => {
         expect(textOf(b[1]), `${v}/${s.id}/${n}`).toContain(c.text)
       }
     }
+  })
+
+  it('has exactly the four library columns in both setups, and no fetch column or card', () => {
+    for (const v of VARIANTS) {
+      const sec = section(v)
+      expect(sec.length, v).toBeGreaterThan(0)
+      expect([...sec.matchAll(/<th[^>]*\sdata-col="([^"]+)"/g)].map(m => m[1]), `${v} table columns`).toEqual(LIBRARIES)
+      const ol = sec.slice(sec.indexOf('<ol'), sec.indexOf('</ol>'))
+      const cards = ol.split(/<li class="rounded-xl/).slice(1)
+      expect(cards.length, `${v} cards`).toBe(data.scenarios.length)
+      for (const card of cards) expect([...card.matchAll(/\sdata-cell="[^/]+\/[^/]+\/([^"]+)"/g)].map(m => m[1]), `${v} card rows`).toEqual(LIBRARIES)
+      expect(sec, v).not.toMatch(/data-cell="[^"]*\/fetch"|data-col="fetch"|id="cmp-[a-z]+-fetch-/)
+    }
+  })
+
+  it('leaves fetch out of every sentence derived from the matrix', () => {
+    for (const f of ['code-count-configured', 'code-count-default', 'liaise-code', 'path-param', 'ky-rows', 'ky-defaults', 'ky-size',
+      'loses-timeout', 'loses-204', 'loses-retries', 'loses-size', 'size-place'])
+      expect(fact(f), f).not.toMatch(/\bfetch\b/)
+    expect(textOf(html())).toContain(`runs ${list(LIBRARIES)} through ${data.scenarios.length} failure scenarios`)
   })
 
   it('marks a cell as throws whenever its outcome throws, also after a scenario prefix', () => {
@@ -94,7 +122,7 @@ describe('/compare from compare/results.json', () => {
 
   it("opens each cell's setup note, with the note's doc links", () => {
     const methods = [...new Set(Object.values(METHOD_FOR))]
-    for (const v of VARIANTS) for (const n of NAMES) for (const m of methods) {
+    for (const v of VARIANTS) for (const n of LIBRARIES) for (const m of methods) {
       const r = data.scenarios[0].results[n]
       const note: string | undefined = (v === 'configured' ? r.notes : r.defaultNotes)?.[m]
       const id = `cmp-${v}-${n}-${m}`
@@ -118,7 +146,7 @@ describe('/compare from compare/results.json', () => {
   it('counts the cells that needed hand-written code, per library and setup', () => {
     for (const v of VARIANTS) {
       const sentence = fact(`code-count-${v}`)
-      for (const n of NAMES) {
+      for (const n of LIBRARIES) {
         const count = data.scenarios.filter((s: any) => cell(s, n, v).kind === 'code').length
         expect(sentence, `${v} ${n}`).toMatch(new RegExp(`\\b${n} ${count}\\b`))
       }
@@ -130,7 +158,7 @@ describe('/compare from compare/results.json', () => {
   })
 
   it('says which libraries refuse an undefined path param before sending', () => {
-    const refusers = NAMES.filter(n => /^refused before sending/.test(outcome('missing-param', n, 'configured')))
+    const refusers = LIBRARIES.filter(n => /^refused before sending/.test(outcome('missing-param', n, 'configured')))
     expect(refusers.length).toBeGreaterThan(0)
     expect(fact('path-param')).toBe(refusers.length === 1
       ? `${refusers[0]} is the only one that refuses an undefined path param before sending the request.`
@@ -141,7 +169,7 @@ describe('/compare from compare/results.json', () => {
     for (const n of [...NAMES, 'liaise + retryMiddleware']) {
       const row = html().match(new RegExp(`<tr[^>]*\\sdata-size="${escapeRe(n)}"[^>]*>([\\s\\S]*?)</tr>`))
       expect(row, n).not.toBeNull()
-      expect(textOf(row![1])).toBe(`${n}${kb(data.sizes[n].gzip)}${kb(data.sizes[n].brotli)}`)
+      expect(textOf(row![1])).toBe(`${n === 'fetch' ? 'plain fetch (baseline)' : n}${kb(data.sizes[n].gzip)}${kb(data.sizes[n].brotli)}`)
     }
     const place = (m: 'gzip' | 'brotli') => {
       const by = (a: string, b: string) => data.sizes[a][m] - data.sizes[b][m]
@@ -155,6 +183,7 @@ describe('/compare from compare/results.json', () => {
     const src = readFileSync(new URL('../../compare/sizes.mjs', import.meta.url), 'utf8')
     expect(src).toContain("target: 'es2020', platform: 'browser'")
     expect(fact('size-method')).toContain('minified ES2020 ESM bundle for a browser')
+    expect(fact('size-baseline')).toMatch(/^Plain fetch is the baseline, not a library/)
   })
 
   it('renders requests per second, and how liaise compares in each mode', () => {
@@ -162,16 +191,16 @@ describe('/compare from compare/results.json', () => {
     for (const n of NAMES) {
       const row = html().match(new RegExp(`<tr[^>]*\\sdata-rps="${n}"[^>]*>([\\s\\S]*?)</tr>`))
       expect(row, n).not.toBeNull()
-      expect(textOf(row![1])).toBe(`${n}${fmt(data.overhead[n].sequential)}${fmt(data.overhead[n].concurrent)}`)
+      expect(textOf(row![1])).toBe(`${n === 'fetch' ? 'plain fetch (baseline)' : n}${fmt(data.overhead[n].sequential)}${fmt(data.overhead[n].concurrent)}`)
     }
     for (const mode of MODES) {
       const base = data.overhead.liaise[mode].median
       const rel = others.map(n => ({ n, d: (data.overhead[n][mode].median - base) / base }))
       const ties = rel.filter(r => Math.abs(r.d) < OVERHEAD.noise).map(r => r.n)
       const sentence = fact(`overhead-${mode}`)
-      if (ties.length) expect(sentence, mode).toMatch(new RegExp(`liaise ties ${list(ties)}[;.]`))
+      if (ties.length) expect(sentence, mode).toMatch(new RegExp(`liaise ties ${list(ties.map(display))}[;.]`))
       for (const r of rel.filter(r => Math.abs(r.d) >= OVERHEAD.noise))
-        expect(sentence, `${mode} ${r.n}`).toMatch(new RegExp(`\\b${r.n} (handles )?about ${Math.round(Math.abs(r.d) * 100)}% ${r.d > 0 ? 'more' : 'fewer'}\\b`))
+        expect(sentence, `${mode} ${r.n}`).toMatch(new RegExp(`(^|[;,] )${display(r.n)} (handles )?about ${Math.round(Math.abs(r.d) * 100)}% ${r.d > 0 ? 'more' : 'fewer'}\\b`))
     }
   })
 
@@ -184,12 +213,13 @@ describe('/compare from compare/results.json', () => {
     expect(method).toContain(data.meta.overheadNote)
     expect(method).toContain(`under about ${OVERHEAD.noise * 100}% are noise`)
     expect(html()).toContain(`${OVERHEAD.inFlight} in flight`)
+    expect(fact('rps-baseline')).toMatch(/^Plain fetch is the baseline/)
   })
 
   it('lists where liaise loses, each item from the data', () => {
     // No default timeout: a hung server leaves liaise waiting; who does time out.
     expect(outcome('hang', 'liaise', 'default')).toMatch(/^still waiting/)
-    const timesOut = others.filter(n => /(?:^|: )(throws|error result)\b/.test(outcome('hang', n, 'default')))
+    const timesOut = libraries.filter(n => /(?:^|: )(throws|error result)\b/.test(outcome('hang', n, 'default')))
     const t = fact('loses-timeout')
     expect(t).toContain(outcome('hang', 'liaise', 'default'))
     expect(t).toContain(timesOut.length === 1 ? `Only ${timesOut[0]} times out by default` : `${list(timesOut)} time out by default`)
@@ -198,14 +228,14 @@ describe('/compare from compare/results.json', () => {
     // A 204 on a JSON call: liaise's own outcome, and what the others do.
     const e = fact('loses-204')
     expect(e).toContain(`“${outcome('empty-204', 'liaise', 'default')}”`)
-    const throwers = others.filter(n => /^throws/.test(outcome('empty-204', n, 'default')))
-    const resolvers = others.filter(n => /^resolves/.test(outcome('empty-204', n, 'default')))
+    const throwers = libraries.filter(n => /^throws/.test(outcome('empty-204', n, 'default')))
+    const resolvers = libraries.filter(n => /^resolves/.test(outcome('empty-204', n, 'default')))
     expect(e).toMatch(new RegExp(`[;,] ${list(throwers)} throws?[;.]`))
     expect(e).toMatch(new RegExp(`[;,] ${list(resolvers)} resolves?[;.]`))
 
     // No retries out of the box: attempts in the deadline row.
     const attempts = (n: string) => Number(outcome('deadline', n, 'default').match(/(\d+) attempts?/)![1])
-    const retriers = others.filter(n => attempts(n) > attempts('liaise'))
+    const retriers = libraries.filter(n => attempts(n) > attempts('liaise'))
     const r = fact('loses-retries')
     for (const n of [...retriers, 'liaise']) expect(r).toMatch(new RegExp(`\\b${n}( made)? ${attempts(n)}\\b`))
 
@@ -215,25 +245,32 @@ describe('/compare from compare/results.json', () => {
     for (const n of smaller) expect(s).toContain(`${n} ${kb(data.sizes[n].gzip)} kB`)
     expect(s).toContain(`liaise is ${kb(data.sizes.liaise.gzip)} kB`)
 
-    // Request overhead: every library ahead of liaise by more than the noise, in either mode.
+    // Request overhead: a library, or the plain-fetch baseline, ahead of liaise by more than the noise.
     for (const mode of MODES) {
       const base = data.overhead.liaise[mode].median
       for (const n of others) {
         const d = (data.overhead[n][mode].median - base) / base
-        if (d >= OVERHEAD.noise) expect(fact(`loses-overhead-${mode}`)).toContain(`${n} handles about ${Math.round(d * 100)}% more requests per second than liaise`)
+        if (d < OVERHEAD.noise) continue
+        const item = fact(`loses-overhead-${mode}`)
+        expect(item).toContain(`${display(n)} handles about ${Math.round(d * 100)}% more requests per second than liaise`)
+        if (n === 'fetch') expect(item).toMatch(/^Fewer requests per second than (.*, )?the plain fetch baseline\./)
       }
     }
   })
 
-  it('says when a library ahead of liaise has a min–max range that overlaps liaise’s', () => {
+  it('says when a library or the baseline ahead of liaise has a min–max range that overlaps liaise’s', () => {
     for (const mode of MODES) {
       const L = data.overhead.liaise[mode]
       const ahead = others.filter(n => (data.overhead[n][mode].median - L.median) / L.median >= OVERHEAD.noise)
       if (!ahead.length) continue
-      const overlap = ahead.filter(n => data.overhead[n][mode].min <= L.max && L.min <= data.overhead[n][mode].max)
       const sentence = fact(`loses-overhead-${mode}`)
-      if (overlap.length) expect(sentence, mode).toContain(`The min–max ranges of ${list(overlap)} and liaise overlap.`)
-      else expect(sentence, mode).not.toMatch(/overlap/)
+      for (const n of ahead) {
+        const overlaps = data.overhead[n][mode].min <= L.max && L.min <= data.overhead[n][mode].max
+        const pctAhead = Math.round(((data.overhead[n][mode].median - L.median) / L.median) * 100)
+        const claim = `${display(n)} handles about ${pctAhead}% more requests per second than liaise`
+        expect(sentence, `${mode} ${n}`).toContain(claim)
+        expect(sentence.includes(`${claim} (the ranges overlap)`), `${mode} ${n} overlap`).toBe(overlaps)
+      }
     }
   })
 
@@ -244,12 +281,12 @@ describe('/compare from compare/results.json', () => {
       norm(outcome(s.id, n, 'configured')) !== norm(outcome(s.id, 'liaise', 'configured')) || code(s, n) !== code(s, 'liaise'))
     const ky = differs('ky')
     // "Closest" holds only while ky differs from liaise in fewer rows than any other library.
-    for (const n of others.filter(n => n !== 'ky')) expect(differs(n).length, n).toBeGreaterThan(ky.length)
+    for (const n of libraries.filter(n => n !== 'ky')) expect(differs(n).length, n).toBeGreaterThan(ky.length)
     expect(fact('ky-rows')).toContain(`in ${ky.length} of the ${data.scenarios.length} rows`)
     const shown = [...html().matchAll(/\sdata-ky-row="([^"]+)"/g)].map(m => m[1])
     expect(shown).toEqual(ky.map((s: any) => s.id))
 
-    const timesOut = others.filter(n => /(?:^|: )(throws|error result)\b/.test(outcome('hang', n, 'default')))
+    const timesOut = libraries.filter(n => /(?:^|: )(throws|error result)\b/.test(outcome('hang', n, 'default')))
     expect(timesOut).toEqual(['ky'])
     expect(fact('ky-defaults')).toContain('only ky times out')
     expect(fact('ky-size')).toBe(`ky is ${kb(data.sizes.ky.gzip)} kB gzipped, liaise ${kb(data.sizes.liaise.gzip)} kB.`)
