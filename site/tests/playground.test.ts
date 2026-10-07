@@ -75,4 +75,14 @@ describe('playground examples do what their hints say', () => {
       'renamed to Ada King',
     ])
   })
+
+  it('polling: four polls until done; giveUpAfter 600 gives up; 404 stops at once', async () => {
+    const done = await run('polling')
+    expect(done.log).toEqual(['job 42 is done: report.csv'])
+    expect(done.net.map(r => r.path)).toEqual(['/jobs/42', '/jobs/42', '/jobs/42', '/jobs/42'])
+    expect((await run('polling', [['giveUpAfter: 5000', 'giveUpAfter: 600']])).log).toEqual(['gave up: timeout 0'])
+    const gone = await run('polling', [["id: '42'", "id: '404'"]])
+    expect(gone.log).toEqual(['gave up: http 404'])
+    expect(gone.net).toHaveLength(1)
+  })
 })
