@@ -9,10 +9,10 @@ Each entry point is a separate import, and your bundler leaves out what you don'
 
 | What you import | Gzipped |
 | --- | --- |
-| `createApi` and `defineRequest` (REST only) | about 6.2 kB |
-| REST plus `poll` and `pollUntil` | 8.6 kB |
-| the whole core entry, GraphQL included | 10.0 kB |
-| the core entry plus all of `liaise/middleware` | 11.0 kB |
+| `createApi` and `defineRequest` (REST only) | about 6.5 kB |
+| REST plus `poll` and `pollUntil` | 8.9 kB |
+| the whole core entry, GraphQL included | 10.3 kB |
+| the core entry plus all of `liaise/middleware` | 11.4 kB |
 
 The README badge, the front page and [How it compares](/compare/) quote the REST-only figure. The comparison measures one JSON GET, call site included, so it can differ from the first row by a tenth of a kB.
 
