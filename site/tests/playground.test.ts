@@ -3,7 +3,7 @@ import { readFileSync, writeFileSync, mkdirSync, rmSync } from 'node:fs'
 import { createFakeServer } from '../src/playground/fake-server'
 
 const EX = (id: string) => new URL(`../src/playground/examples/${id}.ts`, import.meta.url)
-const TMP = new URL('./.tmp/', import.meta.url)
+const TMP = new URL('./.tmp/playground/', import.meta.url) // this file's own: test files run in parallel
 let n = 0
 
 async function run(id: string, edits: Array<[string, string]> = []) {

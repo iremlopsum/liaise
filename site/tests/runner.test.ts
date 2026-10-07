@@ -117,7 +117,7 @@ describe('instrument and liaiseShim', () => {
 // the library build the site serves (public/liaise, copied there by the site build).
 describe('an example run through the shim', () => {
   const LIB = fileURLToPath(new URL('../public/liaise/', import.meta.url))
-  const TMP = new URL('./.tmp/shim/', import.meta.url)
+  const TMP = new URL('./.tmp/runner/', import.meta.url) // this file's own: test files run in parallel
   const LATER = Symbol.for('liaise.playground.test.later')
   let n = 0 // file names never repeat: an imported module is cached by its path
   afterEach(() => { rmSync(TMP, { recursive: true, force: true }); Reflect.deleteProperty(globalThis, LATER) })
@@ -170,7 +170,7 @@ await new Promise(() => {}) // never settles, like a 'slow' example
   })
 
   it('after stop, a retry that was waiting to go out never does', async () => {
-    const { printed, sent, runner, end } = await start(`import { createApi, defineRequest } from 'liaise'
+    const { printed, sent, settled, runner, end } = await start(`import { createApi, defineRequest } from 'liaise'
 import { retryMiddleware } from 'liaise/middleware'
 const api = createApi({
   baseUrl: 'https://api.example.com',
@@ -179,13 +179,17 @@ const api = createApi({
 })
 console.log('started')
 const { error } = await api.getUser({ id: 'flaky' })
+globalThis[Symbol.for('liaise.playground.test.later')] = error?.kind ?? 'none'
 console.log('ended with', error?.kind)
 `, 1)
-    await vi.waitFor(() => expect(sent).toHaveLength(1), { timeout: 5000 })
-    await new Promise((r) => setTimeout(r, 300)) // the first 500 is back; the retry waits 300 ms
+    // Stop only once the first 500 has been answered: the retry then waits 300 ms before it goes out.
+    await vi.waitFor(() => expect(settled.map((s) => s.outcome)).toEqual([500]), { timeout: 5000 })
+    expect(sent).toHaveLength(1)
     runner.stop()
     expect(await end).toEqual({ ended: 'stopped' })
-    await new Promise((r) => setTimeout(r, 600)) // long past when the retry would have gone out
+    // Wait for the call to end rather than a fixed time: under load, a fixed wait can end before the retry would go.
+    await vi.waitFor(() => expect(Reflect.get(globalThis, LATER)).toBeDefined(), { timeout: 5000 })
+    expect(Reflect.get(globalThis, LATER)).toBe('abort')
     expect(sent.map((r) => r.path)).toEqual(['/users/flaky'])
     expect(printed).toEqual(['log: started'])
   })
