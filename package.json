@@ -1,6 +1,6 @@
 {
   "name": "liaise",
-  "version": "5.2.1",
+  "version": "5.3.0",
   "description": "Type-safe API client for REST and GraphQL on standard fetch. Never throws. Zero dependencies.",
   "type": "module",
   "sideEffects": false,

@@ -8,6 +8,12 @@ For the full record of what changed in each release, see [CHANGELOG.md](./CHANGE
 
 ---
 
+## Upgrading to 5.3.0
+
+No action needed. 5.3.0 adds `withHeaders()`; nothing existing changes.
+
+---
+
 ## Upgrading to 5.2.1
 
 No action needed, unless a path has a `:name` that doesn't start a path segment. Two shapes are now refused: the call

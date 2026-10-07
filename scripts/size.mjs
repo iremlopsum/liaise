@@ -13,7 +13,7 @@ const entries = {
   'core + middleware': `export * from './dist/index.js'; export * from './dist/built-in-middleware.js'`,
 }
 
-// Gzip budgets in bytes, about 10% above the measured value. Raising one is a
+// Gzip budgets in bytes, about 5-10% above the measured value. Raising one is a
 // deliberate edit in the same PR as the growth.
 // 5.1.0 raised all three: sharing on what is sent moved into core (GraphQL share,
 // the wire-key, per-caller pipelines) and the logger moved into core (the `log`
@@ -23,8 +23,8 @@ const entries = {
 // core + middleware 9443 → 11269 B, core + polling 8850 B). REST only is unchanged.
 // 5.3.0 raised REST only, core entry and core + middleware: withHeaders' copy state
 // and the endpoint loop as a function (build / buildSide) are in every client, used or not
-// (REST only 6966 → 7241 B, core entry 10887 → 11500 B, core + middleware 12239 → 12843 B;
-// core + polling 9415 → 9713 B stays within its budget).
+// (measured at 5.3.0: REST only 6966 → 7125 B, core + polling 9415 → 9612 B, core entry
+// 10887 → 11544 B, core + middleware 12239 → 12879 B; core + polling stays within its budget).
 const budgets = { 'REST only': 7700, 'core + polling': 9740, 'core entry': 12100, 'core + middleware': 13500 }
 
 let failed = false
