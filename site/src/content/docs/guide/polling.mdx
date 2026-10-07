@@ -15,7 +15,7 @@ This page shows how to ask an endpoint again on an interval: `poll` keeps data f
 - **The callback gets every `Result`, errors included.** Polling goes on after a failure, with longer waits ([When a poll fails](#when-a-poll-fails)).
 - **`stop()` ends it, and so does aborting the `signal` you pass in the options.** A request still in flight is cancelled, and its answer is never delivered, unless another `poll` or `pollUntil` is asking the same thing ([Several callers, one poll](#several-callers-one-poll)). With a signal that is already aborted, `poll` sends nothing and never calls the callback.
 - **Per-request options go with every request.** Any of the [`CallOptions`](/reference/calloptions/), such as `timeout`, `headers` or `middleware`, applies to each request, as it does with `paginate`. `signal` is the exception: it stops this `poll`, not one request.
-- **An `every` below 1, or one that isn't finite, such as `0` or `Infinity`, asks once** and never repeats.
+- **An `every` below 1, or one that isn't finite, such as `0` or `Infinity`, asks once** and never repeats. The callback gets one `Result`, and then that caller leaves on its own, even when it shares a poll that repeats.
 
 ## Waiting until something is done with `pollUntil`
 
@@ -44,6 +44,8 @@ In the example, a 404 for an export that doesn't exist ends the wait at once wit
 
 Each `poll()` or `pollUntil()` call is a caller. Callers that ask the same thing share one poll: one request per interval, with every `Result` handed to each of them. Five components that show the same count send one request every 5 seconds, not five.
 
+Polls are shared in browsers and React Native. On a server (no `window`) each call gets its own poll, because sharing is decided before your middleware runs and a server handles many users. A middleware that adds the current user's token would otherwise hand one user's answers to another.
+
 Callers ask the same thing when they use:
 
 - **The same endpoint, on the same client.** Two clients never share a poll, even with the same `baseUrl`.
@@ -52,10 +54,12 @@ Callers ask the same thing when they use:
 
 `every`, `inBackground`, `maxEvery`, `signal`, `until` and `giveUpAfter` aren't compared, so callers with different intervals still share. Inside one shared poll:
 
-- **The shortest `every` wins.** It is read again before each wait, so when the caller with the shortest one leaves, the poll goes back to the next shortest once the wait already started has passed.
+- **The shortest `every` wins.** It is read again before each wait, so when the caller with the shortest one leaves, the poll goes back to the next shortest once the wait already started has passed. A caller that joins with a shorter `every` doesn't wait out the longer wait already started: the next request goes its `every` after the last answer. A longer wait after a failure stays as it is.
 - **A caller that joins late gets the last answer** without a new request. It arrives in a microtask, after `poll()` has returned, never inside the call. If the first answer hasn't come yet, the new caller waits for it like the others. A `pollUntil` whose `until` holds for that last answer resolves without sending anything.
 - **One caller leaving doesn't end the others.** `stop()`, an aborted `signal` or a `pollUntil` that resolves removes only that caller. The shared poll stops when its last caller leaves, and a request in flight at that moment is cancelled.
 - **A plain-object `params` is copied at the call**, so changing its top-level fields afterwards changes nothing. Nested values aren't copied, so don't change params after the call, nested objects included. Any other params value is sent as it is, without a copy. `URLSearchParams`, `FormData`, a `Blob` or an `ArrayBuffer` can't be compared, so each caller that passes one gets a shared poll of its own.
+
+**`dedupe` works per endpoint, not per params.** Two polls of a `dedupe: true` endpoint with different params, such as two job ids, cancel each other's requests, and a `pollUntil` among them can end with `kind: 'abort'`.
 
 ## When a poll fails
 
@@ -68,17 +72,17 @@ A failed request doesn't stop `poll`. The callback gets the error `Result`, and 
 
 `pollUntil` waits the same way through the failures it keeps polling through.
 
-**A callback that throws** doesn't stop the poll, and the other callers' callbacks still run. The error goes to `reportError` where the runtime has one, as browsers do, and to `console.error` where it doesn't. A throw from `until` is reported the same way. `poll` gets only the endpoint function, not the client, so these errors can't reach the client's [`onError`](/guide/handling-errors/#reporting-errors-with-onerror).
+**A callback that throws** doesn't stop the poll, and the other callers' callbacks still run. In a browser the error goes to `reportError`, which reports it like an uncaught error. Everywhere else, such as on a server or in React Native, it goes to `console.error`, with a message that says what failed. A throw from `until` is reported the same way. `poll` gets only the endpoint function, not the client, so these errors can't reach the client's [`onError`](/guide/handling-errors/#reporting-errors-with-onerror).
 
 ## Hidden tabs
 
 In a browser, polling pauses while the tab is hidden, so a page in the background doesn't keep asking:
 
 - **No request starts while the tab is hidden.** A poll started in a hidden tab sends its first request when the tab is visible.
-- **When the tab is visible again, it asks at once**, then goes back to its interval.
+- **When the tab is visible again, it asks at once**, then goes back to its interval. If the last answer was a 429 or a 503 whose `Retry-After` hasn't passed yet, it waits until it has instead.
 - **`inBackground: true` keeps it polling.** One caller that sets it keeps the shared poll going while the tab is hidden. When the last such caller leaves, the poll pauses again.
 - **`pollUntil`'s `giveUpAfter` keeps counting** while the poll is paused.
-- **On a server or in React Native, it never pauses.** There is no `document` there, so there is no hidden tab.
+- **On a server or in React Native, it never pauses.** There is no `document` there, so there is no hidden tab. On a server, polls aren't shared either ([Several callers, one poll](#several-callers-one-poll)).
 
 ## With React
 

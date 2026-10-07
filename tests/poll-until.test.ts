@@ -217,6 +217,7 @@ describe('pollUntil', () => {
 describe('pollUntil: how it ends, and what it leaves behind', () => {
   it('a Pollable that throws synchronously resolves middleware and leaves no timer or poll running', async () => {
     vi.stubGlobal('reportError', vi.fn())
+    vi.spyOn(console, 'error').mockImplementation(() => {}) // reportError is used only in a browser
     let calls = 0
     const syncThrow = ((): Promise<Result<Job>> => { calls++; throw new Error('sync') }) as unknown as (p: { id: string }) => Promise<Result<Job>>
     const r = pollUntil(syncThrow, { id: '7' }, { every: 1000, until: isDone, giveUpAfter: 600_000, signal: new AbortController().signal })
@@ -253,6 +254,19 @@ describe('pollUntil: how it ends, and what it leaves behind', () => {
     await vi.advanceTimersByTimeAsync(100)
     expect(await settled(pending)).toBe(true)
     expect((await pending).error?.kind).toBe('abort')
+  })
+
+  it("two polls of a dedupe: true endpoint with different params cancel each other, so pollUntil can end with 'abort'", async () => {
+    mock = mockFetch({ 'GET /jobs/:id': ({ params }) => new Promise(r => setTimeout(() => r(jsonResponse({ id: params.id, status: 'queued' })), 5000)) })
+    mock.install()
+    const getJob = defineRequest<Job>()({ method: 'GET', path: '/jobs/:id', dedupe: true })
+    const api = createApi({ baseUrl: 'https://api.test', requests: { getJob } })
+    const seven = pollUntil(api.getJob, { id: '7' }, { every: 1000, until: isDone })
+    const stop = poll(api.getJob, { id: '8' }, () => {}, { every: 1000 })
+    await vi.advanceTimersByTimeAsync(100)
+    expect(await settled(seven)).toBe(true)
+    expect((await seven).error?.kind).toBe('abort')
+    stop()
   })
 
   it("keeps polling through a single request's timeout", async () => {
@@ -319,6 +333,7 @@ describe('pollUntil: how it ends, and what it leaves behind', () => {
   })
 
   it('a signal-like object without removeEventListener still resolves, and stops the poll', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {})
     const api = jobs(['queued', 'done'])
     const signal = { aborted: false, addEventListener() {} } as unknown as AbortSignal
     const pending = pollUntil(api.getJob, { id: '7' }, { every: 1000, until: isDone, signal })
@@ -339,6 +354,7 @@ describe('pollUntil: how it ends, and what it leaves behind', () => {
 
   it('never rejects, even for options that are not an object', async () => {
     vi.stubGlobal('reportError', vi.fn())
+    vi.spyOn(console, 'error').mockImplementation(() => {}) // reportError is used only in a browser
     const api = jobs(['done'])
     await expect(pollUntil(api.getJob, { id: '7' }, undefined as never)).resolves.toMatchObject({ error: { kind: 'middleware' } })
   })

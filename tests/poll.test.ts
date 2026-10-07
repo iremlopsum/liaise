@@ -793,10 +793,11 @@ describe('poll: never throws, whatever it is given', () => {
     }
   })
 
-  it("retry() on the middleware error from a throwing Pollable never throws or rejects either", async () => {
+  it("retry() on the middleware error from a throwing Pollable calls it once more, and never throws or rejects either", async () => {
     const seen: Result<Stats>[] = []
-    const syncThrow = (() => { throw new Error('sync') }) as unknown as () => Promise<Result<Stats>>
-    const rejects = async (): Promise<Result<Stats>> => { throw new Error('async') }
+    let calls = 0
+    const syncThrow = (() => { calls++; throw new Error('sync') }) as unknown as () => Promise<Result<Stats>>
+    const rejects = async (): Promise<Result<Stats>> => { calls++; throw new Error('async') }
     for (const endpoint of [syncThrow, rejects]) {
       const stop = poll(endpoint, {}, r => seen.push(r), { every: 1000 })
       await flush()
@@ -808,6 +809,7 @@ describe('poll: never throws, whatever it is given', () => {
       expect(() => { again = result.retry() }).not.toThrow()
       await expect(again).resolves.toMatchObject({ error: { kind: 'middleware' } })
     }
+    expect(calls).toBe(4)
   })
 
   it("stop() doesn't throw for a signal-like object without removeEventListener, and ends the poll", async () => {
