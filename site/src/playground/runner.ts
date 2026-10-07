@@ -10,9 +10,12 @@
 // tied to its run by id, not to the globals:
 //   - instrument() binds the example module's `console` to its run, so later output is dropped
 //     even while another run owns the global console;
-//   - its liaise clients carry the run's gate middleware, so a call made after the run ended
-//     returns an abort Result without sending anything, whichever `fetch` is current. While the
-//     run is live the gate leaves the call alone: middleware sees what it would see anywhere.
+//   - its liaise clients carry the run's gate middleware, last in each client's array, so a call
+//     made after the run ended, or a client-level retry still waiting at stop, returns an abort
+//     Result without sending anything. Middleware set on an endpoint or a call runs inside the
+//     gate, so a retry it has pending at stop is not covered: it goes to whichever `fetch` is
+//     current then. While the run is live the gate leaves the call alone: middleware sees what
+//     it would see anywhere.
 export interface RunScope {
   fetch: typeof fetch
   console: { log: (...args: unknown[]) => void; error: (...args: unknown[]) => void }
