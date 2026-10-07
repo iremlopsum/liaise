@@ -1744,7 +1744,7 @@ type Result<TResponse> = SuccessResult<TResponse> | ErrorResult<TResponse>
 | `statusText` | `string` | The response's status text, `'GraphQL Error'` for a GraphQL error, and `''` when no response arrived. |
 | `body` | `unknown` | For `'http'`, the error body, or `null` when it is empty or doesn't parse. For `'parse'`, what the [Validating responses](#validating-responses) and [Reading responses](#reading-responses) rules say. Otherwise, the thrown value. |
 | `headers` | `Headers` | The response headers. Empty when no response arrived. |
-| `request` | `{ method, url, params }` | The failed request. `url` is the address with the params filled in. It is the path template only when the URL couldn't be built. |
+| `request` | `{ method, url, params }` | The failed request. `url` is the address with the params filled in. It is `baseUrl` plus the path template only when the URL couldn't be built. |
 | `partialData` | `unknown` (optional) | For a GraphQL error, the data the server sent with the errors. `undefined` for every REST error. |
 
 ```ts

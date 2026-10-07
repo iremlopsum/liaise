@@ -1,0 +1,39 @@
+---
+title: "MiddlewareContext"
+description: "What a middleware receives: every field of ctx, and what next() does."
+order: 8
+---
+This page lists what a middleware receives: `ctx`, then `next`. Look here when you write a middleware and need to know what a field holds, or whether changing it changes what is sent.
+
+A middleware is a `Middleware`: `(ctx, next) => Promise<Result<unknown>>`. [Writing middleware](/guide/writing-middleware/) shows how to write one.
+
+## ctx
+
+`ctx` is a `MiddlewareContext`:
+
+| Property | Type | What it holds |
+| -------- | ---- | ------------- |
+| `request.method` | `string` | The HTTP method, such as `'GET'`. |
+| `request.url` | `string` | The full URL, with path params and query string filled in. |
+| `request.path` | `string` | The path template, such as `'/users/:id'`. |
+| `request.params` | `unknown` | The params as the caller passed them. |
+| `request.headers` | `Headers` | The merged headers. A middleware can add, change or remove them. |
+| `request.body` | `unknown` | The serialized body: a JSON string for an object of params, or the body as you passed it, such as a `FormData`. `null` when there is none. |
+| `request.signal` | `AbortSignal \| undefined` | The caller's `signal` combined with the call's deadline, or `undefined` when there is neither. `fetch` receives it, merged with the dedupe signal under `dedupe`. Under `share` it is the signal this caller waits on, because the shared request has its own. A middleware can replace it ([Signals in middleware](/guide/writing-middleware/#signals-in-middleware)). |
+| `requestName` | `string` | The endpoint's key, such as `'getUser'`. |
+
+liaise reads `method`, `url`, `headers`, `body` and `signal` from `ctx.request` when it calls `fetch`, so a middleware that changes one of them changes what is sent. How a replaced signal works with `share` and `dedupe` is under [Signal-replacing middleware](/reference/behaviour-in-detail/#signal-replacing-middleware).
+
+On a GraphQL client, `request.method` is always `'POST'`, and changing it changes nothing. `request.url` and `request.path` are both the endpoint, `request.params` holds the variables, `request.body` is the JSON string of `{ query, variables }`, and `requestName` is the operation's key, such as `'getCategory'`.
+
+## next
+
+`next` is a `MiddlewareNext`: `() => Promise<Result<unknown>>`. It runs the rest of the chain, ending in `fetch`, and resolves to its `Result`.
+
+- **Call it once** to pass the call on, then return its `Result` or a changed one.
+- **Call it again** to try again. Each call runs everything after this middleware again, as `retryMiddleware` does.
+- **Don't call it** to answer early, for example from a cache. Return a `Result` of your own.
+- **A middleware that throws** ends the call with `kind: 'middleware'`, unless it rethrows liaise's own abort or timeout reason ([Abort classification](/reference/behaviour-in-detail/#abort-classification)).
+- **A `next()` called after the call has settled** sends nothing and returns the `Result` the caller already has ([Timeout backstop](/reference/behaviour-in-detail/#timeout-backstop)).
+
+**Next:** [Built-in middleware options](/reference/built-in-middleware-options/) lists the options of retries, the cache and logging.

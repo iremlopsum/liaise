@@ -34,6 +34,6 @@ That is the React adapter. The others take the same declaration under their own 
 
 ## Retrying in one place
 
-TanStack Query retries a failed query three times by default, with exponential backoff ([Important defaults](https://tanstack.com/query/latest/docs/framework/react/guides/important-defaults)). If your liaise client also has [`retryMiddleware`](/guide/retries-caching-and-logging/#retry-failed-calls), each of TanStack's attempts runs liaise's retries too. Pick one: turn off TanStack's `retry` option, or leave `retryMiddleware` off the client these queries use.
+TanStack Query retries a failed query three times by default in the browser, with exponential backoff, and 0 times on the server ([Important defaults](https://tanstack.com/query/latest/docs/framework/react/guides/important-defaults), [Query retries](https://tanstack.com/query/latest/docs/framework/react/guides/query-retries)). If your liaise client also has [`retryMiddleware`](/guide/retries-caching-and-logging/#retry-failed-calls), each of TanStack's attempts runs liaise's retries too. Pick one: turn off TanStack's `retry` option, or leave `retryMiddleware` off the client these queries use.
 
 **Next:** [Use with React](/recipes/use-with-react/) loads data in a plain `useEffect`, without a query library.

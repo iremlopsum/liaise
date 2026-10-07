@@ -1,0 +1,28 @@
+---
+title: "createGraphQL options"
+description: "Every option createGraphQL takes, with its type, its default and what it does."
+order: 2
+---
+This page lists every option `createGraphQL(config)` takes. Look here when you set up a GraphQL client and need an option's exact type or default.
+
+The config is a `GraphQLBaseConfig`, plus the operations: either `operations`, or `queries` and `mutations`.
+
+| Option | Type | Default | What it does |
+| ------ | ---- | ------- | ------------ |
+| `endpoint` | `string` | required | The full URL of the GraphQL endpoint. It takes the place of `baseUrl`. |
+| `operations` | an object of `Operation`s | — | Each key becomes a method on the client, such as `graphql.getCategory` ([Operation options](/reference/operation-options/)). |
+| `queries` | an object of `Operation`s | — | Each key becomes a method under `graphql.query`, such as `graphql.query.getCategory`. |
+| `mutations` | an object of `Operation`s | — | Each key becomes a method under `graphql.mutation`, such as `graphql.mutation.updateCategory`. |
+| `middleware` | `Middleware[]` | — | Runs on every operation, before operation and call middleware. |
+| `headers` | `HeadersInit` | — | Sent with every operation. An operation or a call can replace a header. `Content-Type` is `application/json` unless you set your own. |
+| `timeout` | `number` (ms) | no deadline | One deadline for every operation, retries included. An operation or a call can set its own, and `0` there turns it off. |
+| `log` | `boolean \| LogOptions` | off | Logs every call to the console. Each line names the operation ([Log every call](/guide/retries-caching-and-logging/#log-every-call), [Log options](/reference/built-in-middleware-options/#log-options)). |
+| `onError` | `(error: ApiError) => void` | — | Called once per failed call, GraphQL errors included. Calls that share one failed request count as one. Never for `'abort'`. If it throws, the caller still gets its `Result`. |
+
+Use `operations` for one flat client. To keep queries and mutations apart, use `queries`, `mutations` or both instead. TypeScript refuses `operations` together with either of the others. A query and a mutation may have the same name, and each runs its own operation ([Queries and mutations](/guide/graphql/#queries-and-mutations)).
+
+A method takes the variables and an optional [CallOptions](/reference/calloptions/), and returns a promise of a [Result](/reference/result-and-apierror/). An operation whose variables type is `Record<string, never>` is called with no arguments. Each method also has [getHeaders()](/reference/getheaders/).
+
+`createGraphQL` throws if an operation sets both `share` and `dedupe`, as `createApi` does for an endpoint. A call never throws.
+
+**Next:** [Endpoint options](/reference/endpoint-options/) lists what one REST endpoint can set.

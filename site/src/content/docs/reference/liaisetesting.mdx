@@ -1,0 +1,43 @@
+---
+title: "liaise/testing"
+description: "What liaise/testing exports, what mockFetch returns, and how the stub behaves at the edges."
+order: 10
+---
+This page lists what `liaise/testing` exports, what `mockFetch` returns, and how the stub behaves in the cases [Testing your code](/guide/testing-your-code/) doesn't cover. Look here when a test does something you didn't expect.
+
+| Export | Kind | What it is |
+| ------ | ---- | ---------- |
+| `mockFetch(routes)` | function | Builds a `fetch` stub from routes keyed as `"METHOD /path"`, with `install()`, `restore()`, call recording and response sequences. It returns the object below. |
+| `jsonResponse(body, init?)` | function | Builds a `Response` with `body` as JSON and a `content-type` of `application/json`, unless `init.headers` sets one. `null` gives an empty body. |
+| `successResult(data, init?)` | function | Builds a success `Result` for stubbing at the `Result` level. Its `response` is `jsonResponse(data, init)`. |
+| `errorResult(status, body?)` | function | Builds an error `Result` for stubbing at the `Result` level: `kind: 'http'`, the given HTTP status, and `body`, which defaults to `null`. |
+| `RouteContext` | type | `{ params: Record<string, string>; request: Request }`, passed to a route function. `params` holds each `:token`, decoded. |
+| `RouteHandler` | type | `(ctx: RouteContext) => Response \| Promise<Response>`, a route value that builds its response. |
+| `RouteValue` | type | `Response \| RouteHandler \| Array<Response \| RouteHandler>`, anything a route key can map to. |
+| `RecordedCall` | type | `{ method: string; url: string; headers: Headers; body: unknown }`, one entry in `mock.calls`. |
+
+The `retry()` of a `Result` from `successResult` or `errorResult` resolves to that same `Result`.
+
+## What mockFetch returns
+
+| Member | What it is |
+| ------ | ---------- |
+| `fetch` | The stub itself. Install it your own way, such as with `vi.stubGlobal('fetch', mock.fetch)`, or with `install()`. |
+| `calls` | A `RecordedCall` for every request, in order, whether a route matched it or not. |
+| `callCount(key)` | How many requests matched the route `key`, such as `'GET /api/users/:id'`. |
+| `lastCall(key)` | The last `RecordedCall` that matched `key`, or `undefined`. |
+| `install()` | Replaces `globalThis.fetch` with the stub. A second `install()` does nothing. |
+| `restore()` | Puts back the `fetch` that `install()` replaced. Without an `install()` first, it does nothing. |
+
+## How the stub behaves
+
+- **It honours `init.signal`, like real `fetch`.** A signal that is already aborted, or aborts while a route function is still pending, rejects with its `reason`. So a route that never answers, `() => new Promise(() => {})`, lets you test your own `timeout` and cancel handling.
+- **An aborted call is still recorded** in `calls` and counted by `callCount`, but it doesn't use up a response from a sequence.
+- **`restore()` puts back whatever `globalThis.fetch` was when `install()` ran.** If it was `undefined`, `restore()` puts back `undefined`.
+- **A route key without a space**, such as `'/users'`, throws when you call `mockFetch`, and the message names the key.
+- **Routes are tried in the order you wrote them**, and the first match wins. Put the more specific route first when two could match the same path.
+- **A route matches on the method and the path.** The query string isn't compared, so check it in `mock.calls` or in the route function's `request.url`.
+- **Trailing and doubled slashes are ignored on both sides.** `/a/b/`, `/a//b` and `/a/b` all match the same route.
+- **A route function's `request.url` is the URL your code called**, even a relative one such as `/api/users/42`.
+
+**Next:** [Exports](/reference/exports/) lists everything each entry point exports.

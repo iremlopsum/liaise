@@ -1,8 +1,9 @@
 ---
 title: "Behaviour in detail"
+description: "The edge cases the guide links to: what the cache and share compare, how deadlines and aborts are classified, and how URLs and bodies are handled at the edges."
 order: 12
 ---
-Edge cases the guide links to.
+This page collects the edge cases the guide links to: exactly what the cache and `share` compare, how signals, deadlines and aborts are handled, and what liaise does with URLs and bodies at the edges. Look here when a call does something the guide doesn't explain.
 
 ## Cache key
 
@@ -21,11 +22,11 @@ A call is never cached, and never served from the cache, when its params hold an
 - a circular structure
 - an object with no enumerable keys that isn't a plain object, such as an `Error`, a `Promise`, or a class instance that keeps its state in private fields
 
-Each `cacheMiddleware()` call makes its own store, so two stores never share entries.
+Each `cacheMiddleware()` call makes its own store, so two stores never share entries. Where to put the cache in your middleware is under [Cache repeated reads](/guide/retries-caching-and-logging/#cache-repeated-reads).
 
 ## Share key and refcount
 
-Under `share`, two calls join one request when all of these match. They are read as the request is about to be sent, after every middleware has run.
+This section is the exact rule behind [Sharing identical requests](/guide/sharing-identical-requests/). Under `share`, two calls join one request when all of these match. They are read as the request is about to be sent, after every middleware has run.
 
 - The endpoint's name. Two endpoints can hit one URL with a different `responseType` or schema.
 - The method and the full URL, query string included, exactly as sent.
@@ -73,11 +74,13 @@ A chain still waiting after that is stuck on something the signal doesn't reach.
 
 The stuck middleware keeps running, because a promise can't be cancelled. Whatever it returns or throws later is discarded, with no second `Result` and no second `onError`. If it calls `next()` after the call has settled, nothing is sent, and `next()` returns the `Result` the caller already has.
 
+To stop that work as well, pass `ctx.request.signal` on to it ([Signals in middleware](/guide/writing-middleware/#signals-in-middleware)).
+
 ## Abort classification
 
 liaise decides whether a failure is a cancellation by checking whether this call's own signal aborted. The thrown value's name and type don't matter. A custom reason, such as `controller.abort(new Error('unmounted'))` or a plain string, still gives `kind: 'abort'`, and a deadline gives `'timeout'`.
 
-A middleware that rethrows liaise's own abort or timeout reason, as it is or wrapped once as the `cause` of another error, gives `'abort'` or `'timeout'` too. Anything else a middleware throws is `'middleware'`.
+A middleware that rethrows liaise's own abort or timeout reason, as it is or wrapped once as the `cause` of another error, gives `'abort'` or `'timeout'` too. Anything else a middleware throws is `'middleware'`. [The six kinds](/guide/handling-errors/#the-six-kinds) says what each kind means.
 
 ## baseUrl query merging
 
@@ -127,6 +130,8 @@ A `ReadableStream` body is used up as it is sent, so liaise can't send it again.
 
 ## Empty bodies
 
-- **A 2xx with an empty body under `'json'`** is a `'parse'` error ([Reading responses](/guide/reading-responses/)), and its `Result` still has `retry()`.
+- **A 2xx with an empty body under `'json'`** is a `'parse'` error ([Empty bodies and null](/guide/reading-responses/#empty-bodies-and-null)), and its `Result` still has `retry()`.
 - **A non-2xx with an empty body** is an ordinary `'http'` error with `error.body` set to `null`. So is a non-2xx whose JSON body doesn't parse, such as an HTML page from a gateway. Nobody promised a body on failure, so neither is a `'parse'` error.
 - **On GraphQL**, a 2xx with neither `data` nor `errors` is a `'parse'` error with the raw text in `error.body` ([GraphQL errors](/guide/graphql/#graphql-errors)). That includes a root of `null`, a number or an array. Each is valid JSON, but GraphQL requires an object.
+
+**Next:** That's the reference. [Design principles](/about/design-principles/) explains the choices liaise is built on.
