@@ -13,6 +13,10 @@ npm install liaise
 
 liaise has no dependencies and uses the standard `fetch`. CI tests it on Node 20, 22 and 24, and [Where it runs](/choosing/where-it-runs/) covers browsers, Bun, Deno, Cloudflare Workers and React Native.
 
+- **It is ESM only.** `import` it. `require('liaise')` fails with `ERR_PACKAGE_PATH_NOT_EXPORTED`, so from CommonJS use `await import('liaise')`.
+- **Set TypeScript's `moduleResolution` to `bundler`, `node16` or `nodenext`.** liaise has three entry points, and the old `node` setting finds only the first, so `liaise/middleware` and `liaise/testing` don't resolve.
+- **liaise is built and tested with TypeScript 5.8.** Its types also compile on versions back to 4.7, but CI doesn't test those.
+
 Coming from `@iremlopsum/apify`? That is liaise's old name. Switching takes two steps, listed in [MIGRATION.md](https://github.com/iremlopsum/liaise/blob/main/MIGRATION.md#upgrading-to-500).
 
 ## Make your first call
@@ -25,8 +29,16 @@ Define two endpoints, create a client, and make a call. `https://api.example.com
 
 ## What you just got
 
-- **The path decides the params.** `/users/:id` makes `id` required, so `api.getUser({ userId: '42' })` is a compile error. A call whose `id` is still `undefined` at runtime returns an error before anything is sent.
-- **Every other param comes from the second type.** `createUser` takes `{ name: string; email: string }`. It is a `POST`, so `api.createUser({ name, email })` sends them as a JSON body.
+- **The path decides the params.** `/users/:id` makes `id` required, so a wrong name doesn't compile:
+
+  ```ts
+  // @ts-expect-error: the path names the param `id`, not `userId`
+  api.getUser({ userId: '42' })
+  ```
+
+  A call whose `id` is still `undefined` at runtime returns an error before anything is sent.
+- **Every other param comes from the second type.** `createUser` takes `{ name: string; email: string }`. It is a `POST`, so it sends them as a JSON body.
+- **A hung server becomes an error only with a `timeout`.** There is no default, so the example sets 10 seconds on the client. When it passes, the call comes back with `kind: 'timeout'` ([Set a deadline](/guide/cancelling-deadlines-and-stale-requests/#set-a-deadline-with-timeout)).
 - **`data` is typed from `defineRequest<User>`.** You never annotate a call.
 - **Nothing throws, not even when you're offline.** Every failure comes back in `error`, and `error.kind` names it: `'http'`, `'network'`, `'timeout'`, `'abort'`, `'parse'` or `'middleware'`.
 - **Checking `error` first narrows `data` to `User`**, so you never write `data!`.

@@ -35,6 +35,8 @@ async function loadUser(id: string) {
       case 'middleware': // your own middleware threw
         report(error)
         break
+      default:           // every kind is handled, so a new one is a compile error
+        error.kind satisfies never
     }
     return
   }

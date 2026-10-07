@@ -124,7 +124,7 @@ describe('front page', () => {
   })
   it('states the gzipped size from compare/results.json', () => {
     const results = JSON.parse(readFileSync(new URL('../../compare/results.json', import.meta.url), 'utf8'))
-    expect(html()).toContain(`about ${Math.round(results.sizes.liaise.gzip / 1024)}&nbsp;kB gzipped`)
+    expect(html()).toContain(`about ${Math.round(results.sizes.liaise.gzip / 1024)}&nbsp;kB gzipped for a REST client`)
   })
   it('has exactly five problem rows, each linking to a guide page that exists', () => {
     const rows = [...html().matchAll(/<a href="(\/liaise\/guide\/[^"]+\/)"[^>]*data-problem/g)].map(m => m[1])

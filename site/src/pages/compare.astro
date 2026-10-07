@@ -107,7 +107,7 @@ const q = (s: string) => `“${s}”`
     <div class="mt-16 grid grid-cols-1 gap-14 lg:grid-cols-2 lg:gap-12">
       <section aria-labelledby="size">
         <h2 id="size" class={h2}>Size</h2>
-        <p data-fact="size-method" class="mt-3 text-[14px] leading-6 text-gray-600 dark:text-gray-400">One JSON GET per library, as a minified ES2020 ESM bundle for a browser, gzip and brotli compressed.</p>
+        <p data-fact="size-method" class="mt-3 text-[14px] leading-6 text-gray-600 dark:text-gray-400">One JSON GET per library, as a minified ES2020 ESM bundle for a browser, gzip and brotli compressed. For liaise that bundle holds the REST client only; GraphQL, polling and the middleware are separate imports, and <a href={url('/reference/exports/')} class={a}>Exports</a> gives the size of each.</p>
         <p data-fact="size-baseline" class="mt-2 text-[14px] leading-6 text-gray-600 dark:text-gray-400">Plain fetch is the baseline, not a library: it is built into the runtime, so its row is the call site only.</p>
         <div class="mt-4 overflow-x-auto rounded-xl ring-1 ring-gray-950/[0.08] dark:ring-white/10">
           <table class="w-full text-left text-[13px]">

@@ -38,6 +38,16 @@ To retry 429s and network errors too, pass `retryOn`. This client retries a 503,
 
 `retryOn` checks `kind` for a dropped connection rather than `status: 0`, because an abort has status 0 too. [Retry a flaky backend within one deadline](/recipes/retry-a-flaky-backend-within-one-deadline/) walks through this setup.
 
+### Retry only what is safe to send twice
+
+`retryMiddleware` retries any method. A 5xx after a `POST` can mean the server did the work and failed afterwards, so a retry can create the same order twice. On a client that also writes, retry only the methods that are safe to repeat:
+
+<Example name="retry-idempotent" />
+
+- `r.error.request.method` is the method the call was sent with.
+- `PUT` and `DELETE` are idempotent by HTTP's definition, but only if your API implements them that way. Check before you add them.
+- If a `POST` must be retried and your API supports idempotency keys, send one with each order, so the server can recognise the repeat.
+
 Pass an object to tune the waits between attempts:
 
 ```ts
@@ -81,7 +91,7 @@ const { data } = await api.getUser({ id: '42' }, { skipMiddleware: [getUserCache
 - **Only successes are cached.** An error always goes to the network again.
 - **The key includes the URL, the params and the headers.** When your auth header is set before the cache runs, one user never sees another user's entry. [Cache key](/reference/behaviour-in-detail/#cache-key) has the details.
 - **Put a middleware that adds a unique header to each call after `cacheMiddleware`.** A request ID added before it makes every call look new, and nothing is ever cached. Client middleware always runs before endpoint middleware, so either list the request-ID middleware on the endpoint after the cache, or put the cache on the client before it.
-- The options are `ttl`, `maxSize` and `debug` ([Cache options](/reference/built-in-middleware-options/#cache-options)).
+- **Entries last 5 minutes, and the store keeps 50 by default.** The oldest entry is dropped first. Set `ttl` and `maxSize` to change that, and `debug` to log hits and misses ([Cache options](/reference/built-in-middleware-options/#cache-options)).
 - To merge identical calls made at the same time without keeping anything, use [`share`](/guide/sharing-identical-requests/) instead.
 
 ## Log every call

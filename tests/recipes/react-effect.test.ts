@@ -28,19 +28,22 @@ beforeEach(() => mock.install())
 afterEach(() => { mock.restore(); state = undefined })
 
 // example:react-effect:start
-function useUser(id: string) {
-  const [state, setState] = useState<{ user?: User; failed?: boolean }>({})
+type UserState = { id?: string; user?: User; failed?: boolean }
+
+function useUser(id: string): UserState {
+  const [state, setState] = useState<UserState>({})
 
   useEffect(() => {
     const controller = new AbortController()
     api.getUser({ id }, { signal: controller.signal }).then(({ data, error }) => {
       if (error?.kind === 'abort') return // unmounted, or id changed
-      setState(error ? { failed: true } : { user: data })
+      setState(error ? { id, failed: true } : { id, user: data })
     })
     return () => controller.abort() // cancel when the component goes away
   }, [id])
 
-  return state
+  // The answer for an earlier id isn't this id's: loading until it arrives.
+  return state.id === id ? state : {}
 }
 // example:react-effect:end
 
@@ -51,7 +54,20 @@ it('stores the user when the call succeeds', async () => {
   await tick()
   release()
   await tick()
-  expect(state).toEqual({ user: { id: '42', name: 'Ada' } })
+  expect(state).toEqual({ id: '42', user: { id: '42', name: 'Ada' } })
+})
+
+it("shows nothing for a new id until that id's user arrives", async () => {
+  useUser('42')
+  await tick()
+  release()
+  await tick()
+  cleanup!() // React runs the old effect's cleanup before the new one
+  expect(useUser('43')).toEqual({}) // not user 42
+  await tick()
+  release()
+  await tick()
+  expect(state).toEqual({ id: '43', user: { id: '43', name: 'Ada' } })
 })
 
 it('leaves state alone when the component unmounts first', async () => {

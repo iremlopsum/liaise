@@ -43,6 +43,21 @@ if (error) {
 }
 ```
 
-What `error.body` holds for every kind of failure is listed under [`ApiError`](/reference/result-and-apierror/).
+`error.body` is typed `unknown`, because nothing promises what shape a server's errors take. To use one, check it first. A type guard narrows it:
+
+```ts
+type Problem = { message: string; code?: string }
+
+function isProblem(body: unknown): body is Problem {
+  return typeof body === 'object' && body !== null && typeof (body as Problem).message === 'string'
+}
+
+const { error } = await api.getUser({ id: '42' })
+if (error?.kind === 'http' && isProblem(error.body)) {
+  show(error.body.message) // error.body is a Problem here
+}
+```
+
+The validator you use for [responses](/guide/validating-responses/) can do the same check. What `error.body` holds for every kind of failure is listed under [`ApiError`](/reference/result-and-apierror/).
 
 **Next:** [Validating responses](/guide/validating-responses/) checks at runtime that the body has the shape your type promises.

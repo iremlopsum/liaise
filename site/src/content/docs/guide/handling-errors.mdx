@@ -9,14 +9,14 @@ Plain `fetch` reports failures three different ways. A 500 resolves like a succe
 
 <Example name="handling-errors" />
 
-`show`, `redirectToLogin` and `report` stand for your own code. Each failure reaches its own branch: a 401 goes to the login page, a 500 shows its status, being offline and a hung server each get their own message, and a body that isn't JSON is reported.
+`show`, `redirectToLogin` and `report` stand for your own code. Each failure reaches its own branch: a 401 goes to the login page, a 500 shows its status, being offline and a hung server each get their own message, and a body that isn't JSON is reported. The `default` branch makes the `switch` exhaustive: if a future version adds a seventh kind, `error.kind satisfies never` stops compiling until you handle it.
 
 ## The six kinds
 
 | `kind` | What happened | `status` | What you usually do | Reported to [`onError`](#reporting-errors-with-onerror)? |
 | ------ | ------------- | -------- | ------------------- | ---------------------- |
-| `'http'` | The server answered with a non-2xx status. | The response's status | Handle it by status, or show it | Yes |
-| `'network'` | No response arrived, because you're offline or DNS or CORS failed. Params liaise refuses before sending also land here. | `0` | Show an offline message, or retry | Yes |
+| `'http'` | The server answered with a non-2xx status. A GraphQL response with `errors` is `'http'` too, even on a 2xx ([GraphQL errors](/guide/graphql/#graphql-errors)). | The response's status | Handle it by status, or show it | Yes |
+| `'network'` | No response arrived, because you're offline or DNS or CORS failed. A call liaise refused to send is `'network'` too ([below](#when-network-is-a-bug-in-your-code)). | `0` | Show an offline message, or retry | Yes |
 | `'timeout'` | Your [`timeout`](/guide/cancelling-deadlines-and-stale-requests/#set-a-deadline-with-timeout) passed. | `0` | Say it's slow | Yes |
 | `'abort'` | The call was cancelled by your signal, or replaced by a newer [`dedupe`](/guide/cancelling-deadlines-and-stale-requests/#drop-stale-calls-with-dedupe) call. | `0` | Ignore it | **No** |
 | `'parse'` | A 2xx body didn't parse as its `responseType`, or failed your [schema](/guide/validating-responses/). | The response's status | Report it | Yes |
@@ -29,6 +29,20 @@ Plain `fetch` reports failures three different ways. A 500 resolves like a succe
 - **`response` is for the status and headers.** liaise has already read its body to produce `data` or `error.body`, so `response.json()` throws "Body has already been read". A `Response` you build yourself for `successResult()` in tests keeps its body.
 - Every field of `error` is listed under [`ApiError`](/reference/result-and-apierror/).
 
+## When 'network' is a bug in your code
+
+liaise refuses to send a call it can't build correctly, and reports it as `'network'` with `status: 0`, the same as being offline. These are bugs in the calling code, not outages:
+
+- a path param that is `undefined`, `null`, `''`, an object or `NaN` ([Path params](/guide/defining-endpoints/#path-params))
+- a nested object or a `Date` in the query string ([Sending data](/guide/sending-data/))
+- params of a type liaise can't send, such as a `Set`
+
+The example above would tell the user "You're offline" for any of them. Only the message tells them apart: `error.body` holds a `TypeError`, and for a refused call its message names the param and ends in "so the call was not sent". `fetch` failing offline gives a `TypeError` too, such as "Failed to fetch" in Chrome or "fetch failed" in Node.
+
+- **TypeScript catches most of these first.** A param typed `id: string` can't be `undefined` without a cast or an `any`.
+- **Log `error.body` for every `'network'` error**, at least in development, so a bug doesn't hide behind the offline message.
+- **A refused call never reaches your middleware**, so `retryMiddleware` doesn't retry it. [`onError`](#reporting-errors-with-onerror) does see it.
+
 ## Trying again with retry()
 
 Every `Result` carries `retry()`, which runs the same call again. It goes through all your middleware, so an auth header is set again and logging runs again:
@@ -36,7 +50,7 @@ Every `Result` carries `retry()`, which runs the same call again. It goes throug
 ```ts
 const { error, retry } = await api.getUser({ id: '42' })
 
-if (error?.status === 401) {
+if (error?.kind === 'http' && error.status === 401) {
   await refreshToken()
   const second = await retry() // a fresh call through every middleware
   if (!second.error) show(second.data.name)

@@ -26,6 +26,7 @@ React runs an effect's cleanup before it runs the effect again with a new `id`, 
 
 - **In development, Strict Mode runs one extra setup and cleanup** before the first real setup ([`useEffect`](https://react.dev/reference/react/useEffect)). The first call is cancelled and skipped like any other, and the second one loads the user.
 - **A cancelled call isn't reported to `onError`**, so leaving a page never reaches your error tracker.
+- **A new `id` shows loading, not the previous user.** Each answer is stored with the `id` it is for, and the hook returns `{}` until the current `id`'s answer arrives.
 - **Every other failure sets `{ failed: true }`.** Keep `error` in state instead if the component needs to tell a 404 from being offline ([Handling errors](/guide/handling-errors/)).
 
 For caching, refetching and sharing data between components, use [TanStack Query with liaise](/recipes/use-with-tanstack-query/). TanStack aborts the query's signal when the query is no longer needed, so you don't write the cleanup yourself.

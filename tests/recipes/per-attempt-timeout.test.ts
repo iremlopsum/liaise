@@ -24,10 +24,23 @@ import { createApi } from 'liaise'
 import type { Middleware } from 'liaise'
 import { retryMiddleware } from 'liaise/middleware'
 
-// A fresh time limit for each attempt, instead of one for the whole call.
+// A fresh time limit for each attempt, on top of the caller's own signal.
 const perAttempt = (ms: number): Middleware => async (ctx, next) => {
-  ctx.request.signal = AbortSignal.timeout(ms)
-  return next()
+  const caller = ctx.request.signal // the caller's signal and deadline, if any
+  const limit = AbortSignal.timeout(ms)
+  const attempt = new AbortController()
+  const stop = () => attempt.abort(caller?.aborted ? caller.reason : limit.reason)
+  if (caller?.aborted) stop()
+  caller?.addEventListener('abort', stop)
+  limit.addEventListener('abort', stop)
+  ctx.request.signal = attempt.signal
+  try {
+    return await next()
+  } finally {
+    caller?.removeEventListener('abort', stop)
+    limit.removeEventListener('abort', stop)
+    ctx.request.signal = caller // the next attempt starts from the caller's signal again
+  }
 }
 
 const api = createApi({
@@ -49,4 +62,23 @@ it('a timed-out attempt is retried with a fresh limit', async () => {
   const r = await pending
   expect(r.data).toEqual({ id: '1', name: 'Ada' })
   expect(controllers).toHaveLength(2)
+})
+
+it("the caller's cancel stops the request in flight", async () => {
+  let sent: AbortSignal | undefined
+  vi.stubGlobal('fetch', (_url: string, init: RequestInit) => {
+    sent = init.signal ?? undefined
+    return new Promise<Response>(() => {})
+  })
+  try {
+    const caller = new AbortController()
+    const pending = api.getUser({ id: '1' }, { signal: caller.signal })
+    await new Promise(r => setTimeout(r, 0))
+    caller.abort()
+    const r = await pending
+    expect(r.error?.kind).toBe('abort')
+    expect(sent?.aborted).toBe(true)
+  } finally {
+    vi.unstubAllGlobals()
+  }
 })

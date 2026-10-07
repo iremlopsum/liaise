@@ -18,6 +18,19 @@ describe('wide tables', () => {
     const css = readdirSync(new URL('_astro/', dist)).filter(f => f.endsWith('.css')).map(f => readFileSync(new URL(`_astro/${f}`, dist), 'utf8')).join('')
     expect(css).toMatch(/\.table-scroll\{[^}]*overflow-x:auto/)
   })
+  it('a table of three or more columns keeps a minimum width, so it scrolls instead of squeezing', () => {
+    const css = readdirSync(new URL('_astro/', dist)).filter(f => f.endsWith('.css')).map(f => readFileSync(new URL(`_astro/${f}`, dist), 'utf8')).join('')
+    expect(css).toMatch(/\.table-scroll>table:has\(th:nth-child\(3\)\)\{min-width:32rem\}/)
+    expect(css).toMatch(/\.table-scroll>table:has\(th:nth-child\(4\)\)\{min-width:40rem\}/)
+  })
+})
+
+describe('dark mode', () => {
+  it('sets color-scheme, so native scrollbars and controls turn dark with the page', () => {
+    const css = readdirSync(new URL('_astro/', dist)).filter(f => f.endsWith('.css')).map(f => readFileSync(new URL(`_astro/${f}`, dist), 'utf8')).join('')
+    expect(css).toMatch(/:root\{[^}]*color-scheme:light/)
+    expect(css).toMatch(/\.dark\{[^}]*color-scheme:dark/)
+  })
 })
 
 describe('header navigation', () => {
