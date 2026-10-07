@@ -89,4 +89,30 @@ describe('withHeaders: GraphQL', () => {
     expect(mock.callCount('POST /graphql')).toBe(2)
     expect([a1.data?.who, a2.data?.who, b.data?.who]).toEqual(['s=alice', 's=alice', 's=bob'])
   })
+
+  it('split: operations added to the passed record after construction are not in a copy', () => {
+    serve()
+    const queries: Record<string, Operation<any, any>> = { who: op() }
+    const graph = createGraphQL({ endpoint, queries, mutations: { touch: op() } })
+    queries.late = op()
+    expect(Object.keys(withHeaders(graph, {}).query)).toEqual(Object.keys(graph.query))
+    expect(Object.keys(withHeaders(graph.query, {}))).toEqual(Object.keys(graph.query))
+  })
+
+  it('split: a query and a mutation of one name keep separate dedupe lanes on a copy', async () => {
+    serve(20)
+    const graph = createGraphQL({ endpoint, queries: { user: op({ dedupe: true }) }, mutations: { user: op({ dedupe: true }) } })
+    const copy = withHeaders(graph, { cookie: 's=a' })
+    const m = copy.mutation.user()
+    const q = copy.query.user()
+    expect((await m).error).toBeNull()
+    expect((await q).error).toBeNull()
+  })
+
+  it('getHeaders on a chained copy and on a side copy merges every layer', () => {
+    serve()
+    const graph = createGraphQL({ endpoint, queries: { who: op() } })
+    const chained = withHeaders(withHeaders(graph, { 'X-A': '1', 'X-B': '1' }).query, { 'X-B': '2' })
+    expect(chained.who.getHeaders()).toMatchObject({ 'x-a': '1', 'x-b': '2' })
+  })
 })

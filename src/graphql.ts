@@ -746,10 +746,14 @@ export function createGraphQL(config: any): any {
   // Each side is built from its own record, so a query and a mutation may share
   // a name (GraphQL allows it). Before 5.1.1 the two were merged by name and the
   // mutation replaced the query under both gql.query.x and gql.mutation.x.
+  // Snapshots, like create-api.ts's `entries`: a record the consumer mutates
+  // after construction must not give a copy operations the original lacks.
+  const queries: Record<string, Operation<any, any>> | undefined = config.queries && { ...config.queries }
+  const mutations: Record<string, Operation<any, any>> | undefined = config.mutations && { ...config.mutations }
   const buildSplit = (copy: CopyState, origin: Record<string, Methods> | null): Record<string, Methods> => {
     const result: Record<string, Methods> = {}
-    if (config.queries) result.query = buildSide(config.queries, copy, 'query:', origin?.query ?? null)
-    if (config.mutations) result.mutation = buildSide(config.mutations, copy, 'mutation:', origin?.mutation ?? null)
+    if (queries) result.query = buildSide(queries, copy, 'query:', origin?.query ?? null)
+    if (mutations) result.mutation = buildSide(mutations, copy, 'mutation:', origin?.mutation ?? null)
     stampCopier(result, (headers, options) => buildSplit(nextCopy(copy, headers, options), origin ?? result))
     return result
   }
