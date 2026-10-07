@@ -5,7 +5,16 @@ order: 12
 ---
 This page lists everything the three entry points export. Look here to find which import a name comes from.
 
-Each entry point is a separate import, and your bundler leaves out what you don't import. Gzipped, as measured by `npm run size`: about 6.2 kB for a REST-only import, 8.6 kB for a REST import with `poll` and `pollUntil`, 10.0 kB for the whole core entry, and 11.0 kB with all the middleware.
+Each entry point is a separate import, and your bundler leaves out what you don't import. Gzipped, as measured by `npm run size` for this version:
+
+| What you import | Gzipped |
+| --- | --- |
+| `createApi` and `defineRequest` (REST only) | about 6.2 kB |
+| REST plus `poll` and `pollUntil` | 8.6 kB |
+| the whole core entry, GraphQL included | 10.0 kB |
+| the core entry plus all of `liaise/middleware` | 11.0 kB |
+
+The README badge, the front page and [How it compares](/compare/) quote the REST-only figure. The comparison measures one JSON GET, call site included, so it can differ from the first row by a tenth of a kB.
 
 ## liaise
 

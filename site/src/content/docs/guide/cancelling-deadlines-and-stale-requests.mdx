@@ -32,14 +32,14 @@ A cancellation you asked for isn't reported to [`onError`](/guide/handling-error
 
 ## Set a deadline with timeout
 
-`timeout` is in milliseconds. You set it on the client, on the endpoint or on one call. Here the client gives 10 seconds to every endpoint that sets none, and `getReport` sets its own 3:
+`timeout` is in milliseconds, and there is no default: without one, a call waits as long as the server takes. You set it on the client, on the endpoint or on one call. Here the client gives 10 seconds to every endpoint that sets none, and `getReport` sets its own 3:
 
 <Example name="deadline" />
 
 The endpoint's 3 seconds replace the client's 10, so a server that never answers ends the call at 3 seconds with `kind: 'timeout'`.
 
 - **`timeout` is one deadline for the whole call.** It covers every middleware, every retry and every wait between retries. `timeout: 3000` with three retries still answers within three seconds.
-- **The most specific `timeout` wins.** A call's replaces the endpoint's, and the endpoint's replaces the client's. Zero or a negative number at the winning level means no deadline, so `timeout: 0` on an endpoint opts it out of the client's, and on a call turns both off. With no `timeout` anywhere there is no deadline, which is the default.
+- **The most specific `timeout` wins.** A call's replaces the endpoint's, and the endpoint's replaces the client's. Zero or a negative number at the winning level means no deadline, so `timeout: 0` on an endpoint opts it out of the client's, and on a call turns both off.
 - **`result.retry()` starts a fresh deadline.** The retried call isn't charged for time the first one used.
 - If you want a separate limit for each attempt instead, see [Give each attempt its own timeout](/recipes/give-each-attempt-its-own-timeout/).
 - Under [`share`](/guide/sharing-identical-requests/), the endpoint's or the client's `timeout` also bounds the one shared request ([details](/reference/behaviour-in-detail/#share-key-and-refcount)).

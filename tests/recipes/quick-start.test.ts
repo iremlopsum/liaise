@@ -21,10 +21,12 @@ const createUser = defineRequest<User, { name: string; email: string }>()({
   path: '/users',
 })
 
-// 2. Create the client.
+// 2. Create the client. There is no default timeout: without one, a server
+//    that never answers keeps the call waiting.
 const api = createApi({
   baseUrl: 'https://api.example.com',
   requests: { getUser, createUser },
+  timeout: 10_000,
 })
 
 // 3. Call it. This never throws: you always get { data, error }.
@@ -36,20 +38,29 @@ if (error) {
 } else {
   console.log(data.name) // data is a User here
 }
+
+// A POST sends its params as a JSON body.
+const created = await api.createUser({ name: 'Grace', email: 'grace@example.com' })
+if (!created.error) console.log(created.data.id)
 // example:quick-start:end
 
 mock.restore()
 
 it('runs the quick start against a stubbed server', () => {
-  expect(log).toHaveBeenCalledWith('Ada')
+  expect(log.mock.calls).toEqual([['Ada'], ['43']])
   expect(err).not.toHaveBeenCalled()
   expect(mock.lastCall('GET /users/:id')?.url).toBe('https://api.example.com/users/42')
 })
 
-it('createUser sends its params as a JSON body', async () => {
-  mock.install()
-  const r = await api.createUser({ name: 'Grace', email: 'grace@example.com' })
-  mock.restore()
-  expect(r.data?.id).toBe('43')
+it('createUser sends its params as a JSON body', () => {
   expect(JSON.parse(String(mock.lastCall('POST /users')?.body))).toEqual({ name: 'Grace', email: 'grace@example.com' })
+})
+
+it('sets a 10 second deadline', async () => {
+  const spy = vi.spyOn(AbortSignal, 'timeout')
+  mock.install()
+  await api.getUser({ id: '42' })
+  mock.restore()
+  expect(spy).toHaveBeenCalledWith(10_000)
+  spy.mockRestore()
 })

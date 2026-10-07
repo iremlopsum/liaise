@@ -6,7 +6,7 @@
 
 Type-safe REST and GraphQL on plain fetch. Never throws. Zero dependencies. Works with any framework.
 
-[![npm](https://img.shields.io/npm/v/liaise)](https://www.npmjs.com/package/liaise) [![CI](https://github.com/iremlopsum/liaise/actions/workflows/ci.yml/badge.svg)](https://github.com/iremlopsum/liaise/actions/workflows/ci.yml) ![6.2 kB gzipped](https://img.shields.io/badge/gzipped-6.2%20kB-blue) ![MIT](https://img.shields.io/badge/license-MIT-blue)
+[![npm](https://img.shields.io/npm/v/liaise)](https://www.npmjs.com/package/liaise) [![CI](https://github.com/iremlopsum/liaise/actions/workflows/ci.yml/badge.svg)](https://github.com/iremlopsum/liaise/actions/workflows/ci.yml) ![6.2 kB gzipped, REST only](https://img.shields.io/badge/gzipped%2C%20REST%20only-6.2%20kB-blue) ![MIT](https://img.shields.io/badge/license-MIT-blue)
 
 ```bash
 npm install liaise
@@ -47,10 +47,12 @@ const createUser = defineRequest<User, { name: string; email: string }>()({
   path: '/users',
 })
 
-// 2. Create the client.
+// 2. Create the client. There is no default timeout: without one, a server
+//    that never answers keeps the call waiting.
 const api = createApi({
   baseUrl: 'https://api.example.com',
   requests: { getUser, createUser },
+  timeout: 10_000,
 })
 
 // 3. Call it. This never throws: you always get { data, error }.
@@ -62,6 +64,10 @@ if (error) {
 } else {
   console.log(data.name) // data is a User here
 }
+
+// A POST sends its params as a JSON body.
+const created = await api.createUser({ name: 'Grace', email: 'grace@example.com' })
+if (!created.error) console.log(created.data.id)
 ```
 
 ### What you just got

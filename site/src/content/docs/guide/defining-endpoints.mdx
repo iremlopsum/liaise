@@ -79,4 +79,6 @@ await api.getUser({ userId: '42' })
 
 Use `new Request` when the config isn't a literal, for example when you build it at runtime, or when you don't want the path checked. It is not deprecated. For an endpoint with no params, write `Record<string, never>` as `TParams`.
 
+Importing liaise's `Request` hides the Fetch API's `Request` class in that file. If the file needs the standard one too, rename liaise's on import, `import { Request as Endpoint } from 'liaise'`, or reach the global as `globalThis.Request`. `defineRequest` doesn't have this problem.
+
 **Next:** [Handling errors](/guide/handling-errors/) shows what a call gives back when something goes wrong, and how to tell the failures apart.

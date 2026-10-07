@@ -31,6 +31,10 @@ liaise never throws. Every failure comes back as a value, and you check `error` 
 
 With liaise, you convert at the one place that needs a throw, as the [TanStack Query recipe](/recipes/use-with-tanstack-query/) does, and every other call checks `error`. [The comparison](/compare/) shows what ky and the others give back for each kind of failure.
 
+### You need streaming, progress or WebSockets
+
+liaise reads each response body whole before it returns, so it has no streaming responses and no server-sent events. It doesn't report upload or download progress, and it has no WebSockets. For a stream or server-sent events, use `fetch` directly. For progress, use `XMLHttpRequest`, or axios, whose `onUploadProgress` and `onDownloadProgress` options report it. Sending a `ReadableStream` as a request body does work, in runtimes whose `fetch` supports it ([Stream bodies](/reference/behaviour-in-detail/#stream-bodies)).
+
 ## When liaise fits
 
 liaise is a good fit when you have:

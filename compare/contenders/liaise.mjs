@@ -5,15 +5,15 @@ import { readFileSync } from 'node:fs'
 // liaise's `exports` does not expose ./package.json, so read it from disk.
 const pkg = JSON.parse(readFileSync(new URL('../node_modules/liaise/package.json', import.meta.url), 'utf8'))
 
-// Doc source: liaise's README. Anchors are for the restructured README on this branch.
-const README = 'https://github.com/iremlopsum/liaise/blob/main/README.md'
+// Doc source: liaise's docs site.
+const SITE = 'https://iremlopsum.github.io/liaise'
 const DOCS = {
-  timeout: `${README}#cancelling-deadlines-and-stale-requests`,
-  dedupe: `${README}#drop-stale-calls-with-dedupe`,
-  share: `${README}#add-an-auth-header-and-refresh-the-token-on-a-401`,
-  responseType: `${README}#reading-responses`,
-  schema: `${README}#validating-responses`,
-  retry: `${README}#retries-caching-and-logging`,
+  timeout: `${SITE}/guide/cancelling-deadlines-and-stale-requests/#set-a-deadline-with-timeout`,
+  dedupe: `${SITE}/guide/cancelling-deadlines-and-stale-requests/#drop-stale-calls-with-dedupe`,
+  share: `${SITE}/recipes/add-an-auth-header-and-refresh-the-token-on-a-401/`,
+  responseType: `${SITE}/guide/reading-responses/`,
+  schema: `${SITE}/guide/validating-responses/`,
+  retry: `${SITE}/guide/retries-caching-and-logging/#retry-failed-calls`,
 }
 
 const userSchema = { // Standard Schema, hand-built so the harness needs no validator dependency
@@ -74,7 +74,7 @@ export default {
     configured: { create: ctx => make(ctx, true), notes: {
       getJson: `timeout: 3000 (${DOCS.timeout}); responseType: 'none' declared on the 204 endpoint; liaise has no option for an endpoint that answers JSON or an empty body (${DOCS.responseType})`,
       search: `dedupe: true (${DOCS.dedupe})`,
-      getWithAuth: `hand-written: auth middleware from the README recipe (${DOCS.share}); share: true on refresh replaces the shared refresh promise`,
+      getWithAuth: `hand-written: auth middleware from the auth recipe (${DOCS.share}); share: true on refresh replaces the shared refresh promise`,
       getWithDeadline: `timeout: 3000 (${DOCS.timeout}) + retryMiddleware({ max: 3 }) (${DOCS.retry})`,
       getValidated: `schema, Standard Schema (${DOCS.schema})`,
     } },

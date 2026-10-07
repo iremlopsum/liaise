@@ -75,7 +75,7 @@ const runnable = Object.fromEntries(await Promise.all(SCENARIOS.map(async (s) =>
 </div>
 
 <script>
-  import { createFakeServer, type Outcome } from '../playground/fake-server'
+  import { createFakeServer, abortOutcome, type Outcome } from '../playground/fake-server'
   import { pickFetch } from '../playground/route-fetch'
   import { SCENARIOS, type Scenario } from '../playground/scenarios'
   import { createRunner, instrument, liaiseShim } from '../playground/runner'
@@ -113,7 +113,7 @@ const runnable = Object.fromEntries(await Promise.all(SCENARIOS.map(async (s) =>
     type RowOutcome = Outcome | 'network'
     const statusClass = (o: RowOutcome) =>
       o === 'cancelled' ? 'text-gray-400 line-through decoration-gray-600' :
-      o === 'offline' || o === 'network' ? 'text-rose-400' : o >= 500 ? 'text-rose-400' : o >= 400 ? 'text-amber-300' : 'text-emerald-400'
+      o === 'offline' || o === 'network' || o === 'timeout' ? 'text-rose-400' : o >= 500 ? 'text-rose-400' : o >= 400 ? 'text-amber-300' : 'text-emerald-400'
     function addRow(method: string, where: string, operation?: string) {
       const li = document.createElement('li')
       li.className = 'flex items-center gap-2 rounded-md px-2 py-1 hover:bg-white/[0.03]'
@@ -160,8 +160,9 @@ const runnable = Object.fromEntries(await Promise.all(SCENARIOS.map(async (s) =>
         settleRow(li, response.status, Date.now() - started)
         return response
       } catch (e) {
-        const cancelled = (init?.signal ?? request?.signal)?.aborted
-        settleRow(li, cancelled ? 'cancelled' : 'network', Date.now() - started)
+        const signal = init?.signal ?? request?.signal
+        const cancelled = signal?.aborted
+        settleRow(li, cancelled ? abortOutcome(signal) : 'network', Date.now() - started)
         if (!cancelled && e instanceof TypeError) cors.hidden = false
         throw e
       }

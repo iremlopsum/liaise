@@ -109,9 +109,9 @@ Median (min–max) of 10 interleaved rounds of 2,000 calls each, after 2,000 war
 
 ### liaise
 
-- getJson: timeout: 3000 (https://github.com/iremlopsum/liaise/blob/main/README.md#cancelling-deadlines-and-stale-requests); responseType: 'none' declared on the 204 endpoint; liaise has no option for an endpoint that answers JSON or an empty body (https://github.com/iremlopsum/liaise/blob/main/README.md#reading-responses)
-- search: dedupe: true (https://github.com/iremlopsum/liaise/blob/main/README.md#drop-stale-calls-with-dedupe)
-- getWithAuth: hand-written: auth middleware from the README recipe (https://github.com/iremlopsum/liaise/blob/main/README.md#add-an-auth-header-and-refresh-the-token-on-a-401); share: true on refresh replaces the shared refresh promise
-- getWithDeadline: timeout: 3000 (https://github.com/iremlopsum/liaise/blob/main/README.md#cancelling-deadlines-and-stale-requests) + retryMiddleware({ max: 3 }) (https://github.com/iremlopsum/liaise/blob/main/README.md#retries-caching-and-logging)
-- getValidated: schema, Standard Schema (https://github.com/iremlopsum/liaise/blob/main/README.md#validating-responses)
+- getJson: timeout: 3000 (https://iremlopsum.github.io/liaise/guide/cancelling-deadlines-and-stale-requests/#set-a-deadline-with-timeout); responseType: 'none' declared on the 204 endpoint; liaise has no option for an endpoint that answers JSON or an empty body (https://iremlopsum.github.io/liaise/guide/reading-responses/)
+- search: dedupe: true (https://iremlopsum.github.io/liaise/guide/cancelling-deadlines-and-stale-requests/#drop-stale-calls-with-dedupe)
+- getWithAuth: hand-written: auth middleware from the auth recipe (https://iremlopsum.github.io/liaise/recipes/add-an-auth-header-and-refresh-the-token-on-a-401/); share: true on refresh replaces the shared refresh promise
+- getWithDeadline: timeout: 3000 (https://iremlopsum.github.io/liaise/guide/cancelling-deadlines-and-stale-requests/#set-a-deadline-with-timeout) + retryMiddleware({ max: 3 }) (https://iremlopsum.github.io/liaise/guide/retries-caching-and-logging/#retry-failed-calls)
+- getValidated: schema, Standard Schema (https://iremlopsum.github.io/liaise/guide/validating-responses/)
 - getWithAuth (out of the box): hand-written: same refresh middleware, without share

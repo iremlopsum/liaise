@@ -195,3 +195,31 @@ console.log('ended with', error?.kind)
   })
 })
 
+describe('fake server: how an aborted request is labelled', () => {
+  const getUser = defineRequest<{ name: string }>()({ method: 'GET', path: '/users/:id' })
+  const serve = () => {
+    const settled: unknown[] = []
+    const server = createFakeServer({ onSettle: (s) => settled.push(s.outcome) })
+    vi.stubGlobal('fetch', server.fetch)
+    return settled
+  }
+
+  it("a request whose timeout passes is 'timeout', as liaise reports it", async () => {
+    const settled = serve()
+    const api = createApi({ baseUrl: FAKE_ORIGIN, requests: { getUser }, timeout: 20 })
+    const { error } = await api.getUser({ id: 'slow' })
+    expect(error?.kind).toBe('timeout')
+    expect(settled).toEqual(['timeout'])
+  })
+
+  it("a request the caller cancels is 'cancelled'", async () => {
+    const settled = serve()
+    const api = createApi({ baseUrl: FAKE_ORIGIN, requests: { getUser } })
+    const controller = new AbortController()
+    const call = api.getUser({ id: 'slow' }, { signal: controller.signal })
+    await tick()
+    controller.abort()
+    expect((await call).error?.kind).toBe('abort')
+    expect(settled).toEqual(['cancelled'])
+  })
+})

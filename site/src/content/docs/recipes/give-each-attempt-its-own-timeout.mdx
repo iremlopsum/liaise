@@ -14,11 +14,12 @@ An attempt that hangs ends after 5 seconds with `kind: 'timeout'`. `retryMiddlew
 ## Why it works
 
 - **liaise reads `ctx.request.signal` when it calls `fetch`**, so each attempt is sent with the signal `perAttempt` set. When that signal's time runs out, the attempt ends with `kind: 'timeout'` ([Signals in middleware](/guide/writing-middleware/#signals-in-middleware)).
+- **The caller's signal still stops the request.** `perAttempt` aborts the attempt when either the caller's signal or the attempt's limit fires, with that signal's reason. A cancel ends the call as `'abort'` and cancels the request in flight; a passed limit ends the attempt as `'timeout'`.
+- **Each attempt puts the caller's signal back when it ends.** `retryMiddleware` sends every attempt with the same `ctx`, so without that line the next attempt would start from this attempt's aborted signal and time out at once.
+- **The two signals are joined by hand** because `AbortSignal.any` needs Node 20.3 or Safari 17.4. If every runtime you support has it, `AbortSignal.any([caller, limit])` does the same in one line; leave out `undefined` when there is no caller signal.
 - **Order matters.** Each middleware in the list wraps the ones after it. `retryMiddleware` comes first, so it wraps `perAttempt`, and every retry runs `perAttempt` again with a fresh signal. Listed the other way round, `perAttempt` would run once, and every attempt would share its one signal.
 - **Timeouts aren't retried by default.** The default `retryOn` matches only 5xx responses, and a timeout has status 0. The `retryOn` above opts in to timeouts and keeps 5xx.
 
-## What you give up
-
-The request is sent with the per-attempt signal alone. A caller's own cancel still ends the call as `'abort'`, but the request itself keeps running until the per-attempt signal fires. [Signal-replacing middleware](/reference/behaviour-in-detail/#signal-replacing-middleware) says how a replaced signal works with `share` and `dedupe`.
+[Signal-replacing middleware](/reference/behaviour-in-detail/#signal-replacing-middleware) says how a replaced signal works with `share` and `dedupe`.
 
 **Next:** [Report errors to Sentry](/recipes/report-errors-to-sentry/) sends every unexpected failure to your error tracker from one place.

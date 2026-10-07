@@ -12,7 +12,11 @@ import { executeGraphQL, operationName } from './fake-graphql'
 export const FAKE_ORIGIN = 'https://api.example.com'
 
 /** What the network panel shows once a request is over: a status, or how it failed. */
-export type Outcome = number | 'offline' | 'cancelled'
+export type Outcome = number | 'offline' | 'cancelled' | 'timeout'
+
+/** How an aborted request ended: its deadline passed ('timeout', as liaise reports it) or it was cancelled. */
+export const abortOutcome = (signal: AbortSignal | null | undefined): 'timeout' | 'cancelled' =>
+  (signal?.reason as { name?: unknown } | undefined)?.name === 'TimeoutError' ? 'timeout' : 'cancelled'
 
 /** `operation` is a GraphQL request's operation name, when it has one. */
 export interface SentRequest { id: number; method: string; path: string; operation?: string }
@@ -119,7 +123,7 @@ export function createFakeServer({ onRequest = () => {}, onSettle = () => {} }: 
         onSettle({ id, outcome, ms: Date.now() - started })
         settle()
       }
-      const onAbort = () => done('cancelled', () => reject(aborted(signal!)))
+      const onAbort = () => done(abortOutcome(signal), () => reject(aborted(signal!)))
       if (signal?.aborted) return onAbort()
       signal?.addEventListener('abort', onAbort, { once: true })
       const answer = (r: Route) => {
