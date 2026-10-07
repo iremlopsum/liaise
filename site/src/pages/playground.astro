@@ -1,0 +1,15 @@
+---
+import Base from '../layouts/Base.astro'
+import Playground from '../components/Playground.astro'
+---
+<Base title="Playground" description="The real liaise build, running in your browser against a fake API. Five examples, editable, with real types." active="playground">
+  <!-- From lg, the code pane fills the window below the header, intro and tabs. -->
+  <main class="mx-auto max-w-[90rem] px-4 py-8 sm:px-6 lg:px-8 lg:[--playground-h:max(29rem,calc(100dvh-21.5rem))]">
+    <h1 class="text-2xl font-semibold tracking-tight">Playground</h1>
+    <p class="mt-2 max-w-3xl text-[15px] leading-7 text-gray-600 dark:text-gray-400">
+      This is the real liaise build, running in your browser against a fake API that lives in the page.
+      Pick an example, change it and run it again: the Network and Console panels show what happened.
+    </p>
+    <div class="mt-6"><Playground /></div>
+  </main>
+</Base>

@@ -1,0 +1,198 @@
+---
+// The playground: the real liaise build, running in the page against a fake API
+// (../playground/fake-server.ts). Tabs, highlighted code and hint are HTML from the build, so the
+// page reads without JavaScript. On a larger screen the editor (Monaco, ../playground/editor.ts)
+// loads after first paint and replaces the code; on a phone it never loads, and the examples run
+// from the JavaScript compiled here.
+//
+// Height: the code pane is 27rem, 29rem from lg. A page can set --playground-h to change the
+// lg height (the /playground page fills the window with it).
+import { Code } from 'astro:components'
+import { transformWithOxc } from 'vite'
+import { SCENARIOS } from '../playground/scenarios'
+
+const raw = import.meta.glob<string>('../playground/examples/*.ts', { query: '?raw', import: 'default', eager: true })
+const source = (id: string) => {
+  const text = raw[`../playground/examples/${id}.ts`]
+  if (text === undefined) throw new Error(`<Playground>: no example src/playground/examples/${id}.ts`)
+  return text
+}
+// The examples with their types stripped, for running them where there is no editor to compile them.
+const runnable = Object.fromEntries(await Promise.all(SCENARIOS.map(async (s) =>
+  [s.id, (await transformWithOxc(source(s.id), `${s.id}.ts`, { lang: 'ts' })).code])))
+---
+<div id="playground" data-playground class="scroll-mt-24 overflow-hidden rounded-2xl bg-[#0b0d12] text-gray-300 shadow-2xl shadow-gray-950/20 ring-1 ring-gray-950/10 dark:shadow-black/40 dark:ring-white/10">
+  <!-- Tabs -->
+  <div class="flex items-center gap-1 overflow-x-auto border-b border-white/[0.07] px-3 pt-2.5" role="tablist" aria-label="Examples">
+    {SCENARIOS.map((s, i) => (
+      <button type="button" role="tab" data-id={s.id} aria-selected={i === 0 ? 'true' : 'false'}
+        class="shrink-0 rounded-t-lg px-3 py-2 text-[13px] font-medium text-gray-500 transition hover:text-gray-300 aria-selected:bg-white/[0.06] aria-selected:text-white aria-selected:shadow-[inset_0_-2px_0_var(--accent)]">{s.label}</button>
+    ))}
+  </div>
+
+  <div class="grid lg:grid-cols-[minmax(0,1fr)_23rem]">
+    <!-- Code: highlighted at build time, until the editor replaces it -->
+    <div class="relative min-w-0 md:h-[27rem] lg:h-[var(--playground-h,29rem)]">
+      <div data-editor class="absolute inset-0"></div>
+      {SCENARIOS.map((s, i) => (
+        <div data-code={s.id} hidden={i !== 0} class="relative overflow-x-auto bg-[#0b0d12] md:absolute md:inset-0 md:overflow-hidden [&_pre]:bg-transparent! [&_pre]:px-6 [&_pre]:py-4 [&_pre]:font-mono [&_pre]:text-[13px] [&_pre]:leading-[21px]">
+          <Code code={source(s.id)} lang="ts" theme="github-dark-default" />
+        </div>
+      ))}
+    </div>
+
+    <!-- Output -->
+    <div class="flex h-[22rem] min-w-0 flex-col border-t border-white/[0.07] lg:h-auto lg:border-t-0 lg:border-l">
+      <div class="flex items-center justify-between px-4 pt-3.5 pb-2">
+        <h3 class="text-[11px] font-medium tracking-wider text-gray-500 uppercase">Network</h3>
+        <span data-net-count class="font-mono text-[11px] text-gray-500"></span>
+      </div>
+      <ul data-net class="max-h-[45%] space-y-px overflow-y-auto px-2 font-mono text-[12px]"></ul>
+      <div class="mt-2 flex items-center justify-between border-t border-white/[0.07] px-4 pt-3.5 pb-2">
+        <h3 class="text-[11px] font-medium tracking-wider text-gray-500 uppercase">Console</h3>
+      </div>
+      <ol data-console class="flex-1 space-y-1.5 overflow-y-auto px-4 pb-4 font-mono text-[12px] leading-5"></ol>
+    </div>
+  </div>
+
+  <!-- Footer -->
+  <div class="flex flex-col gap-3 border-t border-white/[0.07] px-4 py-3 sm:flex-row sm:items-center">
+    <p data-hint class="flex-1 text-[13px] leading-5 text-gray-400">{SCENARIOS[0].hint}</p>
+    <div class="flex shrink-0 items-center gap-3">
+      <span class="hidden font-mono text-[11px] text-gray-500 md:inline">Ctrl+Space or ⌘I for suggestions · ⌘↵ to run</span>
+      <span class="text-[12px] text-gray-500 md:hidden">Editing works on a larger screen.</span>
+      <button type="button" data-run class="inline-flex items-center gap-2 rounded-full bg-white px-4 py-1.5 text-[13px] font-semibold text-gray-950 transition hover:bg-gray-200 disabled:opacity-60">
+        <svg viewBox="0 0 12 12" class="size-3 fill-current" aria-hidden="true"><path d="M3 1.8v8.4a.6.6 0 0 0 .9.52l7-4.2a.6.6 0 0 0 0-1.04l-7-4.2A.6.6 0 0 0 3 1.8Z"/></svg>
+        Run
+      </button>
+    </div>
+  </div>
+
+  <script type="application/json" data-runnable set:html={JSON.stringify(runnable).replace(/</g, '\\u003c')} />
+</div>
+
+<script>
+  import { createFakeServer, type Outcome } from '../playground/fake-server'
+  import { SCENARIOS, type Scenario } from '../playground/scenarios'
+  import type { MountedEditor } from '../playground/editor'
+
+  type Id = Scenario['id']
+  const BASE = import.meta.env.BASE_URL // '/liaise/'
+  const raw = import.meta.glob<string>('../playground/examples/*.ts', { query: '?raw', import: 'default', eager: true })
+  const SOURCES = Object.fromEntries(SCENARIOS.map((s) => [s.id, raw[`../playground/examples/${s.id}.ts`]])) as Record<Id, string>
+
+  const root = document.querySelector<HTMLElement>('[data-playground]')
+  if (root) start(root)
+
+  function start(root: HTMLElement) {
+    const $ = <T extends HTMLElement = HTMLElement>(s: string) => root.querySelector<T>(s)!
+    const runnable = JSON.parse($('[data-runnable]').textContent!) as Record<Id, string>
+    let current = SCENARIOS[0]
+    let editor: MountedEditor | undefined
+
+    // ---- Tabs ----------------------------------------------------------------
+    const tabs = [...root.querySelectorAll<HTMLButtonElement>('[role=tab]')]
+    function select(id: Id) {
+      current = SCENARIOS.find((s) => s.id === id)!
+      for (const t of tabs) t.setAttribute('aria-selected', String(t.dataset.id === id))
+      for (const c of root.querySelectorAll<HTMLElement>('[data-code]')) c.hidden = c.dataset.code !== id
+      $('[data-hint]').textContent = current.hint
+      editor?.show(id)
+    }
+
+    // ---- Output panels -------------------------------------------------------
+    const net = $('[data-net]'), out = $('[data-console]'), count = $('[data-net-count]')
+    let t0 = 0
+    const stamp = () => `+${String(Date.now() - t0).padStart(4, ' ')}ms`
+    const statusClass = (o: Outcome) =>
+      o === 'cancelled' ? 'text-gray-500 line-through decoration-gray-600' :
+      o === 'offline' ? 'text-rose-400' : o >= 500 ? 'text-rose-400' : o >= 400 ? 'text-amber-300' : 'text-emerald-400'
+    const rows = new Map<number, HTMLLIElement>()
+    const server = createFakeServer({
+      onRequest: ({ id, method, path }) => {
+        const li = document.createElement('li')
+        li.className = 'flex items-center gap-2 rounded-md px-2 py-1 hover:bg-white/[0.03]'
+        li.innerHTML = `<span class="w-9 text-gray-500">${esc(method)}</span><span class="min-w-0 flex-1 truncate text-gray-200">${esc(path)}</span><span data-o class="text-gray-500">…</span><span data-ms class="w-14 text-right text-gray-600"></span>`
+        net.append(li); rows.set(id, li); count.textContent = `${rows.size} request${rows.size === 1 ? '' : 's'}`
+        net.scrollTop = net.scrollHeight
+      },
+      onSettle: ({ id, outcome, ms }) => {
+        const li = rows.get(id); if (!li) return
+        const o = li.querySelector<HTMLElement>('[data-o]')!
+        o.textContent = String(outcome); o.className = statusClass(outcome)
+        li.querySelector<HTMLElement>('[data-ms]')!.textContent = `${ms}ms`
+      },
+    })
+    const fmt = (v: unknown) => typeof v === 'string' ? v : (() => { try { return JSON.stringify(v) } catch { return String(v) } })()
+    const esc = (s: string) => s.replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' })[c]!)
+    const print = (args: unknown[], tone = 'text-gray-200') => {
+      const li = document.createElement('li')
+      li.className = 'flex gap-3'
+      li.innerHTML = `<span class="shrink-0 whitespace-pre text-gray-600">${stamp()}</span><span class="min-w-0 break-words ${tone}">${esc(args.map(fmt).join(' '))}</span>`
+      out.append(li); out.scrollTop = out.scrollHeight
+    }
+
+    // ---- Run -----------------------------------------------------------------
+    // While an example runs, `fetch` is the fake API. The page's own files (the editor's types,
+    // the search index) still load from the site.
+    const pageFetch = window.fetch, realFetch = pageFetch.bind(window)
+    const sameOrigin = (input: RequestInfo | URL) =>
+      new URL(input instanceof Request ? input.url : String(input), location.href).origin === location.origin
+    const fakeFetch: typeof fetch = (input, init) => (sameOrigin(input) ? realFetch(input, init) : server.fetch(input, init))
+    const SUBPATH: Record<string, string> = { '': 'index.js', '/middleware': 'built-in-middleware.js', '/testing': 'testing.js' }
+    const withLiaise = (js: string) => js.replace(/from\s+(['"])liaise(\/[a-z]+)?\1/g, (_, _q, sub = '') =>
+      `from '${location.origin}${BASE}liaise/${SUBPATH[sub] ?? 'index.js'}'`)
+    const runButton = $<HTMLButtonElement>('[data-run]')
+    let running = false
+    async function run() {
+      if (running) return
+      running = true; runButton.disabled = true
+      net.innerHTML = ''; out.innerHTML = ''; rows.clear(); count.textContent = ''; server.reset()
+      const realLog = console.log, realError = console.error
+      let url = ''
+      t0 = Date.now()
+      try {
+        // An example as shipped runs as compiled at build time; an edited one goes through the
+        // editor's TypeScript worker, which also counts its type errors.
+        const { js, errors } = editor?.edited() ? await editor.compile() : { js: runnable[current.id], errors: 0 }
+        t0 = Date.now()
+        if (errors) print([`${errors} type error${errors > 1 ? 's' : ''} (hover the red underline). Running anyway.`], 'text-amber-300')
+        url = URL.createObjectURL(new Blob([withLiaise(js)], { type: 'text/javascript' }))
+        window.fetch = fakeFetch
+        console.log = (...a: unknown[]) => print(a)
+        console.error = (...a: unknown[]) => print(a, 'text-rose-300')
+        await import(/* @vite-ignore */ url)
+      } catch (e) {
+        const err = e as { name?: string; message?: string } | undefined
+        print([`Uncaught ${err?.name ?? 'Error'}: ${err?.message ?? String(e)}`], 'text-rose-300')
+      } finally {
+        if (url) URL.revokeObjectURL(url)
+        window.fetch = pageFetch; console.log = realLog; console.error = realError
+        running = false; runButton.disabled = false
+      }
+    }
+    runButton.addEventListener('click', run)
+    root.querySelector('[role=tablist]')!.addEventListener('click', (e) => {
+      const id = (e.target as Element).closest<HTMLElement>('[role=tab]')?.dataset.id as Id | undefined
+      if (!id || id === current.id || running) return
+      select(id); run()
+    })
+
+    // ---- Editor: larger screens only, after first paint ------------------------
+    if (!matchMedia('(max-width: 767px)').matches) {
+      const load = () =>
+        import('../playground/editor')
+          .then(({ mountEditor }) => mountEditor($('[data-editor]'), { sources: SOURCES, current: current.id, base: BASE, onRun: run }))
+          .then((mounted) => {
+            editor = mounted
+            editor.show(current.id) // the tab may have changed while it loaded
+            for (const c of root.querySelectorAll('[data-code]')) c.remove()
+          })
+          .catch((e) => console.warn('playground: the editor did not load; the examples still run.', e))
+      const later = (f: () => void) => ('requestIdleCallback' in window ? requestIdleCallback(f, { timeout: 2000 }) : setTimeout(f, 200))
+      requestAnimationFrame(() => later(load))
+    }
+
+    run()
+  }
+</script>
