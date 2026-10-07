@@ -16,6 +16,8 @@ describe('poll types', () => {
   it('checks params against the endpoint', () => {
     // @ts-expect-error id is required
     poll(api.getJob, {}, () => {}, { every: 1000 })
+    // @ts-expect-error id is required
+    pollUntil(api.getJob, {}, { every: 1000, until: () => true })
   })
 
   it('accepts a GraphQL operation', () => {

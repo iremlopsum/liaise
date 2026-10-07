@@ -25,7 +25,7 @@ export { paginate } from './paginate.js'
 /** Options for `paginate` — `next`, `maxPages`, and any CallOptions. */
 export type { PaginateOptions } from './paginate.js'
 
-/** Asks an endpoint again on an interval; callers asking the same thing share one poll. */
+/** `poll` asks an endpoint again on an interval; `pollUntil` resolves once a condition holds. Callers asking the same thing share one poll. */
 export { poll, pollUntil } from './poll.js'
 
 /** Options and the endpoint shape for `poll`. */

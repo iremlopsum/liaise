@@ -167,6 +167,10 @@ class SharedPoll {
     } catch (error) {
       // A liaise endpoint never throws; a hand-written Pollable might.
       report(error)
+      // Never deliver inside the join() that started this ask: a synchronous throw would
+      // otherwise reach the caller before it has its `leave`.
+      await Promise.resolve()
+      if (this.stopped) return
       result = createNetworkErrorResult(
         new ApiError({ kind: 'middleware', status: 0, statusText: '', body: error, headers: new Headers(), request: { method: this.request?.method ?? '', url: this.request?.url ?? '', params: this.params } }),
         () => this.endpoint(this.params, this.callOptions),
@@ -277,11 +281,12 @@ export function poll<P extends object, R>(
 
 /**
  * Errors waiting can't fix end pollUntil with that Result: a 4xx other than 408
- * and 429, a parse or middleware error, or a cancellation. Network errors, a
+ * and 429, a GraphQL `errors` response, a parse or middleware error, or a cancellation. Network errors, a
  * single request's timeout, 5xx, 408 and 429 keep it polling (with backoff).
  */
 function endsPolling(kind: string, status: number): boolean {
-  if (kind === 'http') return status >= 400 && status < 500 && status !== 408 && status !== 429
+  // A 2xx 'http' error is a GraphQL `errors` response: waiting doesn't fix it either.
+  if (kind === 'http') return status < 300 || (status >= 400 && status < 500 && status !== 408 && status !== 429)
   return kind === 'parse' || kind === 'middleware' || kind === 'abort'
 }
 
@@ -297,60 +302,82 @@ export function pollUntil<P extends object, R>(
   options: PollUntilOptions<R>,
 ): Promise<Result<R>> {
   return new Promise(resolve => {
-    const { until, giveUpAfter, signal } = options
-    const retry = (): Promise<Result<R>> => pollUntil(endpoint, params, options)
     let settled = false
-    let shared: SharedPoll | undefined
     let leave = (): void => {}
-    let giveUp: ReturnType<typeof setTimeout> | undefined
+    try {
+      const { until, giveUpAfter, signal } = options
+      const retry = (): Promise<Result<R>> => pollUntil(endpoint, params, options)
+      let shared: SharedPoll | undefined
+      let giveUp: ReturnType<typeof setTimeout> | undefined
 
-    const own = (kind: 'timeout' | 'abort', body: unknown): Result<R> =>
-      createNetworkErrorResult<R>(
-        new ApiError({
-          kind,
-          status: 0,
-          statusText: '',
-          body,
-          headers: new Headers(),
-          request: { method: shared?.request?.method ?? '', url: shared?.request?.url ?? '', params },
-        }),
-        retry,
-      )
-    const finish = (result: Result<R>): void => {
-      if (settled) return
-      settled = true
-      if (giveUp !== undefined) clearTimeout(giveUp)
-      signal?.removeEventListener('abort', onAbort)
-      leave()
-      resolve(result)
-    }
-    const onAbort = (): void => finish(own('abort', signal!.reason))
-
-    if (signal?.aborted) {
-      resolve(own('abort', signal.reason))
-      return
-    }
-    ;({ leave, shared } = join(endpoint as unknown as Pollable<object, unknown>, params, options, r => {
-      const result = r as Result<R>
-      if (result.error === null) {
-        let done = false
-        try {
-          done = until(result)
-        } catch (error) {
-          report(error)
-        }
-        if (done) finish(result)
-      } else if (endsPolling(result.error.kind, result.error.status)) {
-        finish(result)
+      const own = (kind: 'timeout' | 'abort', body: unknown): Result<R> =>
+        createNetworkErrorResult<R>(
+          new ApiError({
+            kind,
+            status: 0,
+            statusText: '',
+            body,
+            headers: new Headers(),
+            request: { method: shared?.request?.method ?? '', url: shared?.request?.url ?? '', params },
+          }),
+          retry,
+        )
+      const finish = (result: Result<R>): void => {
+        if (settled) return
+        settled = true
+        if (giveUp !== undefined) clearTimeout(giveUp)
+        signal?.removeEventListener('abort', onAbort)
+        leave()
+        resolve(result)
       }
-    }))
-    signal?.addEventListener('abort', onAbort, { once: true })
-    if (typeof giveUpAfter === 'number' && Number.isFinite(giveUpAfter) && giveUpAfter > 0) {
-      giveUp = setTimeout(() => {
-        const reason = new Error(`pollUntil gave up after ${giveUpAfter} ms`)
-        reason.name = 'TimeoutError'
-        finish(own('timeout', reason))
-      }, giveUpAfter)
+      const onAbort = (): void => finish(own('abort', signal!.reason))
+
+      if (signal?.aborted) {
+        resolve(own('abort', signal.reason))
+        return
+      }
+      // A caller whose own `every` asks once gets the first Result, whatever it is.
+      const asksOnce = Number.isNaN(positive(options.every))
+      ;({ leave, shared } = join(endpoint as unknown as Pollable<object, unknown>, params, options, r => {
+        const result = r as Result<R>
+        if (result.error === null) {
+          let done = false
+          try {
+            done = until(result)
+          } catch (error) {
+            report(error)
+          }
+          if (done || asksOnce) finish(result)
+        } else if (asksOnce || endsPolling(result.error.kind, result.error.status)) {
+          finish(result)
+        }
+      }))
+      if (settled) {
+        // Settled while joining: finish() ran before `leave` was assigned, so stop here.
+        leave()
+        return
+      }
+      signal?.addEventListener('abort', onAbort, { once: true })
+      // Above the longest timer (about 24.8 days) the delay would overflow and fire at once: no limit.
+      if (typeof giveUpAfter === 'number' && Number.isFinite(giveUpAfter) && giveUpAfter > 0 && giveUpAfter <= MAX_TIMER) {
+        giveUp = setTimeout(() => {
+          const reason = new Error(`pollUntil gave up after ${giveUpAfter} ms`)
+          reason.name = 'TimeoutError'
+          finish(own('timeout', reason))
+        }, giveUpAfter)
+      }
+    } catch (error) {
+      report(error)
+      if (!settled) {
+        settled = true
+        leave()
+        resolve(
+          createNetworkErrorResult<R>(
+            new ApiError({ kind: 'middleware', status: 0, statusText: '', body: error, headers: new Headers(), request: { method: '', url: '', params } }),
+            () => pollUntil(endpoint, params, options),
+          ),
+        )
+      }
     }
   })
 }
