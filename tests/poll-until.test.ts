@@ -33,6 +33,8 @@ const settled = async (p: Promise<unknown>): Promise<boolean> => {
 const isDone = (r: { data: Job }) => r.data.status === 'done'
 /** Polls are shared only where there is a `window` (browsers, React Native). Node has none, so a test of sharing stubs one. */
 const shareable = () => vi.stubGlobal('window', globalThis)
+/** A browser: errors go to `reportError` only where there is a `document`. */
+const inBrowser = () => vi.stubGlobal('document', Object.assign(new EventTarget(), { visibilityState: 'visible' }))
 
 beforeEach(() => { vi.useFakeTimers() })
 afterEach(() => { mock?.restore(); vi.useRealTimers(); vi.unstubAllGlobals(); vi.restoreAllMocks() })
@@ -153,6 +155,7 @@ describe('pollUntil', () => {
   })
 
   it('until throwing counts as not done and is reported', async () => {
+    inBrowser()
     const reportError = vi.fn()
     vi.stubGlobal('reportError', reportError)
     const api = jobs(['queued', 'done'])
@@ -161,6 +164,30 @@ describe('pollUntil', () => {
     await vi.advanceTimersByTimeAsync(1000)
     expect((await r).error).toBeNull()
     expect(reportError).toHaveBeenCalledTimes(1)
+  })
+
+  it('joining a slower poll with a shorter every takes effect at once: it resolves, not times out', async () => {
+    shareable()
+    const api = jobs(['queued', 'done'])
+    const stop = poll(api.getJob, { id: '7' }, () => {}, { every: 3000 })
+    await vi.advanceTimersByTimeAsync(20) // answered at 0 ms: the next request would wait until 3000 ms
+    const pending = pollUntil(api.getJob, { id: '7' }, { every: 50, until: isDone, giveUpAfter: 1000 })
+    await vi.advanceTimersByTimeAsync(29)
+    expect(mock.calls).toHaveLength(1)
+    await vi.advanceTimersByTimeAsync(1) // 50 ms after the last answer
+    expect(mock.calls).toHaveLength(2)
+    expect(await settled(pending)).toBe(true)
+    expect((await pending).error).toBeNull()
+    stop()
+  })
+
+  it('until throwing, where there is no document, is logged as until', async () => {
+    const log = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const api = jobs(['done'])
+    const r = pollUntil(api.getJob, { id: '7' }, { every: 1000, giveUpAfter: 500, until: () => { throw new Error('boom') } })
+    await vi.advanceTimersByTimeAsync(500)
+    expect((await r).error?.kind).toBe('timeout')
+    expect(log).toHaveBeenCalledWith('[liaise] poll: until failed:', expect.objectContaining({ message: 'boom' }))
   })
 
   it('two pollUntil calls on the same job share requests', async () => {

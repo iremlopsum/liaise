@@ -20,6 +20,8 @@ const ns = (results: Result<Stats>[]) => results.map(r => (r.error ? r.error.sta
 const flush = () => vi.advanceTimersByTimeAsync(0)
 /** Polls are shared only where there is a `window` (browsers, React Native). Node has none, so a test of sharing stubs one. */
 const shareable = () => vi.stubGlobal('window', globalThis)
+/** A browser: errors go to `reportError` only where there is a `document`. */
+const inBrowser = () => vi.stubGlobal('document', Object.assign(new EventTarget(), { visibilityState: 'visible' }))
 
 beforeEach(() => { vi.useFakeTimers() })
 afterEach(() => { mock?.restore(); vi.useRealTimers(); vi.unstubAllGlobals(); vi.restoreAllMocks() })
@@ -151,6 +153,88 @@ describe('poll: sharing', () => {
     await flush()
     expect(mock.calls).toHaveLength(2) // joined the same shared poll: the key was computed from the copy
     stop(); joined()
+  })
+
+  it('a late joiner that stops before its microtask runs gets nothing (Strict Mode beside a shared poll)', async () => {
+    const api = client()
+    const first = poll(api.getStats, {}, () => {}, { every: 1000 })
+    await flush()
+    const seen: Result<Stats>[] = []
+    poll(api.getStats, {}, r => seen.push(r), { every: 1000 })()
+    const again = poll(api.getStats, {}, r => seen.push(r), { every: 1000 })
+    await flush()
+    expect(ns(seen)).toEqual([1]) // one delivery, to the caller still there
+    expect(mock.calls).toHaveLength(1)
+    first(); again()
+  })
+
+  it('a late joiner never gets an older answer after a newer one', async () => {
+    // The joiner arrives 0 to 5 microtasks after the second answer is returned, so one of
+    // them lands between that answer and the microtask that hands it the first one.
+    for (let hops = 0; hops < 6; hops++) {
+      let n = 0
+      const late: number[] = []
+      const stops: Array<() => void> = []
+      const endpoint = async () => {
+        n++
+        if (n === 2) {
+          let p = Promise.resolve()
+          for (let i = 0; i < hops; i++) p = p.then(() => {})
+          void p.then(() => stops.push(poll(endpoint, {}, r => { if (!r.error) late.push(r.data.n) }, { every: 1000 })))
+        }
+        return successResult({ n })
+      }
+      stops.push(poll(endpoint, {}, () => {}, { every: 1000 }))
+      await vi.advanceTimersByTimeAsync(2500)
+      expect(late.length, `${hops} hops`).toBeGreaterThan(1)
+      expect(late, `${hops} hops`).toEqual([...new Set(late)].sort((a, b) => a - b))
+      stops.forEach(stop => stop())
+    }
+  })
+
+  it('a joiner with a shorter every leaves a backoff wait as it is', async () => {
+    vi.spyOn(Math, 'random').mockReturnValue(0.999999)
+    const api = client({ 'GET /stats': () => jsonResponse({ failed: true }, { status: 500 }) })
+    const a = poll(api.getStats, {}, () => {}, { every: 1000 })
+    await flush() // a 500 at 0 ms: the next request waits 2000 ms
+    await vi.advanceTimersByTimeAsync(100)
+    const b = poll(api.getStats, {}, () => {}, { every: 100 })
+    await vi.advanceTimersByTimeAsync(1800)
+    expect(mock.calls).toHaveLength(1)
+    await vi.advanceTimersByTimeAsync(100)
+    expect(mock.calls).toHaveLength(2)
+    a(); b()
+  })
+
+  it('an every: 0 caller beside a repeating one gets one callback, then leaves', async () => {
+    const api = client()
+    const once: Result<Stats>[] = []
+    const repeating = poll(api.getStats, {}, () => {}, { every: 100 })
+    poll(api.getStats, {}, r => once.push(r), { every: 0 })
+    await vi.advanceTimersByTimeAsync(550)
+    expect(ns(once)).toEqual([1])
+    expect(mock.calls.length).toBeGreaterThan(5)
+    repeating()
+  })
+
+  it('an ask-once caller never stopped leaves no timer, visibilitychange listener, abort listener or shared poll behind', async () => {
+    const doc = Object.assign(new EventTarget(), { visibilityState: 'visible' })
+    const add = vi.spyOn(doc, 'addEventListener')
+    const remove = vi.spyOn(doc, 'removeEventListener')
+    vi.stubGlobal('document', doc)
+    const controller = new AbortController()
+    const removeAbort = vi.spyOn(controller.signal, 'removeEventListener')
+    const api = client()
+    poll(api.getStats, {}, () => {}, { every: 0, signal: controller.signal })
+    await flush()
+    expect(mock.calls).toHaveLength(1)
+    expect(vi.getTimerCount()).toBe(0)
+    const added = add.mock.calls.find(c => c[0] === 'visibilitychange')![1]
+    expect(remove).toHaveBeenCalledWith('visibilitychange', added)
+    expect(removeAbort).toHaveBeenCalledWith('abort', expect.any(Function))
+    poll(api.getStats, {}, () => {}, { every: 0 })
+    await flush()
+    expect(mock.calls).toHaveLength(2) // a new shared poll, which asks afresh
   })
 })
 
@@ -334,8 +418,9 @@ describe('poll: stopping', () => {
 })
 
 describe('poll: a callback that throws', () => {
-  it("doesn't stop the poll or the other callbacks, and goes to reportError", async () => {
+  it("doesn't stop the poll or the other callbacks, and goes to reportError in a browser", async () => {
     shareable()
+    inBrowser()
     const reportError = vi.fn()
     vi.stubGlobal('reportError', reportError)
     const api = client()
@@ -357,6 +442,27 @@ describe('poll: a callback that throws', () => {
     const stop = poll(api.getStats, {}, () => { throw new Error('boom') }, { every: 1000 })
     await flush()
     expect(log).toHaveBeenCalledWith(expect.stringContaining('poll'), expect.objectContaining({ message: 'boom' }))
+    stop()
+  })
+
+  it('goes to console.error, not reportError, where there is no document (Deno, Bun, Node)', async () => {
+    const reportError = vi.fn()
+    vi.stubGlobal('reportError', reportError)
+    const log = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const api = client()
+    const stop = poll(api.getStats, {}, () => { throw new Error('boom') }, { every: 1000 })
+    await flush()
+    expect(reportError).not.toHaveBeenCalled()
+    expect(log).toHaveBeenCalledWith('[liaise] poll: the callback failed:', expect.objectContaining({ message: 'boom' }))
+    stop()
+  })
+
+  it('console.error names what failed: an endpoint that throws is not called a callback', async () => {
+    const log = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const down = async (): Promise<Result<Stats>> => { throw new Error('down') }
+    const stop = poll(down, {}, () => {}, { every: 1000 })
+    await flush()
+    expect(log).toHaveBeenCalledWith('[liaise] poll: the endpoint failed:', expect.objectContaining({ message: 'down' }))
     stop()
   })
 })
@@ -509,6 +615,59 @@ describe('poll: a hidden tab', () => {
     stop()
   })
 
+  it('a Retry-After still running when the tab is shown again is waited out', async () => {
+    vi.spyOn(Math, 'random').mockReturnValue(0)
+    // Hidden after the 429 arrives, and hidden while it is in flight.
+    for (const hideFirst of [false, true]) {
+      const t = tab()
+      let i = 0
+      const api = client({ 'GET /stats': () => (i++ === 0 ? jsonResponse({}, { status: 429, headers: { 'retry-after': '10' } }) : jsonResponse({ n: i })) })
+      const stop = poll(api.getStats, {}, () => {}, { every: 1000 })
+      if (hideFirst) t.hide()
+      await flush() // 0 ms: a 429 with Retry-After: 10
+      await vi.advanceTimersByTimeAsync(100)
+      t.hide()
+      await vi.advanceTimersByTimeAsync(100)
+      t.show() // 200 ms
+      await flush()
+      expect(mock.calls, `hidden ${hideFirst ? 'in flight' : 'after'}`).toHaveLength(1)
+      await vi.advanceTimersByTimeAsync(9799)
+      expect(mock.calls).toHaveLength(1)
+      await vi.advanceTimersByTimeAsync(1) // 10 000 ms
+      expect(mock.calls).toHaveLength(2)
+      stop(); mock.restore()
+    }
+  })
+
+  it('a Retry-After shorter than the backoff wait is still waited out when the tab is shown', async () => {
+    vi.spyOn(Math, 'random').mockReturnValue(0.999999) // a backoff wait of 2000 ms
+    const t = tab()
+    let i = 0
+    const api = client({ 'GET /stats': () => (i++ === 0 ? jsonResponse({}, { status: 503, headers: { 'retry-after': '1' } }) : jsonResponse({ n: i })) })
+    const stop = poll(api.getStats, {}, () => {}, { every: 1000 })
+    await flush() // 0 ms: a 503 with Retry-After: 1
+    t.hide()
+    await vi.advanceTimersByTimeAsync(500)
+    t.show() // 500 ms: the Retry-After has 500 ms left
+    await vi.advanceTimersByTimeAsync(499)
+    expect(mock.calls).toHaveLength(1)
+    await vi.advanceTimersByTimeAsync(1) // 1000 ms
+    expect(mock.calls).toHaveLength(2)
+    stop()
+  })
+
+  it('after a failure without Retry-After, a tab shown again asks at once', async () => {
+    const t = tab()
+    const api = client({ 'GET /stats': () => jsonResponse({}, { status: 500 }) })
+    const stop = poll(api.getStats, {}, () => {}, { every: 1000 })
+    await flush()
+    t.hide()
+    t.show()
+    await flush()
+    expect(mock.calls).toHaveLength(2)
+    stop()
+  })
+
   it('never pauses where there is no document', async () => {
     const api = client()
     const stop = poll(api.getStats, {}, () => {}, { every: 1000 })
@@ -535,6 +694,7 @@ describe('poll: any liaise endpoint', () => {
   })
 
   it('a Pollable that throws becomes a middleware error Result, delivered, and polling goes on', async () => {
+    inBrowser()
     const reportError = vi.fn()
     vi.stubGlobal('reportError', reportError)
     let calls = 0
@@ -648,6 +808,16 @@ describe('poll: never throws, whatever it is given', () => {
       expect(() => { again = result.retry() }).not.toThrow()
       await expect(again).resolves.toMatchObject({ error: { kind: 'middleware' } })
     }
+  })
+
+  it("stop() doesn't throw for a signal-like object without removeEventListener, and ends the poll", async () => {
+    const api = client()
+    const signal = { aborted: false, addEventListener() {} } as unknown as AbortSignal
+    const stop = poll(api.getStats, {}, () => {}, { every: 1000, signal })
+    await flush()
+    expect(() => stop()).not.toThrow()
+    await vi.advanceTimersByTimeAsync(5000)
+    expect(mock.calls).toHaveLength(1)
   })
 
   it('a document without addEventListener or removeEventListener (a partial shim) still polls, and stop() ends it', async () => {

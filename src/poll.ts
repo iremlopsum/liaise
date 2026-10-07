@@ -20,10 +20,14 @@ export type Pollable<P extends object, R> = (params: P, options?: CallOptions) =
 export interface PollOptions extends Omit<CallOptions, 'signal'> {
   /**
    * Milliseconds to wait after each response before asking again. A value below
-   * 1, or one that isn't finite, asks once and never repeats.
+   * 1, or one that isn't finite, asks once and never repeats: that caller leaves
+   * after its answer.
    */
   every: number
-  /** Keep polling while the browser tab is hidden. Default `false`: pause, and ask at once when it's visible again. */
+  /**
+   * Keep polling while the browser tab is hidden. Default `false`: pause, and ask at
+   * once when it's visible again, or once a `Retry-After` the server sent has passed.
+   */
   inBackground?: boolean
   /** The longest wait after failures in a row. Default `max(every, 60_000)`. */
   maxEvery?: number
@@ -51,21 +55,23 @@ interface Caller {
 }
 
 /**
- * A thrown callback or `until` never breaks the poll. Like an error thrown from an
- * EventTarget handler it goes to `reportError` (browsers, Deno, Bun); where there is none it's
- * logged. Never re-thrown later: in Node an async throw would crash the process.
+ * A thrown callback or `until`, or an endpoint that fails to return a Result, never
+ * breaks the poll. In a browser (where there is a `document`) it goes to `reportError`,
+ * like an error thrown from an event handler. Everywhere else it's logged, saying what
+ * failed: Deno's `reportError` ends the process, and Node has none. Never re-thrown
+ * later: in Node an async throw would crash the process.
  */
-function report(error: unknown): void {
+function report(error: unknown, what: string): void {
   const g = globalThis as { reportError?: (error: unknown) => void }
-  if (typeof g.reportError === 'function') g.reportError(error)
-  else console.error('[liaise] a poll callback threw:', error)
+  if (typeof document !== 'undefined' && typeof g.reportError === 'function') g.reportError(error)
+  else console.error(`[liaise] poll: ${what} failed:`, error)
 }
 
 function deliver(caller: Caller, result: Result<unknown>): void {
   try {
     caller.deliver(result)
   } catch (error) {
-    report(error)
+    report(error, 'the callback')
   }
 }
 
@@ -88,6 +94,11 @@ class SharedPoll {
   private timer: ReturnType<typeof setTimeout> | undefined
   private controller: AbortController | undefined
   private stopped = false
+  /** When the last answer came, and the wait after it that is in effect. */
+  private answeredAt = 0
+  private wait = 0
+  /** When the last answer's Retry-After ends; 0 when it had none. */
+  private retryAt = 0
   private readonly onVisibility = (): void => this.visibilityChanged()
 
   constructor(
@@ -107,10 +118,18 @@ class SharedPoll {
     } else {
       this.callers.add(caller)
       const last = this.last
-      if (last) queueMicrotask(() => { if (this.callers.has(caller)) deliver(caller, last) })
-      // A joiner can make an idle poll ask again: an inBackground caller in a hidden
-      // tab, or a repeating caller joining a poll that asked once.
-      if (!this.controller && this.timer === undefined && !this.paused() && (this.repeats() || !last)) void this.ask()
+      // Not to a caller that left meanwhile (Strict Mode's cleanup), nor one that a newer
+      // answer reached first.
+      if (last) queueMicrotask(() => { if (this.callers.has(caller) && this.last === last) deliver(caller, last) })
+      if (this.timer !== undefined) {
+        // A shorter every takes effect now, not after the longer wait already started.
+        // A backoff after failures stays as it is.
+        if (!this.failures && caller.every < this.wait) this.arm(this.answeredAt + (this.wait = caller.every) - Date.now())
+      } else if (!this.controller && !this.paused() && (this.repeats() || !last)) {
+        // A joiner can make an idle poll ask again: an inBackground caller in a hidden
+        // tab, or a repeating caller joining a poll that asked once.
+        this.resume()
+      }
     }
     return () => this.leave(caller)
   }
@@ -142,7 +161,23 @@ class SharedPoll {
   private visibilityChanged(): void {
     if (this.stopped) return
     if (this.paused()) this.clearTimer()
-    else if (!this.controller && this.timer === undefined && (this.repeats() || !this.last)) void this.ask()
+    else if (!this.controller && this.timer === undefined && (this.repeats() || !this.last)) this.resume()
+  }
+
+  /** Asks at once, unless the last answer's Retry-After hasn't passed yet: then when it has. */
+  private resume(): void {
+    const left = this.retryAt - Date.now()
+    if (left > 0) this.arm(left)
+    else void this.ask()
+  }
+
+  /** Asks again after `delay` ms: at once for 0 or less, and never later than the longest timer. */
+  private arm(delay: number): void {
+    this.clearTimer()
+    this.timer = setTimeout(() => {
+      this.timer = undefined
+      void this.ask()
+    }, Math.min(Math.max(0, delay), MAX_TIMER))
   }
 
   private clearTimer(): void {
@@ -172,7 +207,7 @@ class SharedPoll {
       if (typeof result === 'object' && result !== null) return result
       throw new TypeError(`the endpoint resolved with ${String(result)}, not a Result`)
     } catch (error) {
-      report(error)
+      report(error, 'the endpoint')
       return createNetworkErrorResult(
         new ApiError({ kind: 'middleware', status: 0, statusText: '', body: error, headers: new Headers(), request: { method: this.request?.method ?? '', url: this.request?.url ?? '', params: this.params } }),
         () => this.call(),
@@ -199,10 +234,9 @@ class SharedPoll {
   }
 
   private schedule(result: Result<unknown>): void {
-    this.clearTimer()
-    if (this.stopped || this.paused()) return
+    this.retryAt = 0
     const repeating = [...this.callers].filter(c => !Number.isNaN(c.every))
-    if (repeating.length === 0) return
+    if (this.stopped || repeating.length === 0) return
     const every = Math.min(...repeating.map(c => c.every))
     const cap = Math.min(...repeating.map(c => c.maxEvery))
     let wait = every
@@ -214,13 +248,17 @@ class SharedPoll {
       if (status === 429 || status === 503) {
         // A hand-written Result may have a response without headers.
         const after = parseRetryAfter(result.response?.headers?.get?.('retry-after') ?? null)
-        if (after !== null) wait = Math.max(wait, Math.min(after, cap))
+        if (after !== null) {
+          const held = Math.min(after, cap)
+          // Remembered even while paused: a tab shown again waits out the rest of it.
+          this.retryAt = Date.now() + held
+          wait = Math.max(wait, held)
+        }
       }
     }
-    this.timer = setTimeout(() => {
-      this.timer = undefined
-      void this.ask()
-    }, Math.min(wait, MAX_TIMER))
+    this.answeredAt = Date.now()
+    this.wait = wait
+    if (!this.paused()) this.arm(wait)
   }
 }
 
@@ -291,18 +329,23 @@ export function poll<P extends object, R>(
   try {
     const signal = options.signal
     if (signal?.aborted) return () => {}
-    ;({ leave } = join(endpoint as unknown as Pollable<object, unknown>, params, options, r => callback(r as Result<R>)))
-    if (!signal) return leave
-    const onAbort = (): void => leave()
-    signal.addEventListener('abort', onAbort, { once: true })
-    return () => {
-      signal.removeEventListener('abort', onAbort)
+    const stop = (): void => {
       leave()
+      signal?.removeEventListener?.('abort', stop)
     }
+    // A caller that asks once leaves after its answer, even beside callers that repeat,
+    // so nothing it started is left running.
+    const once = Number.isNaN(positive(options.every))
+    ;({ leave } = join(endpoint as unknown as Pollable<object, unknown>, params, options, r => {
+      if (once) stop()
+      callback(r as Result<R>)
+    }))
+    signal?.addEventListener('abort', stop, { once: true })
+    return stop
   } catch (error) {
     // Untyped misuse, such as no options or a signal that isn't one: report it, stop
     // what it started, and hand back a stop that does nothing.
-    report(error)
+    report(error, 'poll()')
     leave()
     return () => {}
   }
@@ -374,7 +417,7 @@ export function pollUntil<P extends object, R>(
           try {
             done = until(result)
           } catch (error) {
-            report(error)
+            report(error, 'until')
           }
           if (done || asksOnce) finish(result)
         } else if (asksOnce || endsPolling(result.error.kind, result.error.status)) {
@@ -396,7 +439,7 @@ export function pollUntil<P extends object, R>(
         }, giveUpAfter)
       }
     } catch (error) {
-      report(error)
+      report(error, 'pollUntil()')
       if (!settled) {
         settled = true
         leave()
