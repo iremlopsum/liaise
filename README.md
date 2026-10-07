@@ -988,8 +988,42 @@ const reportServerErrors: Middleware = async (ctx, next) => {
 
 ### Pagination
 
-Many list endpoints return one page at a time. `paginate` walks through the pages and gives you one `Result` per page:
+Many list endpoints return one page at a time. `paginate` asks for a page only when you ask for the next one, so you can load page 1, then page 2 when the reader wants more, or walk every page in a loop:
 
+<!-- tested: pagination -->
+```ts
+import { createApi, defineRequest, paginate } from 'liaise'
+
+type Item = { id: string; name: string }
+type Page = { items: Item[]; cursor?: string }
+
+const listItems = defineRequest<Page, { limit: number; cursor?: string }>()({
+  method: 'GET',
+  path: '/items',
+})
+
+const api = createApi({ baseUrl: 'https://api.example.com', requests: { listItems } })
+
+const pages = paginate(api.listItems, { limit: 50 }, {
+  next: (p, prev) => (p.data.cursor ? { ...prev, cursor: p.data.cursor } : undefined),
+})
+// Nothing has been fetched yet.
+
+async function loadMore() {
+  const { value: page, done } = await pages.next() // one request per click
+  if (done) return hideLoadMore()
+  if (page.error) return showError(page.error)
+  render(page.data.items)
+}
+```
+
+`render`, `showError` and `hideLoadMore` stand for your own code, and your "Load more" button calls `loadMore`. Creating `pages` sends nothing, and each click sends one request: `/items?limit=50`, then `?limit=50&cursor=…` with the cursor from the page before, until a page comes back without one and the next click finds `done`.
+
+#### Walking every page
+
+For an export or a sync job, where you want every page, loop over the pages with `for await`:
+
+<!-- tested: pagination-walk -->
 ```ts
 import { createApi, defineRequest, paginate } from 'liaise'
 
@@ -1011,7 +1045,23 @@ for await (const page of paginate(api.listItems, { limit: 50 }, {
 }
 ```
 
-`render` stands for your own code.
+The loop asks for `/items?limit=50`, then for `?limit=50&cursor=…` with each page's `cursor`, and stops after the first page that comes back without one. `break` stops it sooner, and no further page is requested.
+
+#### Going straight to a page
+
+`paginate` only moves forward, from each page to the one after it. A numbered pager ("go to page 7") or a cursor kept in the URL needs one particular page, so there you don't need `paginate`. Keep the page number or the cursor in your own state, and call the endpoint with it:
+
+```ts
+// The cursor lives in the URL, so a reload or a shared link opens the same page.
+const cursor = new URLSearchParams(location.search).get('cursor') ?? undefined
+const { data, error } = await api.listItems({ limit: 50, cursor })
+if (error) showError(error)
+else render(data.items)
+```
+
+Your "Next" link then carries `data.cursor` in its URL. With a numbered pager it's the same call with the number the reader picked, such as `{ limit: 50, page: 7 }` for an API that pages by number.
+
+#### Getting to the next page
 
 - **`next` returns the params for the next page.** It gets the page just loaded and the params that loaded it, so the usual case is a spread. liaise never has to guess whether your API calls it `cursor`, `page_token` or `after`, and the same shape covers every scheme:
 
@@ -1028,10 +1078,17 @@ for await (const page of paginate(api.listItems, { limit: 50 }, {
     : undefined
   ```
 
-- **Return `undefined` or `null` to stop.**
-- **An error page ends the walk.** You get the error page, and then the loop ends, because there is no data to read the next cursor from. You see what failed. The loop never stops quietly.
+- **Return `undefined` or `null` to stop.** A `for await` loop ends there, and the next `pages.next()` gives `done` without sending a request.
+
+#### When to stop
+
+- **An error page ends it.** You get the error page, and then a loop ends, or the next `pages.next()` gives `done`, because there is no data to read the next cursor from. You see what failed. It never stops quietly.
 - **`maxPages` has no default.** Set it if you want a ceiling, as in `paginate(api.listItems, { limit: 50 }, { next, maxPages: 100 })`. liaise doesn't pick a number, because a silent cut-off at an arbitrary page looks exactly like reaching the last one.
-- **Every other option applies to every page.** Any of the [`CallOptions`](#calloptions), such as `signal`, `timeout` or `headers`, goes with each request, so one signal cancels the whole walk.
+- **A page you don't ask for is never requested.** Breaking out of a `for await` loop sends no further request, and neither does a `pages` you stop calling `next()` on.
+
+#### Options and pages
+
+- **Every other option applies to every page.** Any of the [`CallOptions`](#calloptions), such as `signal`, `timeout` or `headers`, goes with each request, so one signal cancels every page, whether you walk them or load them one at a time.
 - **`paginate` yields pages.** Read the items from each page yourself. Flattening them would mean guessing which field holds the array.
 
 ### GraphQL

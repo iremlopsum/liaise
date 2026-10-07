@@ -34,6 +34,8 @@ declare const api: ReturnType<typeof import('liaise').createApi<{
   deleteUser: import('liaise').Request<{ id: string | number }, void>
   uploadAvatar: import('liaise').Request<FormData, { url: string }>
   downloadFile: import('liaise').Request<{ id: string | number }, Blob>
+  // The pagination example's list endpoint.
+  listItems: import('liaise').Request<{ limit: number; cursor?: string }, { items: { id: string; name: string }[]; cursor?: string }>
 }>>
 declare const graphql: ReturnType<typeof import('liaise').createGraphQL<{
   getCategory: import('liaise').Operation<{ id: string }, { category: Category }>
