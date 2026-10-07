@@ -1102,6 +1102,8 @@ graphql.query.getCategory({ id: '123' })
 graphql.mutation.updateCategory({ id: '123', name: 'New Name' })
 ```
 
+A query and a mutation may have the same name. Each runs its own operation, and `dedupe` and `share` treat them as separate endpoints, so a query never cancels or joins the mutation of the same name.
+
 #### GraphQL errors
 
 A 2xx response with `{ errors: [...] }` is an error. It has `kind: 'http'`, the response's own `status`, and the `GraphQLError[]` in `error.body`. The same `if (error)` check covers GraphQL errors, HTTP errors and network errors.
@@ -1853,7 +1855,7 @@ How the stub behaves, beyond [Testing your code](#testing-your-code):
 
 ### Exports
 
-Each entry point is a separate import, and your bundler leaves out what you don't import. Gzipped, as measured by `npm run size`: about 6.2 kB for a REST-only import, 7.5 kB for the whole core entry, and 9.2 kB with all the middleware.
+Each entry point is a separate import, and your bundler leaves out what you don't import. Gzipped, as measured by `npm run size`: about 6.2 kB for a REST-only import, 7.6 kB for the whole core entry, and 9.2 kB with all the middleware.
 
 **`liaise`**
 

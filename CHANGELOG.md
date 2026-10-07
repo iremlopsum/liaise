@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [5.1.1] — 2026-10-07
+
+Fixes a GraphQL client split into `queries` and `mutations` when a query and a mutation share a name.
+
+### Fixed
+
+- **`gql.query.x` ran the mutation `x`.** `createGraphQL` merged the `queries` and `mutations` records by name, so a mutation replaced a query of the same name under both `gql.query.x` and `gql.mutation.x`: the query sent the mutation's document and reported the mutation's headers. Each side is now built from its own record.
+- **A query and a mutation with the same name shared one `dedupe` lane.** A call to one could cancel an in-flight call to the other. They are now separate endpoints for `dedupe` and `share`; `requestName`, as middleware and the logger see it, is still the plain name.
+- **The share-and-dedupe check missed a query hidden by a same-named mutation.** `createGraphQL` now checks each record on its own, so that configuration mistake is refused at construction as documented.
+
+No action needed to upgrade: only clients that reused a name across `queries` and `mutations` behave differently, and they were not doing what their code said.
+
+The core entry is 7.6 kB gzipped (was 7.5 kB); a REST-only import is unchanged at 6.2 kB.
+
 ## [5.1.0] — 2026-10-04
 
 Fixes a security bug in `share`: on a server, one user's response could be handed to
@@ -1144,6 +1158,7 @@ Initial release of the rewritten client. Reconstructed from the release commit
   `ArrayBuffer` and strings
 - Response parsing as `json`, `text`, `blob`, `arrayBuffer` or `formData`
 
+[5.1.1]: https://github.com/iremlopsum/liaise/compare/v5.1.0...v5.1.1
 [5.1.0]: https://github.com/iremlopsum/liaise/compare/v5.0.3...v5.1.0
 [5.0.3]: https://github.com/iremlopsum/liaise/compare/v5.0.2...v5.0.3
 [5.0.2]: https://github.com/iremlopsum/liaise/compare/v5.0.1...v5.0.2

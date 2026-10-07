@@ -176,6 +176,108 @@ describe('createGraphQL — split queries/mutations', () => {
     const { data } = await client.mutation.deleteUser({ id: '1' })
     expect(data).toEqual({ id: '1' })
   })
+
+  // A query and a mutation may share a name: they live in separate records, and
+  // GraphQL allows it. Before 5.1.1 both records were merged by name, so the
+  // mutation replaced the query and gql.query.user ran the mutation.
+  describe('a query and a mutation with the same name', () => {
+    const QUERY = gql`query User($id: String!) { user(id: $id) { id } }`
+    const MUTATION = gql`mutation User($id: String!) { touchUser(id: $id) { id } }`
+    const ok = () => ({
+      ok: true, status: 200, statusText: 'OK', headers: new Headers(),
+      text: () => Promise.resolve(JSON.stringify({ data: { id: '1' } })),
+    })
+
+    it('each send their own document', async () => {
+      const mockFetch = vi.fn().mockImplementation(() => Promise.resolve(ok()))
+      vi.stubGlobal('fetch', mockFetch)
+      const client = createGraphQL({
+        endpoint: 'https://api.example.com/graphql',
+        queries: { user: new Operation<{ id: string }, { id: string }>({ operation: QUERY }) },
+        mutations: { user: new Operation<{ id: string }, { id: string }>({ operation: MUTATION }) },
+      })
+
+      await client.query.user({ id: '1' })
+      await client.mutation.user({ id: '1' })
+
+      const sent = mockFetch.mock.calls.map((call) => JSON.parse(call[1].body).query)
+      expect(sent).toEqual([QUERY, MUTATION])
+    })
+
+    it('each report their own headers', () => {
+      const client = createGraphQL({
+        endpoint: 'https://api.example.com/graphql',
+        queries: { user: new Operation<{ id: string }, { id: string }>({ operation: QUERY, headers: { 'x-side': 'query' } }) },
+        mutations: { user: new Operation<{ id: string }, { id: string }>({ operation: MUTATION, headers: { 'x-side': 'mutation' } }) },
+      })
+
+      expect(client.query.user.getHeaders()['x-side']).toBe('query')
+      expect(client.mutation.user.getHeaders()['x-side']).toBe('mutation')
+    })
+
+    it('keep separate dedupe lanes: the query never cancels the mutation', async () => {
+      const pending: Array<{ init: RequestInit; resolve: (r: unknown) => void }> = []
+      vi.stubGlobal('fetch', vi.fn((_url: string, init: RequestInit) => new Promise((resolve, reject) => {
+        init.signal?.addEventListener('abort', () => reject(init.signal!.reason), { once: true })
+        pending.push({ init, resolve })
+      })))
+      const client = createGraphQL({
+        endpoint: 'https://api.example.com/graphql',
+        queries: { user: new Operation<{ id: string }, { id: string }>({ operation: QUERY, dedupe: true }) },
+        mutations: { user: new Operation<{ id: string }, { id: string }>({ operation: MUTATION, dedupe: true }) },
+      })
+
+      const mutation = client.mutation.user({ id: '1' })
+      await vi.waitFor(() => expect(pending).toHaveLength(1))
+      const query = client.query.user({ id: '1' })
+      await vi.waitFor(() => expect(pending).toHaveLength(2))
+
+      expect(pending[0].init.signal?.aborted).toBe(false)
+      for (const p of pending) p.resolve(ok())
+      const [m, q] = await Promise.all([mutation, query])
+      expect(m.error).toBeNull()
+      expect(q.error).toBeNull()
+    })
+
+    it('never join each other under share', async () => {
+      const mockFetch = vi.fn().mockImplementation(() => Promise.resolve(ok()))
+      vi.stubGlobal('fetch', mockFetch)
+      const client = createGraphQL({
+        endpoint: 'https://api.example.com/graphql',
+        queries: { user: new Operation<{ id: string }, { id: string }>({ operation: QUERY, share: true }) },
+        mutations: { user: new Operation<{ id: string }, { id: string }>({ operation: MUTATION, share: true }) },
+      })
+
+      await Promise.all([client.query.user({ id: '1' }), client.mutation.user({ id: '1' })])
+
+      expect(mockFetch).toHaveBeenCalledTimes(2)
+    })
+
+    it('keep the plain name as requestName for middleware and the logger', async () => {
+      vi.stubGlobal('fetch', vi.fn().mockImplementation(() => Promise.resolve(ok())))
+      const seen: string[] = []
+      const record: Middleware = async (ctx, next) => { seen.push(ctx.requestName); return next() }
+      const client = createGraphQL({
+        endpoint: 'https://api.example.com/graphql',
+        middleware: [record],
+        queries: { user: new Operation<{ id: string }, { id: string }>({ operation: QUERY }) },
+        mutations: { user: new Operation<{ id: string }, { id: string }>({ operation: MUTATION }) },
+      })
+
+      await client.query.user({ id: '1' })
+      await client.mutation.user({ id: '1' })
+
+      expect(seen).toEqual(['user', 'user'])
+    })
+
+    it('are each checked for share together with dedupe', () => {
+      expect(() => createGraphQL({
+        endpoint: 'https://api.example.com/graphql',
+        queries: { user: new Operation<{ id: string }, { id: string }>({ operation: QUERY, share: true, dedupe: true }) },
+        mutations: { user: new Operation<{ id: string }, { id: string }>({ operation: MUTATION }) },
+      })).toThrow(/sets both share and dedupe/)
+    })
+  })
 })
 
 describe('createGraphQL — GraphQL errors (HTTP 200 with { errors })', () => {
