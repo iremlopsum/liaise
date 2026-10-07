@@ -123,20 +123,29 @@ describe('front page', () => {
       for (const f of pages()) {
         const html = readFileSync(dist(f), 'utf8')
         expect(html, f).toContain('<meta property="og:image" content="https://iremlopsum.github.io/liaise/og.png"')
-        expect(html, f).toMatch(/<meta property="og:url" content="https:\/\/iremlopsum\.github\.io\/liaise\/[^"]*"/)
+        if (f !== '404.html') expect(html, f).toMatch(/<meta property="og:url" content="https:\/\/iremlopsum\.github\.io\/liaise\/[^"]*"/)
         expect(html, f).toMatch(/<meta property="og:title" content="[^"]+"/)
         expect(html, f).toMatch(/<meta property="og:description" content="[^"]+"/)
         expect(html, f).toContain('<meta name="twitter:card" content="summary_large_image"')
       }
     })
+    it('keeps the 404 page out of the index: noindex, no canonical, no og:url', () => {
+      const html = readFileSync(dist('404.html'), 'utf8')
+      expect(html).toContain('<meta name="robots" content="noindex"')
+      expect(html).not.toContain('rel="canonical"')
+      expect(html).not.toContain('og:url')
+    })
     it('ships a 1200x630 PNG for og:image', () => {
+      expect(existsSync(dist('og.png')), 'og.png is shipped').toBe(true)
       const png = readFileSync(dist('og.png'))
       expect(png.subarray(1, 4).toString()).toBe('PNG')
       expect([png.readUInt32BE(16), png.readUInt32BE(20)]).toEqual([1200, 630])
     })
     it('lists the docs pages in the sitemap, under the base', () => {
+      expect(existsSync(dist('sitemap-index.xml')), 'sitemap-index.xml is generated').toBe(true)
       const index = readFileSync(dist('sitemap-index.xml'), 'utf8')
       expect(index).toContain('https://iremlopsum.github.io/liaise/sitemap-0.xml')
+      expect(existsSync(dist('sitemap-0.xml')), 'sitemap-0.xml is generated').toBe(true)
       const map = readFileSync(dist('sitemap-0.xml'), 'utf8')
       expect(map).toContain('<loc>https://iremlopsum.github.io/liaise/guide/handling-errors/</loc>')
       expect(map).toContain('<loc>https://iremlopsum.github.io/liaise/compare/</loc>')
