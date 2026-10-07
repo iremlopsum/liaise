@@ -28,8 +28,36 @@ npm run typecheck         # TypeScript, library source
 npm run test:types        # type-level tests
 npm run test:run          # all tests once, including integration
 npm run test:integration  # integration tests against a real local HTTP server
+npm run docs:check        # README examples match the tests they come from
+npm run docs:types        # every other TypeScript example in the docs type-checks
 npm run build
 ```
+
+## Working on the docs
+
+The docs site lives in `site/` and is published at https://iremlopsum.github.io/liaise/. It
+uses the library you just built, so build that first:
+
+```bash
+npm run build                  # the library, into dist/
+npm --prefix site install
+npm --prefix site run dev      # http://localhost:4321/liaise/
+npm --prefix site run build && npm --prefix site test   # what CI runs for the site
+```
+
+Pages are in `site/src/content/docs/`, one folder per sidebar group.
+
+- **Runnable examples come from tests.** A page shows one with `<Example name="…" />`, which
+  renders the region between `// example:<name>:start` and `:end` in a test under `tests/`. To
+  change an example, change the test, run it, then check the page. The README copies the same
+  regions, and `npm run docs:check` fails when a copy drifts.
+- **Every other TypeScript block must type-check** (`npm run docs:types`). If a block is
+  deliberately incomplete, put a marker with the reason just before it: `<!-- untyped: reason -->`
+  in Markdown, `{/* untyped: reason */}` in MDX.
+- **Links between pages** are written without the `/liaise` prefix (`/guide/handling-errors/`).
+  The build adds it, and the site tests fail on any link that goes nowhere.
+- **The README is still a full reference** until it is shortened in a later release. If your change affects
+  something a user calls, passes or gets back, update the page and the README section.
 
 ## The rules that matter
 
@@ -38,7 +66,7 @@ These are the ones a pull request gets checked against.
 - **No runtime dependencies.** Anything liaise depends on ends up in every user's bundle. If a change needs a library, it probably belongs in user code or middleware instead.
 - **Never throw.** Every public call returns a `Result` (`{ data, error }`), even when the network fails or the code inside a middleware throws. The single exception is a configuration mistake caught when `createApi` is called.
 - **Every fix comes with a test, and the test must fail without the fix.** Undo your fix, run the test, check that it fails because of the bug (an assertion error, not a crash from missing code), then put the fix back.
-- **Docs change with the code.** If your change affects anything a user calls, passes or gets back, update `README.md` in the same pull request.
+- **Docs change with the code.** If your change affects anything a user calls, passes or gets back, update the docs page in `site/src/content/docs/` and `README.md` in the same pull request.
 - **Leave the version alone.** `package.json` version, `CHANGELOG.md` and `MIGRATION.md` are updated by the maintainer when a release is cut.
 - **Commit messages carry no tool attribution.** No `Co-Authored-By:` lines naming an AI tool and no "Generated with" lines. CI rejects them.
 
