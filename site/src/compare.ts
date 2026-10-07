@@ -144,6 +144,7 @@ const relative = (mode: Mode) => {
   return others.map((n) => ({ n, d: (rps(n, mode).median - base) / base }))
 }
 const isNoise = (d: number) => Math.abs(d) < OVERHEAD.noise
+const rangesOverlap = (n: string, mode: Mode) => rps(n, mode).min <= rps('liaise', mode).max && rps('liaise', mode).min <= rps(n, mode).max
 export const overheadMethod = `Median (min–max) of ${OVERHEAD.rounds} interleaved rounds of ${count(OVERHEAD.calls)} calls each, after ${count(OVERHEAD.warmup)} warm-up calls per library. Measured on ${results.meta.overheadNote}. Differences under about ${OVERHEAD.noise * 100}% are noise.`
 export function overheadSentence(mode: Mode) {
   const { lead } = MODES.find((m) => m.id === mode)!
@@ -201,7 +202,14 @@ export const losses = {
   overhead: MODES.map(({ id, lead }) => {
     const ahead = relative(id).filter((r) => r.d >= OVERHEAD.noise)
     if (!ahead.length) return null
-    return { id, ahead: ahead.map((r) => r.n), text: `${lead}, ${list(ahead.map((r) => `${r.n} handles about ${pct(r.d)}% more requests per second than liaise`))}.` }
+    // A median ahead by more than the noise can still sit inside liaise's min–max range.
+    const overlap = ahead.filter((r) => rangesOverlap(r.n, id)).map((r) => r.n)
+    return {
+      id,
+      ahead: ahead.map((r) => r.n),
+      text: `${lead}, ${list(ahead.map((r) => `${r.n} handles about ${pct(r.d)}% more requests per second than liaise`))}.`,
+      overlap: overlap.length ? `The min–max ranges of ${list(overlap)} and liaise overlap.` : '',
+    }
   }).filter((x) => x !== null),
 }
 

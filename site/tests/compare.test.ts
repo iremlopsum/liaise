@@ -207,6 +207,18 @@ describe('/compare from compare/results.json', () => {
     }
   })
 
+  it('says when a library ahead of liaise has a min–max range that overlaps liaise’s', () => {
+    for (const mode of MODES) {
+      const L = data.overhead.liaise[mode]
+      const ahead = others.filter(n => (data.overhead[n][mode].median - L.median) / L.median >= OVERHEAD.noise)
+      if (!ahead.length) continue
+      const overlap = ahead.filter(n => data.overhead[n][mode].min <= L.max && L.min <= data.overhead[n][mode].max)
+      const sentence = fact(`loses-overhead-${mode}`)
+      if (overlap.length) expect(sentence, mode).toContain(`The min–max ranges of ${list(overlap)} and liaise overlap.`)
+      else expect(sentence, mode).not.toMatch(/overlap/)
+    }
+  })
+
   it('compares ky with liaise row by row, from the data', () => {
     const norm = (o: string) => o.replace(/throws [^,]+|error result \([^)]*\)/g, 'ERR')
     const code = (s: any, n: string) => cell(s, n, 'configured').kind === 'code'

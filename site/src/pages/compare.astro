@@ -185,7 +185,7 @@ const q = (s: string) => `“${s}”`
           {losses.overhead.map((o) => (
             <li data-fact={`loses-overhead-${o.id}`}>
               <strong class="font-semibold text-gray-950 dark:text-white">Fewer requests per second than {list(o.ahead)}.</strong>{' '}
-              {o.text}
+              {o.overlap ? `${o.text} ${o.overlap}` : o.text}
             </li>
           ))}
         </ul>

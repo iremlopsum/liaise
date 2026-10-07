@@ -1625,7 +1625,7 @@ With enough of your own code, every library gets the right result in almost ever
 
 ky is the closest alternative. Apart from throwing instead of returning errors, it differs from liaise in two rows of the table. Its search as you type needs code, and it sends the undefined path param. Out of the box, ky is the only one that times out, and it retries, as ofetch does. In size, liaise is larger than ofetch and smaller than ky and axios.
 
-In request overhead, liaise ties fetch and ofetch. axios handles about 17% and ky about 14% fewer requests per second than liaise. Overhead is measured in microseconds; on a real network each request takes milliseconds.
+In request overhead, one request at a time, liaise ties fetch and ofetch; axios handles about 17% and ky about 14% fewer requests per second than liaise. With 50 requests in flight, liaise ties ofetch and fetch handles about 6% more requests per second than liaise (the measured ranges overlap), while ky handles about 14% and axios about 18% fewer. Overhead is measured in microseconds; on a real network each request takes milliseconds.
 
 ### Where it runs
 
