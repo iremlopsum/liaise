@@ -1,21 +1,17 @@
 ---
 title: "Testing your code"
+description: "liaise/testing gives you a fetch stub that matches routes, so your tests run liaise's real pipeline instead of a canned Result."
 order: 12
 ---
+This page shows how to test code that calls liaise. Read it when you write unit tests for anything that uses your client.
+
 `liaise/testing` gives you a `fetch` stub that matches routes. Your tests then run the real pipeline, from URL building, headers and body to parsing and your own middleware. A stubbed API method that returns a canned `Result` drifts away from what liaise actually does. The stub needs no test runner, so it works in Vitest, Jest or anything else.
 
-```ts
-import { mockFetch, jsonResponse } from 'liaise/testing'
+<Example name="testing" />
 
-const mock = mockFetch({
-  'GET /api/users/:id': ({ params }) => jsonResponse({ id: params.id, name: 'Ada' }),
-  'POST /api/users': jsonResponse({ id: 'new-user' }, { status: 201 }),
-})
+`api` is your client, created with `baseUrl: '/api'`. Nothing in it changes for the test, because the stub replaces only `fetch`. The route captures `id` from the URL, so `data` is `{ id: '42', name: 'Ada' }`, and `mock.restore()` puts the real `fetch` back.
 
-mock.install()   // replaces globalThis.fetch
-// ... exercise your code, which calls the real api.getUser(...) ...
-mock.restore()   // puts the original globalThis.fetch back
-```
+## Routes
 
 - **Routes are keyed as `"METHOD /path"`.** Each `:token` segment is captured and passed to a route function as `{ params, request }`.
 - **A route value is a `Response`, a route function, or an array of either.** `jsonResponse` builds a `Response` with a JSON body, or you can build your own.
@@ -54,4 +50,8 @@ vi.spyOn(api, 'getUser').mockResolvedValue(successResult({ id: '42', name: 'Ada'
 vi.spyOn(api, 'getUser').mockResolvedValue(errorResult(404, { message: 'not found' }))
 ```
 
+Stubbing this way skips the real pipeline, so prefer `mockFetch` when you can.
+
 More of the stub's behaviour, such as how it handles a signal, is under [liaise/testing](/reference/liaisetesting/).
+
+**Next:** That's the guide. The recipes put these pieces together for common tasks, starting with [Add an auth header and refresh the token on a 401](/recipes/add-an-auth-header-and-refresh-the-token-on-a-401/).

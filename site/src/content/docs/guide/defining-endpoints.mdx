@@ -1,29 +1,25 @@
 ---
 title: "Defining endpoints"
+description: "Describe each endpoint once with defineRequest, and its path and types decide what every call to it accepts."
 order: 1
 ---
-You describe each endpoint once, with its method, its path, and the types of its params and response. Every call to it is then checked against that description.
+An endpoint definition tells liaise an endpoint's method, its path, and the types of its params and response. Read this page when you add an endpoint, or when a call doesn't compile and you want to know why.
 
-```ts
-import { createApi, defineRequest } from 'liaise'
+You describe each endpoint once, and every call to it is then checked against that description. Here is one endpoint, `listRepos`, and the calls you can make to it:
 
-type Repo = { id: number; name: string }
+<Example name="define-endpoints" />
 
-// The first type is the response. The second is the params the path doesn't name.
-const listRepos = defineRequest<Repo[], { page?: number }>()({
-  method: 'GET',
-  path: '/orgs/:org/repos',
-})
+The path `/orgs/:org/repos` names `org`, so every call must pass it, and its value is filled into the URL. `page` comes from the second type argument. It is optional, and for a `GET` it goes in the query string. The commented-out call at the end doesn't compile, because it leaves out `org`.
 
-const api = createApi({ baseUrl: 'https://api.example.com', requests: { listRepos } })
-
-await api.listRepos({ org: 'acme' })           // GET /orgs/acme/repos
-await api.listRepos({ org: 'acme', page: 2 })  // GET /orgs/acme/repos?page=2
-// @ts-expect-error
-await api.listRepos({ page: 2 })               // ✗ compile error: org is required
-```
+## Path params
 
 - **The path names the required params.** Each `:name` in the path becomes a required param of type `string | number`. Its value is filled into the URL and left out of the query string and the body.
+- **A path param must have a usable value.** It must be a non-empty string, a finite number, a bigint or a boolean. `undefined`, `null`, `''`, an object, an array, a `Date` and `NaN` are refused before anything is sent, with an error naming the param.
+- That catches the most common mistake, which is calling before an id has loaded. An `org` that is still `undefined` at runtime returns an error with `kind: 'network'` instead of fetching `/orgs/undefined/repos`.
+- **A `#` in the path is a compile error.** A URL fragment is never sent to the server, so `path: '/docs#section'` is refused where you write it. [URL fragments](/reference/behaviour-in-detail/#url-fragments) has the details.
+
+## Query string or body
+
 - **Every other param goes in the second type argument.** For `GET` and `DELETE`, these params go in the query string. For `POST`, `PUT` and `PATCH`, they go in a JSON body. [Sending data](/guide/sending-data/) covers what each one can hold.
 - **`bodyAs` flips that default.** Use it for an API that does it the other way round:
 
@@ -45,9 +41,11 @@ await api.listRepos({ page: 2 })               // ✗ compile error: org is requ
   })
   ```
 
-- **A path param must have a usable value.** It must be a non-empty string, a finite number, a bigint or a boolean. `undefined`, `null`, `''`, an object, an array, a `Date` and `NaN` are refused before anything is sent, with an error naming the param.
-- That catches the most common mistake, which is calling before an id has loaded. An `org` that is still `undefined` at runtime returns an error instead of fetching `/orgs/undefined/repos`.
 - **An endpoint with no params** is called with no arguments. With `defineRequest<{ status: string }>()({ method: 'GET', path: '/health' })`, both `api.health()` and `api.health({})` work.
+
+## The response
+
+- **The first type argument is the response type.** `data` has that type once you have checked `error`.
 - **`responseType`** says how to read the response body. It defaults to `'json'`. The options are under [Reading responses](/guide/reading-responses/).
 - **`responseType: 'none'` needs the response type `undefined`.** Anything else is a compile error, because `data` is always `undefined` for an endpoint that sends no body:
 
@@ -57,9 +55,11 @@ await api.listRepos({ page: 2 })               // ✗ compile error: org is requ
   defineRequest<Repo>()({ method: 'POST', path: '/ping', responseType: 'none' })       // ✗
   ```
 
-- **A `#` in the path is a compile error.** A URL fragment is never sent to the server, so `path: '/docs#section'` is refused where you write it. [URL fragments](/reference/behaviour-in-detail/#url-fragments) has the details.
+- **With a schema, you write no response type at all.** The schema supplies it ([Validating responses](/guide/validating-responses/)).
 
-**Why two calls.** `defineRequest<Repo[]>()({ ... })` is two calls because TypeScript can't infer some type arguments while you write others. The first call takes the response type you write, and the second infers the params from the path. In a single call, writing the response type would quietly turn the path checking off.
+## Why two calls
+
+`defineRequest<Repo[]>()({ ... })` is two calls because TypeScript can't infer some type arguments while you write others. The first call takes the response type you write, and the second infers the params from the path. In a single call, writing the response type would quietly turn the path checking off.
 
 ## Without defineRequest
 
@@ -78,3 +78,5 @@ await api.getUser({ userId: '42' })
 ```
 
 Use `new Request` when the config isn't a literal, for example when you build it at runtime, or when you don't want the path checked. It is not deprecated. For an endpoint with no params, write `Record<string, never>` as `TParams`.
+
+**Next:** [Handling errors](/guide/handling-errors/) shows what a call gives back when something goes wrong, and how to tell the failures apart.

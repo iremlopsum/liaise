@@ -1,0 +1,48 @@
+---
+title: "Reading responses"
+description: "Choose how a response body is read with responseType: JSON by default, or text, a Blob, an ArrayBuffer, FormData or nothing at all."
+order: 4
+---
+This page says how liaise reads a response body and what you get in `data`. Read it when an endpoint returns something other than JSON, such as a file or a CSV, or nothing at all.
+
+A response can be JSON, text or a file. You say which with `responseType` on the endpoint, and liaise reads the body for you:
+
+<Example name="reading-responses" />
+
+`api.getUser` gives you a parsed `User`, `api.exportCsv` a string, `api.downloadFile` a `Blob`, and `api.deleteUser` gives `data: undefined` when the server answers 204.
+
+| `responseType` | How the body is read | `data` |
+| -------------- | -------------------- | ------ |
+| `'json'` (default) | `response.text()`, then `JSON.parse()` | the parsed value |
+| `'text'` | `response.text()` | `string` |
+| `'blob'` | `response.blob()` | `Blob` |
+| `'arrayBuffer'` | `response.arrayBuffer()` | `ArrayBuffer` |
+| `'formData'` | `response.formData()` | `FormData` |
+| `'none'` | not read (the stream is cancelled) | `undefined` |
+
+## Empty bodies and null
+
+- **An empty body under `'json'` is a `'parse'` error.** You declared JSON and the server sent none, so no value could honestly match your type. The error has the response's own status (a 204 reports 204), the `response`, and `''` in `error.body`.
+- **A literal `null` body is not empty.** It is valid JSON, so the call succeeds with `data: null`.
+
+## Endpoints that send no body
+
+- **`'none'` is for an endpoint that sends no body on success**, such as a `DELETE` that answers 204, or 200 with an empty body. liaise reads nothing, `data` is `undefined`, and a body the server sends anyway is discarded. Its stream is cancelled, which frees the connection.
+- **Declare `'none'` with the response type `undefined`.** `defineRequest` enforces this ([Defining endpoints](/guide/defining-endpoints/#the-response)). [Without defineRequest](/guide/defining-endpoints/#without-definerequest) it is only a convention, and `data` is `undefined` at runtime whatever type you wrote.
+
+## Error bodies
+
+A non-2xx body is still read into `error.body`, because an error body usually explains what went wrong. It is read the same way as a success body, except under `'none'`: there it is read as JSON, and `error.body` is `null` when it isn't JSON.
+
+```ts
+const { error } = await api.deleteUser({ id: '42' })
+if (error) {
+  // A 409 { "error": "already deleted" } lands in error.body,
+  // even though deleteUser declares responseType: 'none'.
+  console.error(error.status, error.body)
+}
+```
+
+What `error.body` holds for every kind of failure is listed under [`ApiError`](/reference/result-and-apierror/).
+
+**Next:** [Validating responses](/guide/validating-responses/) checks at runtime that the body has the shape your type promises.

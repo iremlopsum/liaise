@@ -1,35 +1,15 @@
 ---
 title: "Writing middleware"
+description: "A middleware wraps every call: it can change the request before fetch, and read or change the Result after."
 order: 9
 ---
-Some things belong on every call, such as an auth header or tracing, and you don't want to repeat them at each call site. A middleware is a function that wraps a call. It sees the request before it is sent and the `Result` after.
+This page shows how to write your own middleware. Read it when something belongs on every call, such as an auth header, tracing or error reporting, and you don't want to repeat it at each call site.
 
-```ts
-import { createApi, defineRequest, type Middleware } from 'liaise'
+A middleware is a function that wraps a call. It sees the request before it is sent and the `Result` after. This one adds a token on the way in, and signs the user out when the server answers 401:
 
-type User = { id: string; name: string }
+<Example name="middleware" />
 
-const auth: Middleware = async (ctx, next) => {
-  // Before: change the request
-  ctx.request.headers.set('Authorization', `Bearer ${getToken()}`)
-
-  // Run the rest of the chain, ending in fetch
-  const result = await next()
-
-  // After: read or change the result
-  return result
-}
-
-const getUser = defineRequest<User>()({ method: 'GET', path: '/users/:id' })
-
-const api = createApi({
-  baseUrl: 'https://api.example.com',
-  requests: { getUser },
-  middleware: [auth],
-})
-```
-
-`getToken` stands for wherever you keep the token.
+`getToken` and `signOut` stand for your own code. Every call through `api` now carries the `Authorization` header. When a call gets a 401, `auth` calls `signOut()` and then returns the result unchanged, so the caller still gets its 401 error.
 
 Each middleware wraps the next, like the layers of an onion. The request passes in through every layer to `fetch`, and the `Result` passes back out through the same layers:
 
@@ -44,7 +24,9 @@ A middleware can:
 - **Call `next()` more than once**, for example to retry a 5xx.
 - **Read the result** to log it, report an error or transform `data`.
 
-Middleware runs at three levels, the client's first and the call's last, as [Three levels of settings](/start/how-it-fits-together/#three-levels-of-settings) shows.
+Middleware runs at three levels, the client's first and the call's last, as [Three levels of settings](/start/how-it-fits-together/#three-levels-of-settings) shows. A middleware that throws ends the call with `kind: 'middleware'` ([Handling errors](/guide/handling-errors/)).
+
+[Add an auth header and refresh the token on a 401](/recipes/add-an-auth-header-and-refresh-the-token-on-a-401/) grows `auth` into a full token refresh.
 
 ## Skipping a middleware for one call
 
@@ -101,3 +83,7 @@ const reportServerErrors: Middleware = async (ctx, next) => {
   return result
 }
 ```
+
+To report every failed call from one place without a middleware, use [`onError`](/guide/handling-errors/#reporting-errors-with-onerror).
+
+**Next:** [Pagination](/guide/pagination/) walks a list endpoint that returns one page at a time.

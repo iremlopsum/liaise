@@ -609,16 +609,17 @@ const withArkType = defineRequest()({
 
 - A validator that throws is a `'parse'` error too, with the thrown value in `error.body`.
 - **Only a 2xx body is validated.** A non-2xx body is diagnostic and often a different shape, so it is left alone.
-- **The GraphQL `Operation` ([GraphQL](#graphql)) takes `schema` too**, and validates the response's `data`. There the response type stays explicit, because only `defineRequest` infers it:
+- **The GraphQL `Operation` ([GraphQL](#graphql)) takes `schema` too**, and validates the response's whole `data` object, which is keyed by the fields the query selects. There the response type stays explicit, because only `defineRequest` infers it:
 
   ```ts
   import { Operation, gql } from 'liaise'
 
   const UserSchema = z.object({ id: z.string(), name: z.string() })
+  const MeSchema = z.object({ me: UserSchema }) // data is { me: { id, name } }
 
-  const me = new Operation<Record<string, never>, z.infer<typeof UserSchema>>({
+  const me = new Operation<Record<string, never>, z.infer<typeof MeSchema>>({
     operation: gql`query { me { id name } }`,
-    schema: UserSchema,
+    schema: MeSchema,
   })
   ```
 
@@ -1052,7 +1053,7 @@ const GET_CATEGORY = gql`
   }
 `
 
-const getCategory = new Operation<{ id: string }, Category>({
+const getCategory = new Operation<{ id: string }, { category: Category }>({
   operation: GET_CATEGORY,
 })
 
@@ -1065,14 +1066,14 @@ const graphql = createGraphQL({
 const { data, error, response, retry } = await graphql.getCategory({ id: '123' })
 ```
 
-`Operation<TVariables, TData>` takes the variables type first and the response type second. `gql` marks the string as GraphQL for your editor.
+`Operation<TVariables, TData>` takes the variables type first and the type of the response's `data` second. `data` is keyed by the fields the query selects, so here it is `{ category: Category }`. `gql` marks the string as GraphQL for your editor.
 
 An operation with no variables is called without arguments. Write `Record<string, never>` as its variables type:
 
 ```ts
 type Viewer = { id: string; name: string }
 
-const getViewer = new Operation<Record<string, never>, Viewer>({
+const getViewer = new Operation<Record<string, never>, { viewer: Viewer }>({
   operation: gql`query { viewer { id name } }`,
 })
 
@@ -1089,10 +1090,10 @@ To keep queries and mutations apart, use the `queries` and `mutations` keys inst
 const graphql = createGraphQL({
   endpoint: 'https://api.example.com/graphql',
   queries: {
-    getCategory: new Operation<{ id: string }, Category>({ operation: GET_CATEGORY }),
+    getCategory: new Operation<{ id: string }, { category: Category }>({ operation: GET_CATEGORY }),
   },
   mutations: {
-    updateCategory: new Operation<{ id: string; name: string }, Category>({
+    updateCategory: new Operation<{ id: string; name: string }, { updateCategory: Category }>({
       operation: gql`
         mutation UpdateCategory($id: String!, $name: String!) {
           updateCategory(id: $id, name: $name) { id name status }

@@ -12,6 +12,9 @@ export default defineConfig({
       { find: /^liaise$/, replacement: src('index.ts') },
       { find: /^liaise\/middleware$/, replacement: src('built-in-middleware.ts') },
       { find: /^liaise\/testing$/, replacement: src('testing.ts') },
+      // Docs examples import { z } from 'zod'. The package has no zod dependency, so tests
+      // get a stand-in built on Standard Schema (tests/helpers/zod.ts says what it covers).
+      { find: /^zod$/, replacement: fileURLToPath(new URL('./tests/helpers/zod.ts', import.meta.url)) },
     ],
   },
   test: {

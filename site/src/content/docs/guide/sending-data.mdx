@@ -1,33 +1,15 @@
 ---
 title: "Sending data"
+description: "Pass one params object, and liaise puts each field in the path, the query string or the body, and sets Content-Type for you."
 order: 3
 ---
+This page says where liaise puts each param you pass, and how it turns a body into what is sent. Read it when an API expects a particular query-string format, or when you send something other than JSON.
+
 You pass one params object, and liaise puts each field where it belongs: in the path, the query string or the body. You never build a URL by hand.
 
-```ts
-import { createApi, defineRequest } from 'liaise'
+<Example name="sending-data" />
 
-type Item = { id: string; name: string }
-
-const listItems = defineRequest<Item[], { page: number; tags: string[] }>()({
-  method: 'GET',
-  path: '/orgs/:org/items',
-})
-const createItem = defineRequest<Item, { name: string }>()({
-  method: 'POST',
-  path: '/orgs/:org/items',
-})
-
-const api = createApi({ baseUrl: 'https://api.example.com', requests: { listItems, createItem } })
-
-await api.listItems({ org: 'acme', page: 2, tags: ['a', 'b'] })
-// GET /orgs/acme/items?page=2&tags=a&tags=b
-
-await api.createItem({ org: 'acme', name: 'Lamp' })
-// POST /orgs/acme/items, with the JSON body {"name":"Lamp"}
-```
-
-Which params go in the query string and which in the body is set per endpoint, under [Defining endpoints](/guide/defining-endpoints/).
+`org` fills the path in both calls. For the `GET`, the other params go in the query string, and an array becomes a repeated key. For the `POST`, they go in a JSON body, and liaise sets `Content-Type: application/json`. An endpoint can swap the two with `bodyAs`, as [Query string or body](/guide/defining-endpoints/#query-string-or-body) shows.
 
 ## Query strings
 
@@ -46,6 +28,8 @@ Which params go in the query string and which in the body is set per endpoint, u
 - **A `Date` is refused too.** APIs expect ISO 8601 or epoch milliseconds, so convert it yourself with `date.toISOString()` or `date.getTime()`.
 - A refused param sends nothing. You get an error `Result` with `kind: 'network'` and a `TypeError` in `error.body` that names the param.
 
+A `baseUrl` can carry a query string of its own, such as a fixed `api-version`. Its params go in front of the call's ([baseUrl query merging](/reference/behaviour-in-detail/#baseurl-query-merging)).
+
 ## Request bodies
 
 liaise serializes the body from what you pass, and sets `Content-Type` for you unless you set one yourself.
@@ -62,7 +46,7 @@ liaise serializes the body from what you pass, and sets `Content-Type` for you u
 | `ReadableStream` | as-is (a streaming upload; `duplex: 'half'` is set for you) | `application/octet-stream` |
 | Plain object | `JSON.stringify()` | `application/json` |
 
-A `ReadableStream` body can be sent only once. A retry, from middleware or from `result.retry()`, returns an error telling you to read the stream into a `Blob` or `ArrayBuffer` first ([details](/reference/behaviour-in-detail/#stream-bodies)).
+A `ReadableStream` body can be sent only once. A retry, from middleware or from `result.retry()`, returns an error telling you to read the stream into a `Blob` or `ArrayBuffer` first ([details](/reference/behaviour-in-detail/#stream-bodies)). [Upload and download files](/recipes/upload-and-download-files/) shows a `FormData` upload.
 
 ## What params can be
 
@@ -78,3 +62,5 @@ A `ReadableStream` body can be sent only once. A retry, from middleware or from 
 A `Map`, `Set` or class with private state nested inside a JSON body is sent as `{}`, because that is what `JSON.stringify` does. Convert it first.
 
 Headers, including your own `Content-Type`, follow the [three levels of settings](/start/how-it-fits-together/#three-levels-of-settings).
+
+**Next:** [Reading responses](/guide/reading-responses/) covers the other direction: how liaise reads what the server sends back.

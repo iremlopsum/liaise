@@ -1,18 +1,21 @@
 ---
 title: "Retries, caching and logging"
+description: "Retry failed calls with retryMiddleware, keep repeated reads with cacheMiddleware, and see every call with the client's log option."
 order: 8
 ---
+This page covers what liaise has built in beyond the core: retries, caching and logging. Read it when a backend fails now and then, when the same read repeats often, or when you want to see every call while you build.
+
 Some failures go away when you try again. Some reads repeat often enough to keep. And while you build, you want to see every call. Retries and caching are middleware, imported from a separate entry point:
 
 ```ts
 import { retryMiddleware, cacheMiddleware } from 'liaise/middleware'
 ```
 
-Logging is the client's `log` option ([Log every call](/guide/retries-caching-and-logging/#log-every-call)).
+Logging is the client's `log` option ([Log every call](#log-every-call)).
 
 ## Retry failed calls
 
-`retryMiddleware(2)` retries a failed call up to two more times, three attempts in all. By default it retries only 5xx responses. Any 4xx, including a 429, comes back as it is, and so does a network error. To retry 429s and network errors too, pass `retryOn`:
+`retryMiddleware(2)` retries a failed call up to two more times, three attempts in all. By default it retries only 5xx responses. Any 4xx, including a 429, comes back as it is, and so does a network error:
 
 ```ts
 import { createApi, defineRequest } from 'liaise'
@@ -27,13 +30,13 @@ const api = createApi({
   requests: { getItems },
   middleware: [retryMiddleware(2)], // 5xx only
 })
-
-// Also retry 429 and network errors. An abort has status 0 too, so check kind.
-const retryMore = retryMiddleware({
-  retryOn: (r) =>
-    (r.error?.status ?? 0) >= 500 || r.error?.status === 429 || r.error?.kind === 'network',
-})
 ```
+
+To retry 429s and network errors too, pass `retryOn`. This client retries a 503, a 429 and a dropped connection, never a 404, and gives up at its 3 second deadline:
+
+<Example name="flaky-backend" />
+
+`retryOn` checks `kind` for a dropped connection rather than `status: 0`, because an abort has status 0 too. [Retry a flaky backend within one deadline](/recipes/retry-a-flaky-backend-within-one-deadline/) walks through this setup.
 
 Pass an object to tune the waits between attempts:
 
@@ -79,6 +82,7 @@ const { data } = await api.getUser({ id: '42' }, { skipMiddleware: [getUserCache
 - **The key includes the URL, the params and the headers.** When your auth header is set before the cache runs, one user never sees another user's entry. [Cache key](/reference/behaviour-in-detail/#cache-key) has the details.
 - **Put a middleware that adds a unique header to each call after `cacheMiddleware`.** A request ID added before it makes every call look new, and nothing is ever cached. Client middleware always runs before endpoint middleware, so either list the request-ID middleware on the endpoint after the cache, or put the cache on the client before it.
 - The options are `ttl`, `maxSize` and `debug` ([Cache options](/reference/built-in-middleware-options/#cache-options)).
+- To merge identical calls made at the same time without keeping anything, use [`share`](/guide/sharing-identical-requests/) instead.
 
 ## Log every call
 
@@ -121,3 +125,5 @@ const api = createApi({
   ```
 
 Logging is meant for development. In production, [write a middleware](/guide/writing-middleware/) that sends the same facts to your monitoring.
+
+**Next:** [Writing middleware](/guide/writing-middleware/) shows how to write your own, for anything the built-ins don't cover.

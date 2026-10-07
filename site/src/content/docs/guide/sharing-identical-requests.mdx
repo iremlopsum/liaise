@@ -1,43 +1,33 @@
 ---
 title: "Sharing identical requests"
+description: "With share: true, calls that would send the identical request at the same time share one network request, and each caller still gets its own Result."
 order: 7
 ---
+This page explains `share`, which merges identical calls made at the same time into one network request. Read it when several parts of an app load the same data at once, or when several failed calls each try to refresh a token.
+
 Several parts of an app often ask for the same thing at the same moment. Five components load the current user, or five calls get a 401 and each one refreshes the token.
 
 `share: true` merges calls that would send the identical request, with the same URL, method, headers and body, into one network request. Each call still runs its own middleware and gets its own `Result`.
 
-```ts
-import { createApi, defineRequest } from 'liaise'
+<Example name="share" />
 
-type Product = { id: string; name: string }
+The server sees `GET /products/1` once, and `a`, `b` and `c` each get the product in a `Result` of their own.
 
-const getProduct = defineRequest<Product>()({
-  method: 'GET',
-  path: '/products/:id',
-  share: true,
-})
-
-const api = createApi({ baseUrl: 'https://api.example.com', requests: { getProduct } })
-
-// One network request. Each caller gets its own Result from it.
-const [a, b] = await Promise.all([
-  api.getProduct({ id: '42' }),
-  api.getProduct({ id: '42' }),
-])
-```
+## What counts as identical
 
 If two requests are the same byte for byte, the server can't tell them apart either, so sharing them is safe. Apart from tracing headers, if anything differs, they never share.
 
-- **The request is compared after all your middleware has run.** A header your auth middleware adds is part of it, so calls made as different users don't share. [On a server](/guide/sharing-identical-requests/#on-a-server) says what this relies on.
+- **The request is compared after all your middleware has run.** A header your auth middleware adds is part of it, so calls made as different users don't share. [On a server](#on-a-server) says what this relies on.
 - **The URL and the body are compared as sent.** `?a=1&b=2` and `?b=2&a=1` don't share, and neither do two JSON bodies with the same keys in a different order. Params written in the same order always match.
 - **Per-call `headers` and `middleware` are judged by what they change.** Calls with identical per-call headers share, and a per-call middleware that changes nothing doesn't stop sharing.
 - **Tracing headers aren't compared**, so a middleware that stamps a request ID on every call doesn't stop sharing. The shared request goes out with the first caller's tracing headers. [Share key and refcount](/reference/behaviour-in-detail/#share-key-and-refcount) lists them.
 - **An upload never shares.** A call whose body is `FormData`, a `Blob`, an `ArrayBuffer`, a typed array, a `DataView` or a `ReadableStream` sends its own request.
+
+## What each caller gets
+
 - **Each caller has its own `data` for JSON and text.** A middleware that edits `data` changes only its own caller's copy ([details](/reference/behaviour-in-detail/#share-key-and-refcount)).
 - **[`onError`](/guide/handling-errors/#reporting-errors-with-onerror) hears about a failed shared request once**, however many callers get the error. An error that a caller's own middleware makes from it is reported separately.
 - **A call that arrives after the shared request has settled sends a new one.** Nothing is cached. For that, use [`cacheMiddleware`](/guide/retries-caching-and-logging/#cache-repeated-reads).
-- **Think before you set `share` on a write.** Two identical writes at the same moment become one, so adding the same item to a cart twice at once adds it once. That suits a refresh-style call, such as the [token refresh](/recipes/add-an-auth-header-and-refresh-the-token-on-a-401/), and rarely other writes.
-- **`share` joins the call already running. [`dedupe`](/guide/cancelling-deadlines-and-stale-requests/#drop-stale-calls-with-dedupe) cancels it.** Setting both on one endpoint throws when you create the client, so you find the mistake straight away.
 - **A per-call `signal` or `timeout` only lets that caller leave.** The caller that gives up gets `kind: 'abort'` or `'timeout'`. The request keeps running for the others, and is cancelled once every caller has given up.
 
 ```ts
@@ -49,8 +39,15 @@ const patient = api.getProduct({ id: '42' })                    // keeps waiting
 
 How the shared request's own deadline, its timeouts and retries work is under [Share key and refcount](/reference/behaviour-in-detail/#share-key-and-refcount). A middleware that replaces the signal has its own note, under [Signal-replacing middleware](/reference/behaviour-in-detail/#signal-replacing-middleware).
 
+## When not to share
+
+- **Think before you set `share` on a write.** Two identical writes at the same moment become one, so adding the same item to a cart twice at once adds it once. That suits a refresh-style call, such as the [token refresh](/recipes/add-an-auth-header-and-refresh-the-token-on-a-401/), and rarely other writes.
+- **`share` joins the call already running. [`dedupe`](/guide/cancelling-deadlines-and-stale-requests/#drop-stale-calls-with-dedupe) cancels it.** Setting both on one endpoint throws when you create the client, so you find the mistake straight away.
+
 ## On a server
 
 One client can serve every user. The user's token or cookie is part of what is sent, so one user's call never joins another's. [One /me per page view on the server](/recipes/one-me-per-page-view-on-the-server/) shows the setup.
 
 The comparison sees only the headers in `ctx.request.headers`. If something outside liaise adds the user's identity, such as a patched global `fetch` or instrumentation that reads request context, liaise can't see it, and `share` is unsafe in that setup.
+
+**Next:** [Retries, caching and logging](/guide/retries-caching-and-logging/) covers what liaise has built in: retrying failed calls, caching repeated reads and logging every call.
