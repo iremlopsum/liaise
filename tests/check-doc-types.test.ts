@@ -16,7 +16,10 @@ function run(files: Record<string, string>) {
 beforeEach(() => { dir = mkdtempSync(join(tmpdir(), 'doc-types-')) })
 afterEach(() => { rmSync(dir, { recursive: true, force: true }) })
 
-describe('check-doc-types', () => {
+// Most tests here start a real `tsc` over liaise's types and the prelude: about 0.7 s on a
+// laptop, up to ~5 s on a CI runner with other test files competing — past vitest's 5 s
+// default, which failed Node 22 and 24 on PR #10. The work is bounded, so allow it the time.
+describe('check-doc-types', { timeout: 60_000 }, () => {
   it('passes a snippet that uses liaise correctly', () => {
     const r = run({ 'a.md': fence("import { createApi, defineRequest } from 'liaise'\nconst getUser = defineRequest<{ id: string }>()({ method: 'GET', path: '/users/:id' })\nconst api = createApi({ baseUrl: '/api', requests: { getUser } })\nvoid api.getUser({ id: '1' })") })
     expect(r.code).toBe(0)
