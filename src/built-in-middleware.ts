@@ -480,6 +480,14 @@ export function cacheMiddleware(options?: {
     // the response to a different payload never is.
     const paramsStr = stableKey(ctx.request.params)
     if (paramsStr === null) return next()
+    // The fetch options are part of who asked (5.2.0): a credentials:
+    // 'include' call sends cookies an 'omit' call doesn't, so the two never
+    // share an entry. Keyed like params, which also makes key order not
+    // matter; options it can't key are declined, never guessed. Anything that
+    // isn't an object keys as no options, as core sends none.
+    const requestOptions = ctx.request.fetchOptions
+    const optionsStr = stableKey(typeof requestOptions === 'object' && requestOptions !== null ? requestOptions : {})
+    if (optionsStr === null) return next()
     // Who asked and where, not only what: before 5.0.1 the key was name +
     // params, so user B could be served user A's /me (different
     // Authorization), and one Request in two createApi instances shared
@@ -517,7 +525,7 @@ export function cacheMiddleware(options?: {
       })
       urlKey = `${fullUrl.slice(0, qIndex)}?${segments.join('&')}`
     }
-    const key = `${ctx.requestName}|${ctx.request.method}|${urlKey}|${paramsStr}|${headerKey}`
+    const key = `${ctx.requestName}|${ctx.request.method}|${urlKey}|${paramsStr}|${headerKey}|${optionsStr}`
 
     const cached = store.get<Result<unknown>>(key)
     if (cached !== null) {

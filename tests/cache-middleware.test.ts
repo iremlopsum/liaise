@@ -3,7 +3,7 @@ import { CacheStore } from '../src/utils/cache.js'
 import { createApi } from '../src/create-api.js'
 import { Request } from '../src/request.js'
 import { cacheMiddleware } from '../src/built-in-middleware.js'
-import type { Middleware } from '../src/types.js'
+import type { FetchOptions, Middleware } from '../src/types.js'
 import { createGraphQL, Operation } from '../src/graphql.js'
 
 afterEach(() => vi.restoreAllMocks())
@@ -877,5 +877,39 @@ describe('cacheMiddleware caches reads only', () => {
     await client.ok()
     await client.ok()
     expect(fetchMock).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe('the cache key includes the fetch options (5.2.0)', () => {
+  const json = () => mockJsonResponse({ ok: true })
+  const get = () => new Request<{ id: string }, { ok: boolean }>({ method: 'GET', path: '/orders/:id', middleware: [cacheMiddleware()] })
+
+  it('calls that differ only in credentials get separate entries', async () => {
+    const fetchMock = vi.fn(async () => json())
+    vi.stubGlobal('fetch', fetchMock)
+    const api = createApi({ baseUrl: 'https://x.test', requests: { order: get() } })
+    await api.order({ id: '1' }, { fetchOptions: { credentials: 'include' } })
+    await api.order({ id: '1' }, { fetchOptions: { credentials: 'omit' } })
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+  })
+
+  it('the same options in a different key order are one entry', async () => {
+    const fetchMock = vi.fn(async () => json())
+    vi.stubGlobal('fetch', fetchMock)
+    const api = createApi({ baseUrl: 'https://x.test', requests: { order: get() } })
+    await api.order({ id: '1' }, { fetchOptions: { credentials: 'include', mode: 'cors' } })
+    await api.order({ id: '1' }, { fetchOptions: { mode: 'cors', credentials: 'include' } })
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+  })
+
+  it('options it cannot key are declined: neither served nor stored', async () => {
+    const fetchMock = vi.fn(async () => json())
+    vi.stubGlobal('fetch', fetchMock)
+    class Agent { #connections = 1; size() { return this.#connections } }
+    const opaque = { dispatcher: new Agent() } as unknown as FetchOptions
+    const api = createApi({ baseUrl: 'https://x.test', requests: { order: get() } })
+    await api.order({ id: '1' }, { fetchOptions: opaque })
+    await api.order({ id: '1' }, { fetchOptions: opaque })
+    expect(fetchMock).toHaveBeenCalledTimes(2)
   })
 })
