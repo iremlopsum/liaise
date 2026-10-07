@@ -1,0 +1,29 @@
+---
+title: "Report errors to Sentry"
+description: "The client's onError sends every unexpected failure to Sentry from one place, and skips cancelled calls and expected 4xx responses."
+order: 9
+---
+Use this when you want unexpected failures in your error tracker without a report at every call site. The client's `onError` runs once for each call that fails, so one function covers every endpoint.
+
+`Sentry` stands for your error tracker; `getUser` is the [Quick start](/start/quick-start/) endpoint.
+
+<Example name="report-errors" />
+
+A 500 reaches Sentry with its kind, URL and status. A 404, or a call you cancelled, doesn't.
+
+## What reaches Sentry
+
+- **`onError` runs once per failed call, after all your middleware.** A call that `retryMiddleware` rescues is never reported, and calls that [share](/guide/sharing-identical-requests/) one failed request are reported once.
+- **It is never called for `'abort'`**, because you cancelled that call. A missed `timeout` is reported.
+- **The first line of `onError` skips 4xx responses.** A 404 or a 422 is an answer your code handles, not a bug. Everything else reaches Sentry: a 5xx, a network failure, a missed deadline, a body that didn't parse and a middleware that threw ([The six kinds](/guide/handling-errors/#the-six-kinds)).
+- **It only watches.** The caller gets the same `Result` either way.
+
+## What to send
+
+`ApiError` isn't an `Error`, so it carries no stack trace or `message` of its own. Pass the fields you want to see in `extra`, as above. Every field is listed under [ApiError](/reference/result-and-apierror/).
+
+## When to use a middleware instead
+
+Use a middleware when you need timing, or the request before it's sent, or want to report for some endpoints only. [Example: report server errors](/guide/writing-middleware/#example-report-server-errors) has the middleware version.
+
+**Next:** [Upload and download files](/recipes/upload-and-download-files/) sends a file as `FormData` and reads one back as a `Blob`.

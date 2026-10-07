@@ -32,6 +32,8 @@ declare const api: ReturnType<typeof import('liaise').createApi<{
   getDoc: import('liaise').Request<{ id: string | number }, { id: string; title: string }>
   search: import('liaise').Request<{ tag: string }, { id: string }[]>
   deleteUser: import('liaise').Request<{ id: string | number }, void>
+  uploadAvatar: import('liaise').Request<FormData, { url: string }>
+  downloadFile: import('liaise').Request<{ id: string | number }, Blob>
 }>>
 declare const graphql: ReturnType<typeof import('liaise').createGraphQL<{
   getCategory: import('liaise').Operation<{ id: string }, { category: Category }>
@@ -48,6 +50,9 @@ declare const error: ApiError
 declare function getToken(): string
 declare function refreshToken(): Promise<void>
 declare function logToTracker(error: unknown): void
+// The upload recipe: a File from an <input type="file"> and an <a> to link the download.
+declare const file: File
+declare const link: HTMLAnchorElement
 
 declare const mockFetch: typeof import('liaise/testing').mockFetch
 declare const jsonResponse: typeof import('liaise/testing').jsonResponse
@@ -58,4 +63,6 @@ declare const z: any // the docs use zod's z without repeating the import
 declare namespace z { type infer<T> = any }
 declare module 'valibot' { const v: any; export = v }
 declare module 'arktype' { export const type: any }
+// The TanStack Query recipe augments Register to type every query's error.
+declare module '@tanstack/react-query' { interface Register {} }
 declare module '@sentry/browser' { export function captureException(e: unknown, ctx?: unknown): void; export function captureMessage(m: string, ctx?: unknown): void }

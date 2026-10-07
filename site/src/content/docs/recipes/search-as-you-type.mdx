@@ -1,0 +1,23 @@
+---
+title: "Search as you type"
+description: "With dedupe: true, each new search cancels the one still running, so a slow answer to an old query can't replace the results of a newer one."
+order: 2
+---
+Use this for a search box that calls the API as the user types. Each keystroke starts a request, and the answers can come back out of order. A slow answer for `r` can arrive after a fast one for `rea`, and the list then shows results for a query that is no longer in the box.
+
+Set `dedupe: true` on the endpoint. Each new call cancels the one still in flight, so only the latest search can reach the screen. `Repo` is your result type; `render` and `showError` stand for your UI code.
+
+<Example name="search-as-you-type" />
+
+## Why it works
+
+Typing `r`, `re` and `rea` makes three calls. Each new call cancels the one before it, so the calls for `r` and `re` settle with `kind: 'abort'`, and `onInput` returns before it renders anything. If the server answers `r` last, that answer has already been dropped. Only the results for `rea` reach `render`.
+
+- **A cancelled call isn't an error to show.** `'abort'` also covers a cancel of your own, and `onError` never hears about it ([The six kinds](/guide/handling-errors/#the-six-kinds)).
+- **`dedupe` works per endpoint.** A new search never cancels a call to another endpoint.
+- **`dedupe` doesn't send fewer requests.** Every keystroke still starts a call, which cancels the one before. To send fewer, call `onInput` only once the user pauses typing (a debounce).
+- **`share` does the opposite**: it joins the call already running instead of cancelling it. Setting both on one endpoint throws when you create the client.
+
+[Drop stale calls with dedupe](/guide/cancelling-deadlines-and-stale-requests/#drop-stale-calls-with-dedupe) has the rest of `dedupe`'s rules.
+
+**Next:** [Use with TanStack Query](/recipes/use-with-tanstack-query/) connects liaise to TanStack Query's caching and refetching.

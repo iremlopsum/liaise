@@ -1,0 +1,39 @@
+---
+title: "Use with TanStack Query"
+description: "A small unwrap function turns liaise's Result into the throw TanStack Query expects, and TanStack's signal cancels the call when the query is no longer needed."
+order: 3
+---
+Use this when your app uses TanStack Query for caching, refetching and loading states, and liaise for the calls. The two disagree on one thing. liaise never throws, and TanStack Query treats a query as failed only when its query function throws or returns a rejected promise.
+
+A small `unwrap` function converts at that one boundary. `api` is the client from [Quick start](/start/quick-start/).
+
+<Example name="tanstack-query" />
+
+## Why it works
+
+- **`unwrap` returns `data` on success and throws the `ApiError` on failure.** TanStack sees a failed query, and keeps the `ApiError` in the query's `error`.
+- **TanStack's signal cancels the call.** TanStack Query gives every query function an `AbortSignal`, and aborts it when the query becomes out of date or inactive. Passing it on to `api.getUser` cancels the request at that moment ([Query cancellation](https://tanstack.com/query/latest/docs/framework/react/guides/query-cancellation)).
+- **One options object works with every TanStack adapter.** The comments show the call in React, Vue, Svelte and Solid. The test doesn't run those lines.
+
+## Typing the error
+
+`error` is the `ApiError` liaise returned. It isn't an `Error` subclass, so it has no `message`: read `error.kind` and `error.status` ([ApiError](/reference/result-and-apierror/)). To type it in every query, register `ApiError` as TanStack's `defaultError`:
+
+```ts
+import '@tanstack/react-query'
+import type { ApiError } from 'liaise'
+
+declare module '@tanstack/react-query' {
+  interface Register {
+    defaultError: ApiError
+  }
+}
+```
+
+That is the React adapter. The others take the same declaration under their own package name, such as `@tanstack/vue-query` ([TanStack's TypeScript guide](https://tanstack.com/query/latest/docs/framework/react/typescript)).
+
+## Retrying in one place
+
+TanStack Query retries a failed query three times by default, with exponential backoff ([Important defaults](https://tanstack.com/query/latest/docs/framework/react/guides/important-defaults)). If your liaise client also has [`retryMiddleware`](/guide/retries-caching-and-logging/#retry-failed-calls), each of TanStack's attempts runs liaise's retries too. Pick one: turn off TanStack's `retry` option, or leave `retryMiddleware` off the client these queries use.
+
+**Next:** [Use with React](/recipes/use-with-react/) loads data in a plain `useEffect`, without a query library.

@@ -1,0 +1,35 @@
+---
+title: "Upload and download files"
+description: "Upload a file by passing FormData as the params, and download one as a Blob with responseType: 'blob'."
+order: 10
+---
+Use this when a form uploads a file, such as an avatar, or the app offers a file to download. Neither one is JSON: an upload goes out as multipart form data, and a download comes back as bytes.
+
+Pass `FormData` as the params to upload, and set `responseType: 'blob'` to download.
+
+<Example name="files" />
+
+Calling them:
+
+```ts
+// Upload the file the user picked
+const form = new FormData()
+form.append('file', file)
+const uploaded = await api.uploadAvatar(form)
+if (!uploaded.error) show(uploaded.data.url)
+
+// Download a file and link to it
+const { data, error } = await api.downloadFile({ id: '9' })
+if (!error) link.href = URL.createObjectURL(data)
+```
+
+`file` is a `File` from an `<input type="file">`, and `link` is an `<a>` element.
+
+## Why it works
+
+- **`FormData` is sent as it is.** liaise sets no `Content-Type` for it, and the runtime sets `multipart/form-data` with the boundary that separates the parts. Don't set `Content-Type` yourself on a `FormData` upload, or the boundary is lost ([MDN](https://developer.mozilla.org/en-US/docs/Web/API/XMLHttpRequest_API/Using_FormData_Objects)).
+- **The upload's answer is read as JSON**, the default, so `uploaded.data` is `{ url: string }`.
+- **`responseType: 'blob'` reads the body as a `Blob`.** For an `ArrayBuffer` or a string, use `'arrayBuffer'` or `'text'` ([Reading responses](/guide/reading-responses/)).
+- **Other bodies work too.** A `Blob`, an `ArrayBuffer` or a `ReadableStream` passed as the params is sent as `application/octet-stream` ([Request bodies](/guide/sending-data/#request-bodies)). A `ReadableStream` can be sent only once, so to retry an upload, read the stream into a `Blob` or `ArrayBuffer` first ([Stream bodies](/reference/behaviour-in-detail/#stream-bodies)).
+
+**Next:** That's the recipes. [When it fits, and when it doesn't](/choosing/when-it-fits-and-when-it-doesnt/) helps you decide whether liaise suits your project.
