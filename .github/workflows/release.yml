@@ -125,11 +125,48 @@ jobs:
             npm publish
           fi
 
-  release:
+  # After any real publish — by this run, or earlier (repair path): once npm has
+  # the version, what it serves can be checked whoever published it.
+  verify:
     needs: [check, publish]
+    if: ${{ !cancelled() && needs.check.outputs.dry_run != 'true' && (needs.publish.result == 'success' || (needs.check.outputs.publish == 'false' && needs.check.outputs.release == 'true')) }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+      - name: Install from npm and smoke-test
+        env:
+          VERSION: ${{ needs.check.outputs.version }}
+        # Copied out of the repo first: inside it, import('liaise') would load
+        # the repo itself, not what npm serves. npm validates a new version for
+        # minutes before serving it, so the install retries for up to twenty;
+        # --prefer-online makes each retry ask the registry instead of reusing
+        # the answer npm cached on the first, failed attempt (fresh for 5 min).
+        run: |
+          dir="$RUNNER_TEMP/smoke"
+          mkdir -p "$dir" && cp scripts/smoke-installed.mjs "$dir/" && cd "$dir"
+          npm init -y > /dev/null
+          for i in $(seq 1 40); do
+            if npm install --prefer-online --no-audit --no-fund "liaise@$VERSION"; then break; fi
+            if [ "$i" = 40 ]; then echo "::error::liaise@$VERSION was not installable after 20 minutes"; exit 1; fi
+            sleep 30
+          done
+          node smoke-installed.mjs "$VERSION"
+
+  # After verify, so GitHub announces a version only once npm serves it: npm
+  # holds a new version as "Validating" for minutes after the publish (5.1.1:
+  # about four), and installs fail until then.
+  release:
+    needs: [check, publish, verify]
     # Runs after a successful publish, or on the repair path (npm already has the
     # version, so publish was skipped). Never after a failed gate or publish.
-    if: ${{ !cancelled() && needs.check.outputs.release == 'true' && (needs.publish.result == 'success' || needs.check.outputs.publish == 'false') }}
+    if: ${{ !cancelled() && needs.check.outputs.release == 'true' && (needs.publish.result == 'success' || needs.check.outputs.publish == 'false') && needs.verify.result == 'success' }}
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -174,38 +211,6 @@ jobs:
           [ "$LATEST" = "true" ] || latest="--latest=false"
           gh release create "v$VERSION" --verify-tag --title "v$VERSION" --notes-file "$RUNNER_TEMP/notes.md" "$latest"
 
-  # The docs-site spec adds a `docs` job here with `needs: release`. It has to
+  # The docs-site spec adds a `docs` job with `needs: release`. It has to
   # live in this workflow: a Release created with GITHUB_TOKEN does not trigger
   # other workflows.
-
-  # After any real publish — by this run, or earlier (repair path): once npm has
-  # the version, what it serves can be checked whoever published it.
-  verify:
-    needs: [check, publish]
-    if: ${{ !cancelled() && needs.check.outputs.dry_run != 'true' && (needs.publish.result == 'success' || (needs.check.outputs.publish == 'false' && needs.check.outputs.release == 'true')) }}
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
-        with:
-          node-version: 22
-      - name: Install from npm and smoke-test
-        env:
-          VERSION: ${{ needs.check.outputs.version }}
-        # Copied out of the repo first: inside it, import('liaise') would load
-        # the repo itself, not what npm serves. The registry can lag a publish,
-        # so the install retries for up to ten minutes.
-        run: |
-          dir="$RUNNER_TEMP/smoke"
-          mkdir -p "$dir" && cp scripts/smoke-installed.mjs "$dir/" && cd "$dir"
-          npm init -y > /dev/null
-          for i in $(seq 1 20); do
-            if npm install --no-audit --no-fund "liaise@$VERSION"; then break; fi
-            if [ "$i" = 20 ]; then echo "::error::liaise@$VERSION was not installable after 10 minutes"; exit 1; fi
-            sleep 30
-          done
-          node smoke-installed.mjs "$VERSION"
