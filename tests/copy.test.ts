@@ -10,9 +10,9 @@ describe('copy state', () => {
     expect(base).toEqual({ headers: [{ 'X-Client': 'web' }], lane: '', dedupe: true })
   })
 
-  it("a copy appends its headers after the parent's", () => {
-    const copy = nextCopy(base, { cookie: 's=1' }, undefined)
-    expect(copy.headers).toEqual([{ 'X-Client': 'web' }, { cookie: 's=1' }])
+  it("a copy keeps the client's headers, then a snapshot of what it adds", () => {
+    const copy = nextCopy(base, { Cookie: 's=1' }, undefined)
+    expect(copy.headers).toEqual([{ 'X-Client': 'web' }, [['cookie', 's=1']]])
   })
 
   it('a copy that adds nothing keeps the empty lane', () => {
@@ -36,7 +36,7 @@ describe('copy state', () => {
 
   it('a chained copy is laned by what all its layers add, later layers winning', () => {
     const chained = nextCopy(nextCopy(base, { x: '1', y: '1' }, undefined), { x: '2' }, undefined)
-    expect(chained.headers).toEqual([{ 'X-Client': 'web' }, { x: '1', y: '1' }, { x: '2' }])
+    expect(chained.headers).toEqual([{ 'X-Client': 'web' }, [['x', '2'], ['y', '1']]])
     expect(chained.lane).toBe(nextCopy(base, { x: '2', y: '1' }, undefined).lane)
   })
 
@@ -47,6 +47,9 @@ describe('copy state', () => {
     const two = nextCopy(base, bad, undefined)
     expect(one.lane).not.toBe('')
     expect(one.lane).not.toBe(two.lane)
+    // The raw layers stay, so the merge at call time fails again: a 'network' Result.
+    expect(one.headers).toEqual([{ 'X-Client': 'web' }, bad])
+    expect(nextCopy(one, { ok: '1' }, undefined).headers).toEqual([{ 'X-Client': 'web' }, bad, { ok: '1' }])
   })
 
   it('dedupe: the option wins, otherwise the parent decides', () => {

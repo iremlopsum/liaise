@@ -1011,6 +1011,23 @@ describe('poll: copies from withHeaders', () => {
     stopA(); stopB()
   })
 
+  it("a copy whose headers object is mutated afterwards polls as what it sends: alice never gets bob's answers", async () => {
+    shareable()
+    const api = client({ 'GET /stats': ({ request }) => jsonResponse({ cookie: request.headers.get('cookie') }) })
+    const answers: Record<string, (string | null)[]> = { bob: [], reused: [], alice: [] }
+    const into = (who: string) => (r: Result<Stats>) => answers[who].push((r.data as unknown as { cookie: string | null } | null)?.cookie ?? null)
+    const stopBob = poll(withHeaders(api, { cookie: 's=bob' }).getStats, {}, into('bob'), { every: 1000 })
+    const headers = { cookie: 's=alice' }
+    const reused = withHeaders(api, headers)
+    headers.cookie = 's=bob'
+    const stopReused = poll(reused.getStats, {}, into('reused'), { every: 1000 })
+    const stopAlice = poll(withHeaders(api, { cookie: 's=alice' }).getStats, {}, into('alice'), { every: 1000 })
+    await flush()
+    expect(answers).toEqual({ bob: ['s=bob'], reused: ['s=alice'], alice: ['s=alice'] })
+    expect(mock.calls).toHaveLength(2)
+    stopBob(); stopReused(); stopAlice()
+  })
+
   it('without a window, copies never share', async () => {
     const api = client()
     const stopA = poll(withHeaders(api, { cookie: 's=a' }).getStats, {}, () => {}, { every: 1000 })

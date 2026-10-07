@@ -48,6 +48,16 @@ describe('withHeaders: GraphQL', () => {
     expect((await side.who()).data?.who).toBe('s=bob')
   })
 
+  it('mutating the headers object after the copy is made changes nothing it sends', async () => {
+    serve()
+    const graph = createGraphQL({ endpoint, queries: { who: op() } })
+    const headers = { cookie: 's=alice' }
+    const copy = withHeaders(graph, headers)
+    headers.cookie = 's=bob'
+    expect((await copy.query.who()).data?.who).toBe('s=alice')
+    expect(copy.query.who.getHeaders()).toEqual({ cookie: 's=alice' })
+  })
+
   it('a chained side copy sends every layer', async () => {
     serve()
     const graph = createGraphQL({ endpoint, queries: { who: op() } })

@@ -119,6 +119,40 @@ describe('withHeaders: headers', () => {
   })
 })
 
+describe('withHeaders: values are fixed when the copy is made', () => {
+  it('mutating the headers object afterwards changes nothing the copy sends', async () => {
+    serve()
+    const headers: Record<string, string> = { cookie: 's=alice' }
+    const copy = withHeaders(makeApi(), headers)
+    headers.cookie = 's=bob'
+    headers['X-Late'] = '1'
+    await copy.me()
+    expect([header(0, 'cookie'), header(0, 'x-late')]).toEqual(['s=alice', null])
+    expect(copy.me.getHeaders().cookie).toBe('s=alice')
+  })
+
+  it('a Headers instance filled in after the copy is made adds nothing', async () => {
+    serve()
+    const headers = new Headers()
+    const copy = withHeaders(makeApi(), headers)
+    headers.set('cookie', 's=bob')
+    await copy.me()
+    expect(header(0, 'cookie')).toBeNull()
+    expect(copy.me.getHeaders().cookie).toBeUndefined()
+  })
+
+  it('a getter is read once, when the copy is made', async () => {
+    serve()
+    let reads = 0
+    const copy = withHeaders(makeApi(), { get cookie() { return `s=${++reads}` } })
+    await copy.me()
+    await copy.me()
+    copy.me.getHeaders()
+    expect(reads).toBe(1)
+    expect([header(0, 'cookie'), header(1, 'cookie')]).toEqual(['s=1', 's=1'])
+  })
+})
+
 describe('withHeaders: never throws', () => {
   it("an invalid header value: every call is a 'network' Result, getHeaders() is {}, nothing is sent", async () => {
     serve()

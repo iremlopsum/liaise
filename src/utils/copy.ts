@@ -33,7 +33,10 @@ export interface WithHeadersOptions {
 
 /** The settings a client — the original or a copy — builds its endpoints from. */
 export interface CopyState {
-  /** Header sources, merged at call time: the client's `headers`, then each copy's, oldest first. */
+  /**
+   * Header sources, merged at call time: the client's `headers`, then (on a
+   * copy) every copy layer's headers, snapshotted when the copy was made.
+   */
   readonly headers: readonly (HeadersInit | undefined)[]
   /** What dedupe keys this client's calls by, after the endpoint's own lane: '' on the original. */
   readonly lane: string
@@ -61,21 +64,28 @@ let invalid = 0
  * (`name`, or `query:name` in a split GraphQL client) plus this, and no
  * endpoint name contains NUL.
  *
- * Never throws: added headers `Headers` refuses get a lane no other copy has.
- * Their calls fail anyway, as a 'network' Result, when the merge runs at call
- * time — which is why the sources are kept as a list and not merged here.
+ * The added headers are merged here, once, and the copy keeps that snapshot
+ * (as `[name, value]` pairs, the same ones the lane is made of): a copy's keys
+ * must describe what it sends, so mutating the caller's object or `Headers`
+ * afterwards, or a getter returning something else on the next read, changes
+ * nothing. The client's own `headers` stay the first source, as on the original.
+ *
+ * Never throws: added headers `Headers` refuses get a lane no other copy has,
+ * and the raw layers are kept instead of a snapshot, so every call fails as a
+ * 'network' Result when the merge runs again at call time.
  */
 export function nextCopy(parent: CopyState, headers: HeadersInit, options: WithHeadersOptions | undefined): CopyState {
-  const all = [...parent.headers, headers]
+  let sources: (HeadersInit | undefined)[] = [...parent.headers, headers]
   let lane = ''
   try {
-    const pairs: string[][] = []
-    mergeHeaders(...all.slice(1)).forEach((value, name) => { pairs.push([name, value]) })
+    const pairs: [string, string][] = []
+    mergeHeaders(...sources.slice(1)).forEach((value, name) => { pairs.push([name, value]) })
     if (pairs.length) lane = `\u0000${JSON.stringify(pairs)}`
+    sources = [parent.headers[0], pairs]
   } catch {
     lane = `\u0000!${++invalid}`
   }
-  return { headers: all, lane, dedupe: options?.dedupe ?? parent.dedupe }
+  return { headers: sources, lane, dedupe: options?.dedupe ?? parent.dedupe }
 }
 
 /** A copy's poll key: its lane, marked when dedupe is off (its calls behave differently). */
