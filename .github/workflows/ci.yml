@@ -71,3 +71,24 @@ jobs:
             exit 1
           fi
           echo "Checked $count commit(s): no agent attribution."
+
+  # A pull request that bumps package.json's version is a release PR: merging
+  # it publishes (release.yml). Run the release checks here so a missing
+  # CHANGELOG footer or a stale lockfile fails before the owner can merge,
+  # not after. PRs that leave the version alone pass at once.
+  release-ready:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: A version bump must be releasable
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          base="$(git show "$BASE_SHA:package.json" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>console.log(JSON.parse(s).version))')"
+          node scripts/release-check.mjs --mode pr --base-version "$base"
