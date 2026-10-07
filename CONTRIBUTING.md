@@ -36,16 +36,19 @@ npm run build
 ## Working on the docs
 
 The docs site lives in `site/` and is published at https://iremlopsum.github.io/liaise/. It
-uses the library you just built, so build that first:
+needs Node 22.12 or newer (the library itself needs 20). It uses the library you just built, so
+build that first:
 
 ```bash
 npm run build                  # the library, into dist/
-npm --prefix site install
+npm ci --prefix site
 npm --prefix site run dev      # http://localhost:4321/liaise/
 npm --prefix site run build && npm --prefix site test   # what CI runs for the site
 ```
 
-Pages are in `site/src/content/docs/`, one folder per sidebar group.
+Pages are in `site/src/content/docs/`, one folder per sidebar group. Each page starts with
+frontmatter giving its `title`, a one-sentence `description` (used in search results), and an
+`order` that sets its place in the sidebar.
 
 - **Runnable examples come from tests.** A page shows one with `<Example name="…" />`, which
   renders the region between `// example:<name>:start` and `:end` in a test under `tests/`. To
