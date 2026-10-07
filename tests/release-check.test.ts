@@ -21,11 +21,15 @@ ${footer ?? `[${top}]: https://github.com/iremlopsum/liaise/compare/v${prev}...v
 [${prev}]: https://github.com/iremlopsum/liaise/releases/tag/v${prev}
 `
 
-function repo(opts: { version: string; lock?: string; changelog?: string }) {
+const migration = (...versions: string[]) =>
+  `# Migration Guide\n\n${versions.map(v => `## Upgrading to ${v}\n\nNo action needed.\n`).join('\n---\n\n')}`
+
+function repo(opts: { version: string; lock?: string; changelog?: string; migration?: string }) {
   writeFileSync(join(dir, 'package.json'), JSON.stringify({ name: 'liaise', version: opts.version }))
   const lock = opts.lock ?? opts.version
   writeFileSync(join(dir, 'package-lock.json'), JSON.stringify({ name: 'liaise', version: lock, packages: { '': { name: 'liaise', version: lock } } }))
   writeFileSync(join(dir, 'CHANGELOG.md'), opts.changelog ?? changelog(opts.version))
+  writeFileSync(join(dir, 'MIGRATION.md'), opts.migration ?? migration(opts.version))
 }
 
 function run(mode: string, flags: Record<string, unknown> = {}) {
@@ -155,6 +159,19 @@ describe('release-check, pr', () => {
     expect(r.err).toMatch(/link definition/)
   })
 
+  it('refuses a bump with no MIGRATION.md entry, naming the heading to add', () => {
+    repo({ version: '1.1.0', changelog: changelog('1.1.0', '1.0.0'), migration: migration('1.0.0') })
+    const r = run('pr', { 'base-version': '1.0.0', 'npm-versions': ['1.0.0'] })
+    expect(r.code).toBe(1)
+    expect(r.err).toMatch(/MIGRATION\.md has no "## Upgrading to 1\.1\.0"/)
+  })
+
+  it('passes a bump whose MIGRATION.md entry only says no action is needed', () => {
+    repo({ version: '1.1.0', changelog: changelog('1.1.0', '1.0.0'), migration: migration('1.1.0', '1.0.0') })
+    const r = run('pr', { 'base-version': '1.0.0', 'npm-versions': ['1.0.0'] })
+    expect(r.code).toBe(0)
+  })
+
   it('needs the base version', () => {
     repo({ version: '1.1.0' })
     const r = run('pr', { 'npm-versions': ['1.0.0'] })
@@ -190,6 +207,7 @@ describe('release-check, target commit (real git)', () => {
     writeFileSync(join(dir, 'package.json'), compact ? JSON.stringify(pkg) : JSON.stringify(pkg, null, 2) + '\n')
     writeFileSync(join(dir, 'package-lock.json'), JSON.stringify({ name: 'liaise', version, packages: { '': { name: 'liaise', version } } }, null, 2) + '\n')
     writeFileSync(join(dir, 'CHANGELOG.md'), changelog(version))
+    writeFileSync(join(dir, 'MIGRATION.md'), migration(version))
   }
   /** main: A (1.0.0) ─ C ─ M (merges the PR branch, whose B bumps to 1.1.0) ─ D */
   function mergedRelease(compact = false) {

@@ -13,7 +13,7 @@
 // Tests inject the network answers with --npm-versions / --tags / --releases /
 // --npm-githead (or 'none') / --target; without them the real sources are asked.
 import { execFileSync } from 'node:child_process'
-import { readFileSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { headings, footerFor, sectionBody } from './changelog.mjs'
 
@@ -42,6 +42,9 @@ const injected = name => (flag(name) === undefined ? undefined : JSON.parse(flag
 const pkg = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'))
 const lock = JSON.parse(readFileSync(join(root, 'package-lock.json'), 'utf8'))
 const changelog = readFileSync(join(root, 'CHANGELOG.md'), 'utf8')
+// Every release has a MIGRATION.md entry, even when it only says "No action needed." (2026-10-07:
+// 5.1.1 and 5.1.2 had none while 5.0.3 had one, and the file read as out of date).
+const migration = existsSync(join(root, 'MIGRATION.md')) ? readFileSync(join(root, 'MIGRATION.md'), 'utf8') : ''
 const version = pkg.version
 
 function npmVersions() {
@@ -91,6 +94,9 @@ function problemsFor({ requireNewer, npm, tagList }) {
     if (actual === null) problems.push(`CHANGELOG has no link definition "[${version}]: …" at the bottom; add: [${version}]: ${expected}`)
     else if (actual !== expected) problems.push(`CHANGELOG link for [${version}] is ${actual}; expected ${expected}`)
   }
+
+  const heading = `## Upgrading to ${version}`
+  if (!migration.split('\n').some(l => l.trim() === heading)) problems.push(`MIGRATION.md has no "${heading}" section; add one, even if it only says "No action needed."`)
   return problems
 }
 

@@ -1,9 +1,24 @@
 # Migration Guide
 
-Upgrade notes for `liaise` (published as `@iremlopsum/apify` up to 4.4.x). Only releases that need action appear
-here — if a version isn't listed, upgrading to it requires no changes.
+Upgrade notes for `liaise` (published as `@iremlopsum/apify` up to 4.4.x). Every release from 5.0.0 on has an
+entry here, and one that needs nothing says so. Before 5.0.0, only releases that needed action are listed; if
+an older version isn't here, upgrading to it requires no changes.
 
 For the full record of what changed in each release, see [CHANGELOG.md](./CHANGELOG.md).
+
+---
+
+## Upgrading to 5.1.2
+
+No action needed. A `responseType: 'none'` call no longer hangs when its `Response` is a clone, as a
+static `mockFetch` route's is. The documentation moved to https://iremlopsum.github.io/liaise/.
+
+---
+
+## Upgrading to 5.1.1
+
+No action needed. Only a GraphQL client that reused a name across `queries` and `mutations` behaves
+differently, and it wasn't doing what its code said.
 
 ---
 
