@@ -1,4 +1,6 @@
 import { describe, it, expect, vi, afterEach } from 'vitest'
+import { mkdirSync, rmSync, writeFileSync } from 'node:fs'
+import { fileURLToPath } from 'node:url'
 import { createApi, defineRequest } from '../../src/index' // the library's source (the playground runs its build)
 import { createRunner, instrument, liaiseShim, BRIDGE, type RunHandle, type RunScope } from '../src/playground/runner'
 import { createFakeServer, FAKE_ORIGIN, type SentRequest } from '../src/playground/fake-server'
@@ -110,3 +112,82 @@ describe('instrument and liaiseShim', () => {
     expect(shim).toMatch(/export const createGraphQL = gated\(liaise\.createGraphQL\)/)
   })
 })
+
+// The playground's own path: the example's JavaScript through instrument() and liaiseShim(), against
+// the library build the site serves (public/liaise, copied there by the site build).
+describe('an example run through the shim', () => {
+  const LIB = fileURLToPath(new URL('../public/liaise/', import.meta.url))
+  const TMP = new URL('./.tmp/shim/', import.meta.url)
+  const LATER = Symbol.for('liaise.playground.test.later')
+  let n = 0 // file names never repeat: an imported module is cached by its path
+  afterEach(() => { rmSync(TMP, { recursive: true, force: true }); Reflect.deleteProperty(globalThis, LATER) })
+
+  // Starts a run of `js` (compiled example code) and resolves once it has printed `lines` lines.
+  async function start(js: string, lines: number) {
+    const ctx = setup()
+    vi.stubGlobal('fetch', ctx.server.fetch) // where the library build sends
+    mkdirSync(TMP, { recursive: true })
+    const end = ctx.runner.run(async (run) => {
+      const shim = fileURLToPath(new URL(`shim-${++n}.js`, TMP))
+      const example = fileURLToPath(new URL(`example-${n}.js`, TMP))
+      writeFileSync(shim, liaiseShim(run.id, LIB))
+      writeFileSync(example, instrument(js, run.id, shim, LIB))
+      await import(/* @vite-ignore */ example)
+    })
+    await vi.waitFor(() => expect(ctx.printed.length).toBeGreaterThanOrEqual(lines), { timeout: 5000 })
+    return { ...ctx, end }
+  }
+
+  it('leaves a live call alone: middleware sees no signal when the call has none', async () => {
+    const { printed, runner, end } = await start(`import { createApi, defineRequest } from 'liaise'
+const seen = []
+const watch = (where) => async (ctx, next) => { seen.push(where + ': ' + String(ctx.request.signal)); return next() }
+const getUser = defineRequest()({ method: 'GET', path: '/users/:id', middleware: [watch('request')] })
+const api = createApi({ baseUrl: 'https://api.example.com', requests: { getUser }, middleware: [watch('client')] })
+const { data } = await api.getUser({ id: '42' }, { middleware: [watch('call')] })
+console.log(data.name, seen)
+`, 1)
+    expect(await end).toEqual({ ended: 'done' })
+    // Client, request and call middleware all run; the gate sits between client and request.
+    expect(printed).toEqual(['log: Ada Lovelace client: undefined,request: undefined,call: undefined'])
+    expect(runner.running).toBe(false)
+  })
+
+  it('after stop, a call through the gated client sends nothing', async () => {
+    const { printed, sent, runner, end } = await start(`import { createApi, defineRequest } from 'liaise'
+const api = createApi({ baseUrl: 'https://api.example.com', requests: { getUser: defineRequest()({ method: 'GET', path: '/users/:id' }) } })
+const { data } = await api.getUser({ id: '42' })
+console.log(data.name)
+globalThis[Symbol.for('liaise.playground.test.later')] = () => api.getUser({ id: '7' })
+await new Promise(() => {}) // never settles, like a 'slow' example
+`, 1)
+    runner.stop()
+    expect(await end).toEqual({ ended: 'stopped' })
+    const late = await (Reflect.get(globalThis, LATER) as () => Promise<{ error: { kind: string } | null }>)()
+    expect(late.error?.kind).toBe('abort')
+    expect(sent.map((r) => r.path)).toEqual(['/users/42'])
+    expect(printed).toEqual(['log: Ada Lovelace'])
+  })
+
+  it('after stop, a retry that was waiting to go out never does', async () => {
+    const { printed, sent, runner, end } = await start(`import { createApi, defineRequest } from 'liaise'
+import { retryMiddleware } from 'liaise/middleware'
+const api = createApi({
+  baseUrl: 'https://api.example.com',
+  requests: { getUser: defineRequest()({ method: 'GET', path: '/users/:id' }) },
+  middleware: [retryMiddleware({ max: 3, baseDelay: 300, jitter: false })],
+})
+console.log('started')
+const { error } = await api.getUser({ id: 'flaky' })
+console.log('ended with', error?.kind)
+`, 1)
+    await vi.waitFor(() => expect(sent).toHaveLength(1), { timeout: 5000 })
+    await new Promise((r) => setTimeout(r, 300)) // the first 500 is back; the retry waits 300 ms
+    runner.stop()
+    expect(await end).toEqual({ ended: 'stopped' })
+    await new Promise((r) => setTimeout(r, 600)) // long past when the retry would have gone out
+    expect(sent.map((r) => r.path)).toEqual(['/users/flaky'])
+    expect(printed).toEqual(['log: started'])
+  })
+})
+

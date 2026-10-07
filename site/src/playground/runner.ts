@@ -11,7 +11,8 @@
 //   - instrument() binds the example module's `console` to its run, so later output is dropped
 //     even while another run owns the global console;
 //   - its liaise clients carry the run's gate middleware, so a call made after the run ended
-//     returns an abort Result without sending anything, whichever `fetch` is current.
+//     returns an abort Result without sending anything, whichever `fetch` is current. While the
+//     run is live the gate leaves the call alone: middleware sees what it would see anywhere.
 export interface RunScope {
   fetch: typeof fetch
   console: { log: (...args: unknown[]) => void; error: (...args: unknown[]) => void }
@@ -38,7 +39,7 @@ export interface RunHandle {
   readonly signal: AbortSignal
   /** This run's console: silent once the run has ended. */
   readonly console: RunScope['console']
-  /** Middleware for every liaise client the example creates (see instrument()). */
+  /** Middleware for every liaise client the example creates (see instrument()): inert while the run is live. */
   readonly gate: Gate
 }
 
@@ -67,8 +68,10 @@ export function combineSignals(own: AbortSignal | null | undefined, run: AbortSi
 }
 
 const stopped = () => new DOMException('The run was stopped.', 'AbortError')
+// Only once the run has ended: then the call goes to fetch already cancelled, and nothing is sent.
+// While the run is live, ctx is untouched (an in-flight request is aborted by the run's fetch).
 const gateFor = (signal: AbortSignal): Gate => (ctx, next) => {
-  ctx.request.signal = combineSignals(ctx.request.signal, signal)
+  if (signal.aborted) ctx.request.signal = signal
   return next()
 }
 const ended = new AbortController()
@@ -150,7 +153,8 @@ export function liaiseShim(id: number, lib: string): string {
     `import * as liaise from ${entry}`,
     `export * from ${entry}`,
     `const gate = globalThis[Symbol.for('liaise.playground.run')](${id}).gate`,
-    `const gated = (create) => (config) => create({ ...config, middleware: [gate, ...(config?.middleware ?? [])] })`,
+    // Last of the client's middleware, so it also sees each retry a client-level retryMiddleware makes.
+    `const gated = (create) => (config) => create({ ...config, middleware: [...(config?.middleware ?? []), gate] })`,
     `export const createApi = gated(liaise.createApi)`,
     `export const createGraphQL = gated(liaise.createGraphQL)`,
   ].join('\n')
