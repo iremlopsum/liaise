@@ -1,0 +1,107 @@
+---
+title: "Polling"
+description: "poll asks an endpoint again on an interval and hands every Result to your callback, and pollUntil keeps asking until a condition holds, then resolves with that Result."
+order: 11
+---
+This page shows how to ask an endpoint again on an interval: `poll` keeps data fresh, such as a count of unread notifications, and `pollUntil` waits until something is done, such as an export the server is building. Both take any endpoint, from `createApi` or `createGraphQL`.
+
+## Keeping data fresh with `poll`
+
+<Example name="poll" />
+
+`setCount` and `showOffline` stand for your own code. `poll` sends `GET /notifications/count` at once and again 5 seconds after each answer, and hands each `Result` to the callback, until you call `stop()`.
+
+- **The wait starts after each answer.** A slow answer delays the next request instead of overlapping it, so a poll never has two requests in flight.
+- **The callback gets every `Result`, errors included.** Polling goes on after a failure, with longer waits ([When a poll fails](#when-a-poll-fails)).
+- **`stop()` ends it, and so does aborting the `signal` you pass in the options.** A request still in flight is cancelled, and its answer is never delivered, unless another `poll` or `pollUntil` is asking the same thing ([Several callers, one poll](#several-callers-one-poll)). With a signal that is already aborted, `poll` sends nothing and never calls the callback.
+- **Per-request options go with every request.** Any of the [`CallOptions`](/reference/calloptions/), such as `timeout`, `headers` or `middleware`, applies to each request, as it does with `paginate`. `signal` is the exception: it stops this `poll`, not one request.
+- **An `every` below 1, or one that isn't finite, such as `0` or `Infinity`, asks once** and never repeats.
+
+## Waiting until something is done with `pollUntil`
+
+<Example name="poll-until" />
+
+`download` and `showError` stand for your own code. `waitForExport('e1')` asks for `/exports/e1` every 2 seconds. When an answer has `status: 'done'`, `pollUntil` resolves with that `Result` and the polling stops. `until` is only called with successful results, so `r.data` is always there.
+
+`pollUntil` never rejects. It resolves once, with a `Result`, in one of these ways:
+
+| It resolves with | When |
+| ---------------- | ---- |
+| the success `Result` | `until` returns `true` for it. |
+| that error `Result` | The request fails in a way waiting can't fix: an HTTP 4xx other than 408 and 429, a GraphQL error response (`kind: 'http'` with a 2xx status), `kind: 'parse'`, `kind: 'middleware'`, or `kind: 'abort'` from the request itself, such as the endpoint's own `dedupe` cancelling it. |
+| an error with `kind: 'timeout'` | `giveUpAfter` milliseconds pass first. |
+| an error with `kind: 'abort'` | The `signal` in its options aborts. |
+| the first `Result` it gets | Its `every` is below 1 or isn't finite, so it asks once, and there is no second answer to wait for. |
+
+**Every other failure keeps it polling**, with the longer waits described under [When a poll fails](#when-a-poll-fails): a `network` error, a single request's own `timeout`, a 5xx, a 408, a 429, and any other status, such as a 304.
+
+In the example, a 404 for an export that doesn't exist ends the wait at once with `kind: 'http'`, and an export still queued after a minute ends it with `kind: 'timeout'`.
+
+- **The `timeout` from `giveUpAfter` and the `abort` from its `signal` are built by `pollUntil`.** Their `data` and `response` are `null`, `error.request` names the most recent request, and `retry()` runs the whole `pollUntil` again. [What pollUntil resolves with](/reference/polling-options/#what-polluntil-resolves-with) has the details.
+- **If `until` throws**, that answer counts as not done, and the error is reported the way a callback's is ([When a poll fails](#when-a-poll-fails)).
+
+## Several callers, one poll
+
+Each `poll()` or `pollUntil()` call is a caller. Callers that ask the same thing share one poll: one request per interval, with every `Result` handed to each of them. Five components that show the same count send one request every 5 seconds, not five.
+
+Callers ask the same thing when they use:
+
+- **The same endpoint, on the same client.** Two clients never share a poll, even with the same `baseUrl`.
+- **The same params, compared by value.** `{ id: '7' }` and another `{ id: '7' }` share.
+- **The same per-request options, compared by value**, such as equal `headers` objects or the same `timeout`. Per-request `middleware`, `skipMiddleware` or a `Headers` instance can't be compared, so a caller that passes one gets a shared poll of its own.
+
+`every`, `inBackground`, `maxEvery`, `signal`, `until` and `giveUpAfter` aren't compared, so callers with different intervals still share. Inside one shared poll:
+
+- **The shortest `every` wins.** It is read again before each wait, so when the caller with the shortest one leaves, the poll goes back to the next shortest once the wait already started has passed.
+- **A caller that joins late gets the last answer** without a new request. It arrives in a microtask, after `poll()` has returned, never inside the call. If the first answer hasn't come yet, the new caller waits for it like the others. A `pollUntil` whose `until` holds for that last answer resolves without sending anything.
+- **One caller leaving doesn't end the others.** `stop()`, an aborted `signal` or a `pollUntil` that resolves removes only that caller. The shared poll stops when its last caller leaves, and a request in flight at that moment is cancelled.
+- **A plain-object `params` is copied at the call**, so changing its top-level fields afterwards changes nothing. Nested values aren't copied, so don't change params after the call, nested objects included. Any other params value is sent as it is, without a copy. `URLSearchParams`, `FormData`, a `Blob` or an `ArrayBuffer` can't be compared, so each caller that passes one gets a shared poll of its own.
+
+## When a poll fails
+
+A failed request doesn't stop `poll`. The callback gets the error `Result`, and the next request waits longer:
+
+- **The wait grows with each failure in a row.** After the *n*th failure in a row, it is a random time between `every` and `every × 2ⁿ`. It is never shorter than `every`, and the randomness keeps many clients from asking again at the same moment.
+- **`maxEvery` caps it.** The default is `max(every, 60000)`: one minute, or `every` if that is longer.
+- **A success resets it** to `every`.
+- **A `Retry-After` header on a 429 or a 503** makes the wait at least that long, still capped by `maxEvery`.
+
+`pollUntil` waits the same way through the failures it keeps polling through.
+
+**A callback that throws** doesn't stop the poll, and the other callers' callbacks still run. The error goes to `reportError` where the runtime has one, as browsers do, and to `console.error` where it doesn't. A throw from `until` is reported the same way. `poll` gets only the endpoint function, not the client, so these errors can't reach the client's [`onError`](/guide/handling-errors/#reporting-errors-with-onerror).
+
+## Hidden tabs
+
+In a browser, polling pauses while the tab is hidden, so a page in the background doesn't keep asking:
+
+- **No request starts while the tab is hidden.** A poll started in a hidden tab sends its first request when the tab is visible.
+- **When the tab is visible again, it asks at once**, then goes back to its interval.
+- **`inBackground: true` keeps it polling.** One caller that sets it keeps the shared poll going while the tab is hidden. When the last such caller leaves, the poll pauses again.
+- **`pollUntil`'s `giveUpAfter` keeps counting** while the poll is paused.
+- **On a server or in React Native, it never pauses.** There is no `document` there, so there is no hidden tab.
+
+## With React
+
+Call `poll` in `useEffect`, and return its `stop` as the effect's cleanup:
+
+```tsx
+import { useEffect, useState } from 'react'
+import { poll } from 'liaise'
+
+function UnreadBadge() {
+  const [count, setCount] = useState(0)
+
+  useEffect(() => {
+    const stop = poll(api.getUnread, {}, ({ data, error }) => {
+      if (!error) setCount(data.unread)
+    }, { every: 5000 })
+    return stop // runs when the component unmounts
+  }, [])
+
+  return <span>{count}</span>
+}
+```
+
+`api` is the client from the first example. Every badge on the page shares one poll, and the last one to unmount stops it. In development, Strict Mode runs the effect, its cleanup and the effect again, and that leaves one poll running, with one delivery per answer.
+
+**Next:** [GraphQL](/guide/graphql/) covers the second client, for GraphQL backends. `poll` and `pollUntil` take its operations too.

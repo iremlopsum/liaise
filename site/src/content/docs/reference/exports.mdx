@@ -1,11 +1,11 @@
 ---
 title: "Exports"
 description: "Everything the liaise, liaise/middleware and liaise/testing entry points export."
-order: 11
+order: 12
 ---
 This page lists everything the three entry points export. Look here to find which import a name comes from.
 
-Each entry point is a separate import, and your bundler leaves out what you don't import. Gzipped, as measured by `npm run size`: about 6.2 kB for a REST-only import, 7.6 kB for the whole core entry, and 9.2 kB with all the middleware.
+Each entry point is a separate import, and your bundler leaves out what you don't import. Gzipped, as measured by `npm run size`: about 6.2 kB for a REST-only import, 8.4 kB for a REST import with `poll` and `pollUntil`, 9.8 kB for the whole core entry, and 10.7 kB with all the middleware.
 
 ## liaise
 
@@ -15,6 +15,8 @@ Each entry point is a separate import, and your bundler leaves out what you don'
 | `defineRequest` | function | Defines an endpoint, with params checked against the path ([Defining endpoints](/guide/defining-endpoints/)). |
 | `Request` | class | The endpoint class that `defineRequest` builds ([Without defineRequest](/guide/defining-endpoints/#without-definerequest)). |
 | `paginate` | function | Walks a paginated endpoint, one `Result` per page ([Pagination](/guide/pagination/)). |
+| `poll` | function | Asks an endpoint on an interval and hands every `Result` to a callback, until `stop()` ([Polling](/guide/polling/)). |
+| `pollUntil` | function | Asks an endpoint on an interval until a condition holds, and resolves with that `Result` ([Polling](/guide/polling/#waiting-until-something-is-done-with-polluntil)). |
 | `ApiError` | class | The `error` of a failed call ([Result and ApiError](/reference/result-and-apierror/)). |
 | `createGraphQL` | function | Creates a GraphQL client from your operations ([createGraphQL options](/reference/creategraphql-options/)). |
 | `Operation` | class | Defines one GraphQL operation ([Operation options](/reference/operation-options/)). |
@@ -23,6 +25,8 @@ Each entry point is a separate import, and your bundler leaves out what you don'
 | `ApiErrorKind` | type | The union of `error.kind` values. |
 | `CallOptions` | type | The second argument of a call ([CallOptions](/reference/calloptions/)). |
 | `PaginateOptions` | type | `next`, `maxPages`, and any `CallOptions`. |
+| `Pollable` | type | What `poll` and `pollUntil` take as an endpoint: `(params, options?) => Promise<Result>`, which every endpoint and operation is. |
+| `PollOptions`, `PollUntilOptions` | type | The options of `poll` and `pollUntil` ([poll() and pollUntil() options](/reference/polling-options/)). |
 | `ApiConfig`, `RequestConfig` | type | The configs of `createApi` and an endpoint. |
 | `LogOptions` | type | The options of `log` and `logMiddleware(options)` ([Log options](/reference/built-in-middleware-options/#log-options)). |
 | `GraphQLBaseConfig`, `OperationConfig` | type | The configs of `createGraphQL` and an `Operation`. |
