@@ -8,6 +8,28 @@ For the full record of what changed in each release, see [CHANGELOG.md](./CHANGE
 
 ---
 
+## Upgrading to 5.2.1
+
+No action needed, unless a path has a `:name` that doesn't start a path segment. Two shapes are now refused: the call
+returns a `'network'` error that says what to change, and nothing is sent.
+
+- **A `:name` in the middle of a segment, with a param of that name.** `/items/v:version` called with `{ version: '2' }`
+  used to send `/items/v2`. Move the `:name` to the start of the segment and put the fixed text in the value:
+  `/items/:version` with `{ version: 'v2' }`. A colon with no param of that name, as in `/v1/documents:batchGet`, is
+  sent as written, as before.
+- **A `:name` in the path's query string**, right after `?`, `&` or `=`. `defineRequest` now refuses it at compile
+  time. Declare query params in the second type argument instead:
+
+```ts
+// Before: a compile error now, and it never sent the query you meant
+defineRequest<Price>()({ method: 'GET', path: '/v2/simple/price?:qs' })
+
+// After
+defineRequest<Price, { ids: string; vs_currencies: string }>()({ method: 'GET', path: '/v2/simple/price' })
+```
+
+---
+
 ## Upgrading to 5.2.0
 
 One change can need action: **`cacheMiddleware` now caches only `GET` and `HEAD`.** Nothing breaks: a call it no

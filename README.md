@@ -6,7 +6,7 @@
 
 Type-safe REST and GraphQL on plain fetch. Never throws. Zero dependencies. Works with any framework.
 
-[![npm](https://img.shields.io/npm/v/liaise)](https://www.npmjs.com/package/liaise) [![CI](https://github.com/iremlopsum/liaise/actions/workflows/ci.yml/badge.svg)](https://github.com/iremlopsum/liaise/actions/workflows/ci.yml) ![6.5 kB gzipped, REST only](https://img.shields.io/badge/gzipped%2C%20REST%20only-6.5%20kB-blue) ![MIT](https://img.shields.io/badge/license-MIT-blue)
+[![npm](https://img.shields.io/npm/v/liaise)](https://www.npmjs.com/package/liaise) [![CI](https://github.com/iremlopsum/liaise/actions/workflows/ci.yml/badge.svg)](https://github.com/iremlopsum/liaise/actions/workflows/ci.yml) ![6.8 kB gzipped, REST only](https://img.shields.io/badge/gzipped%2C%20REST%20only-6.8%20kB-blue) ![MIT](https://img.shields.io/badge/license-MIT-blue)
 
 ```bash
 npm install liaise

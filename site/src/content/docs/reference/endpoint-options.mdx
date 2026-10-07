@@ -10,7 +10,7 @@ This page lists every option a REST endpoint takes. Look here when you write a `
 | Option | Type | Default | What it does |
 | ------ | ---- | ------- | ------------ |
 | `method` | `'GET' \| 'POST' \| 'PUT' \| 'PATCH' \| 'DELETE'` | required | The HTTP method. |
-| `path` | `string` | required | The path after `baseUrl`. Each `:name` is filled from the params ([Path params](/guide/defining-endpoints/#path-params)). A `#` is refused ([URL fragments](/reference/behaviour-in-detail/#url-fragments)). |
+| `path` | `string` | required | The path after `baseUrl`. Each `:name` that starts a path segment is filled from the params ([Path params](/guide/defining-endpoints/#path-params)). A `#` is refused ([URL fragments](/reference/behaviour-in-detail/#url-fragments)), and so is a `:name` in the query string ([Colons in a path](/reference/behaviour-in-detail/#colons-in-a-path)). |
 | `middleware` | `Middleware[]` | — | Runs on every call to this endpoint, after client middleware and before call middleware. |
 | `headers` | `HeadersInit` | — | Sent with every call to this endpoint. Replaces the client's value for the same header. |
 | `fetchOptions` | `FetchOptions` | — | Options passed through to `fetch` on every call to this endpoint, such as `cache: 'no-store'`. Each field replaces the client's. |
