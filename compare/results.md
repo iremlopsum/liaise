@@ -2,7 +2,7 @@
 
 Measured on 7 October 2026 against axios 1.20.0, ky 2.1.0 and ofetch 1.5.1. Other libraries change. Rerun it with `npm run build` in the repo root, then `npm install && npm run compare` in `compare/`.
 
-Run on 2026-10-07, Node v22.18.0, darwin arm64, against a local server. Versions: fetch v22.18.0, axios 1.20.0, ky 2.1.0, ofetch 1.5.1, liaise 5.2.0. In browsers axios uses XHR, so its results there can differ.
+Run on 2026-10-07, Node v22.18.0, darwin arm64, against a local server. Versions: fetch v22.18.0, axios 1.20.0, ky 2.1.0, ofetch 1.5.1, liaise 5.3.0. In browsers axios uses XHR, so its results there can differ.
 
 ## Table A. With each library's documented setup
 
@@ -10,7 +10,7 @@ Run on 2026-10-07, Node v22.18.0, darwin arm64, against a local server. Versions
 | --- | :-- | :-- | :-- | :-- | :-- |
 | Server answers 500 | throws Error* | throws AxiosError | throws HTTPError | throws FetchError | error result (http) |
 | Server unreachable | throws TypeError* | throws AxiosError (name: Error) | throws NetworkError | throws FetchError | error result (network) |
-| Server never answers | throws TimeoutError, 3001 ms* | throws AxiosError, 3005 ms | throws TimeoutError, 3004 ms | throws FetchError, 3003 ms | error result (timeout), 3003 ms |
+| Server never answers | throws TimeoutError, 3006 ms* | throws AxiosError, 3011 ms | throws TimeoutError, 3010 ms | throws FetchError, 3007 ms | error result (timeout), 3008 ms |
 | 200 with broken JSON | throws SyntaxError* | throws AxiosError (name: SyntaxError) | throws SyntaxError | throws SyntaxError | error result (parse) |
 | 204 with no body, on a JSON call | resolves with undefined* | resolves with "" | resolves with undefined | resolves with undefined | resolves with undefined |
 | Search as you type: which results stay on screen | shows "rea"* | shows "rea"* | shows "rea"* | shows "rea"* | shows "rea" |
@@ -28,7 +28,7 @@ Run on 2026-10-07, Node v22.18.0, darwin arm64, against a local server. Versions
 | --- | :-- | :-- | :-- | :-- | :-- |
 | Server answers 500 | wrong data | throws AxiosError | throws HTTPError | throws FetchError | error result (http) |
 | Server unreachable | throws TypeError | throws AxiosError (name: Error) | throws NetworkError | throws FetchError | error result (network) |
-| Server never answers | still waiting after 15s | still waiting after 15s | throws TimeoutError, 10003 ms | still waiting after 15s | still waiting after 15s |
+| Server never answers | still waiting after 15s | still waiting after 15s | throws TimeoutError, 10008 ms | still waiting after 15s | still waiting after 15s |
 | 200 with broken JSON | throws SyntaxError | wrong data | throws SyntaxError | wrong data | error result (parse) |
 | 204 with no body, on a JSON call | throws SyntaxError | resolves with "" | throws SyntaxError | resolves with undefined | error result (parse) |
 | Search as you type: which results stay on screen | shows "r" | shows "r" | shows "r" | shows "r" | shows "r" |
@@ -51,8 +51,8 @@ One JSON GET, minified ES2020 ESM bundle for a browser.
 | axios | 19.1 | 17.3 |
 | ky | 9.6 | 8.5 |
 | ofetch | 4.0 | 3.6 |
-| liaise | 6.6 | 6.0 |
-| liaise + retryMiddleware | 7.1 | 6.5 |
+| liaise | 7.0 | 6.4 |
+| liaise + retryMiddleware | 7.6 | 6.9 |
 
 fetch is built into the runtime; its row is the call site only, the floor rather than a library.
 
@@ -62,11 +62,11 @@ Median (min–max) of 10 interleaved rounds of 2,000 calls each, after 2,000 war
 
 | Library | Sequential | Concurrent (50 in flight) |
 | --- | :-- | :-- |
-| fetch | 15,523 (14,616–16,537) | 18,813 (16,744–19,127) |
-| axios | 11,631 (9,529–12,627) | 14,454 (13,343–14,989) |
-| ky | 12,919 (11,884–13,289) | 14,628 (13,970–15,649) |
-| ofetch | 14,635 (13,209–15,594) | 17,891 (17,099–18,368) |
-| liaise | 14,904 (11,306–15,649) | 17,943 (10,043–18,538) |
+| fetch | 16,550 (14,668–17,117) | 19,496 (17,587–20,150) |
+| axios | 13,540 (11,196–13,872) | 15,556 (14,322–16,090) |
+| ky | 13,721 (12,672–14,694) | 15,895 (15,217–16,246) |
+| ofetch | 16,157 (15,632–16,639) | 18,840 (18,412–19,610) |
+| liaise | 16,131 (15,574–16,791) | 18,797 (17,854–19,341) |
 
 ## Notes
 
