@@ -22,8 +22,10 @@ function loadedUpFront(page: string) {
   }
   return files
 }
-// Monaco's code reads MonacoEnvironment; its stylesheets style .monaco-editor.
-const isMonaco = (file: string, text: string) => (file.endsWith('.js') ? text.includes('MonacoEnvironment') : text.includes('.monaco-editor'))
+// What loads only on demand: Monaco (its code reads MonacoEnvironment, its stylesheets style
+// .monaco-editor) and graphql-js (its validator says "Cannot query field").
+const onDemand = (file: string, text: string) =>
+  file.endsWith('.js') ? text.includes('MonacoEnvironment') || text.includes('Cannot query field') : text.includes('.monaco-editor')
 
 describe('built site', () => {
   it('has a front page with the current version in the header', () => {
@@ -47,19 +49,21 @@ describe('built site', () => {
   it('renders the playground tabs as HTML, on every page that has one', () => {
     const pages = distFiles(/\.html$/).filter(f => readFileSync(dist(f), 'utf8').includes('data-playground'))
     expect(pages).toContain('playground/index.html')
+    expect(SCENARIOS.map(s => s.label)).toEqual(['Quick start', 'Every failure', 'Search as you type', 'Share', 'Retry', 'GraphQL'])
     for (const page of pages) {
       const html = readFileSync(dist(page), 'utf8')
+      expect(html.match(/<button[^>]*role="tab"/g), page).toHaveLength(6)
       for (const s of SCENARIOS) expect(html).toMatch(new RegExp(`<button[^>]*data-id="${s.id}"[^>]*>${s.label}</button>`))
     }
   })
   it('loads nothing from a CDN', () => {
     for (const f of distFiles(/\.(html|js|css)$/)) expect(readFileSync(dist(f), 'utf8'), f).not.toContain('cdn.jsdelivr.net')
   })
-  it('ships the editor to no docs page, and to the playground only on demand', () => {
+  it('ships the editor and graphql-js to no docs page, and to the playground only on demand', () => {
     for (const page of ['guide/handling-errors/index.html', 'playground/index.html']) {
       const files = loadedUpFront(page)
       expect(files.size, page).toBeGreaterThan(0)
-      for (const [f, text] of files) expect(isMonaco(f, text), `${page} loads ${f} up front`).toBe(false)
+      for (const [f, text] of files) expect(onDemand(f, text), `${page} loads ${f} up front`).toBe(false)
     }
   })
 })

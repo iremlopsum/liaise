@@ -2,13 +2,15 @@
 import Base from '../layouts/Base.astro'
 import Playground from '../components/Playground.astro'
 ---
-<Base title="Playground" description="The real liaise build, running in your browser against a fake API. Five examples, editable, with real types." active="playground">
-  <!-- From lg, the code pane fills the window below the header, intro and tabs. -->
-  <main class="mx-auto max-w-[90rem] px-4 py-8 sm:px-6 lg:px-8 lg:[--playground-h:max(29rem,calc(100dvh-21.5rem))]">
+<Base title="Playground" description="The real liaise build, running in your browser: six examples, REST and GraphQL, editable, with real types." active="playground">
+  <!-- From lg, the code pane fills the window below the header, the intro (four lines) and the tabs. -->
+  <main class="mx-auto max-w-[90rem] px-4 py-8 sm:px-6 lg:px-8 lg:[--playground-h:max(29rem,calc(100dvh-25.125rem))]">
     <h1 class="text-2xl font-semibold tracking-tight">Playground</h1>
     <p class="mt-2 max-w-3xl text-[15px] leading-7 text-gray-600 dark:text-gray-400">
-      This is the real liaise build, running in your browser against a fake API that lives in the page.
-      Pick an example, change it and run it again: the Network and Console panels show what happened.
+      This is the real liaise build, running in your browser. Pick an example, change it and run it again:
+      the Network and Console panels show what happened. The examples call a fake API at <code class="font-mono text-[13px]">api.example.com</code>,
+      so every failure is repeatable. Point <code class="font-mono text-[13px]">baseUrl</code> or <code class="font-mono text-[13px]">endpoint</code> anywhere else
+      and the request goes out for real (the server has to allow cross-origin requests).
     </p>
     <div class="mt-6"><Playground /></div>
   </main>

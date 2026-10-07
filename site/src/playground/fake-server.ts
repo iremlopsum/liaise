@@ -1,15 +1,21 @@
-// A fake API that lives in the page. The playground swaps it in for `fetch` while
-// the example runs, so the real liaise build talks to it without a network.
+// A fake API that lives in the page, at FAKE_ORIGIN. While an example runs, the playground sends
+// requests for that host here (route-fetch.ts), so every failure is repeatable.
 //
-//   GET  /users/:id   '42' and others → 200 · '404' → 404 · '500' → 500
+//   GET  /users/:id   '42', '7', '3' → that person · other ids → Ada · '404' → 404 · '500' → 500
 //                     'offline' → network failure · 'slow' → never answers
 //                     'flaky' → 500, 500, then 200
 //   GET  /search?q=   answers short queries more slowly, to show the race
+//   POST /graphql     real GraphQL over the same people (fake-graphql.ts)
+import { executeGraphQL, operationName } from './fake-graphql'
+
+/** The fake API's host. Requests to any other origin are real (route-fetch.ts). */
+export const FAKE_ORIGIN = 'https://api.example.com'
 
 /** What the network panel shows once a request is over: a status, or how it failed. */
 export type Outcome = number | 'offline' | 'cancelled'
 
-export interface SentRequest { id: number; method: string; path: string }
+/** `operation` is a GraphQL request's operation name, when it has one. */
+export interface SentRequest { id: number; method: string; path: string; operation?: string }
 export interface SettledRequest { id: number; outcome: Outcome; ms: number }
 
 export interface FakeServerOptions {
@@ -19,25 +25,35 @@ export interface FakeServerOptions {
 
 export interface FakeServer {
   fetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response>
-  /** Forgets per-run state (the 'flaky' counter), so every run starts the same. */
+  /** Forgets per-run state (the 'flaky' counter, renamed people), so every run starts the same. */
   reset(): void
 }
 
-type Route =
+export type Route =
   | { kind: 'hang' }
   | { kind: 'offline'; delay: number }
   | { kind: 'answer'; status: number; body: unknown; delay: number }
 
-const NAMES: Record<string, string> = { 42: 'Ada Lovelace', 7: 'Grace Hopper', 3: 'Alan Turing' }
+export interface Person { id: string; name: string; email: string; posts: Array<{ id: string; title: string }> }
+
+const PEOPLE: readonly Person[] = [
+  { id: '42', name: 'Ada Lovelace', email: 'ada@example.com', posts: [{ id: '1', title: 'Notes on the Analytical Engine' }] },
+  { id: '7', name: 'Grace Hopper', email: 'grace@example.com', posts: [{ id: '2', title: 'The Education of a Computer' }] },
+  { id: '3', name: 'Alan Turing', email: 'alan@example.com', posts: [{ id: '3', title: 'On Computable Numbers' }, { id: '4', title: 'Computing Machinery and Intelligence' }] },
+]
+const seed = (): Person[] => PEOPLE.map((p) => ({ ...p, posts: p.posts.map((post) => ({ ...post })) }))
 
 const aborted = (signal: AbortSignal): unknown =>
   signal.reason ?? new DOMException('The operation was aborted.', 'AbortError')
+const json = (status: number, body: unknown) =>
+  new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } })
 
 export function createFakeServer({ onRequest = () => {}, onSettle = () => {} }: FakeServerOptions = {}): FakeServer {
   let flaky = 0
   let seq = 0
+  let people = seed()
 
-  function route(method: string, url: URL): Route {
+  function route(method: string, url: URL, body: string): Route | Promise<Route> {
     const user = /^\/users\/([^/]+)$/.exec(url.pathname)
     if (method === 'GET' && user) {
       const id = decodeURIComponent(user[1])
@@ -54,12 +70,14 @@ export function createFakeServer({ onRequest = () => {}, onSettle = () => {} }: 
         if (flaky <= 2) return { kind: 'answer', status: 500, body: { message: 'Try again' }, delay: 250 }
         return { kind: 'answer', status: 200, body: { id, name: 'Flaky Fred' }, delay: 250 }
       }
-      return { kind: 'answer', status: 200, body: { id, name: NAMES[id] ?? 'Ada Lovelace', email: 'ada@example.com' }, delay: 140 }
+      const p = people.find((p) => p.id === id) ?? people[0]
+      return { kind: 'answer', status: 200, body: { id, name: p.name, email: p.email }, delay: 140 }
     }
     if (method === 'GET' && url.pathname === '/search') {
       const q = url.searchParams.get('q') ?? ''
       return { kind: 'answer', status: 200, body: [`${q}`, `${q} docs`, `${q} examples`], delay: Math.max(70, 560 - q.length * 90) }
     }
+    if (method === 'POST' && url.pathname === '/graphql') return executeGraphQL(body, people)
     return { kind: 'answer', status: 404, body: { message: 'Not found' }, delay: 50 }
   }
 
@@ -70,14 +88,19 @@ export function createFakeServer({ onRequest = () => {}, onSettle = () => {} }: 
     const signal = init.signal ?? request?.signal ?? undefined
     // Like real fetch: an already-cancelled request is never sent.
     if (signal?.aborted) throw aborted(signal)
+    const body = typeof init.body === 'string' ? init.body : request && init.body == null ? await request.clone().text() : ''
+    if (signal?.aborted) throw aborted(signal)
     const id = ++seq
     const started = Date.now()
-    onRequest({ id, method, path: url.pathname + url.search })
-    const r = route(method, url)
+    const operation = url.pathname === '/graphql' ? operationName(body) : undefined
+    onRequest({ id, method, path: url.pathname + url.search, ...(operation && { operation }) })
 
     return new Promise<Response>((resolve, reject) => {
       let timer: ReturnType<typeof setTimeout> | undefined
+      let settled = false
       const done = (outcome: Outcome, settle: () => void) => {
+        if (settled) return
+        settled = true
         clearTimeout(timer)
         signal?.removeEventListener('abort', onAbort)
         onSettle({ id, outcome, ms: Date.now() - started })
@@ -86,15 +109,19 @@ export function createFakeServer({ onRequest = () => {}, onSettle = () => {} }: 
       const onAbort = () => done('cancelled', () => reject(aborted(signal!)))
       if (signal?.aborted) return onAbort()
       signal?.addEventListener('abort', onAbort, { once: true })
-      if (r.kind === 'hang') return
-      timer = setTimeout(() => {
-        if (r.kind === 'offline') return done('offline', () => reject(new TypeError('Failed to fetch')))
-        done(r.status, () =>
-          resolve(new Response(JSON.stringify(r.body), { status: r.status, headers: { 'content-type': 'application/json' } })),
-        )
-      }, r.delay)
+      const answer = (r: Route) => {
+        if (settled || r.kind === 'hang') return
+        timer = setTimeout(() => {
+          if (r.kind === 'offline') return done('offline', () => reject(new TypeError('Failed to fetch')))
+          done(r.status, () => resolve(json(r.status, r.body)))
+        }, r.delay)
+      }
+      // REST answers synchronously, so its timing is exact; /graphql executes first.
+      const r = route(method, url, body)
+      if (r instanceof Promise) r.then(answer, (e: unknown) => done(500, () => resolve(json(500, { message: String(e) }))))
+      else answer(r)
     })
   }
 
-  return { fetch, reset: () => { flaky = 0 } }
+  return { fetch, reset: () => { flaky = 0; people = seed() } }
 }

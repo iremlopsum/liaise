@@ -12,7 +12,7 @@ async function run(id: string, edits: Array<[string, string]> = []) {
   mkdirSync(TMP, { recursive: true })
   const file = new URL(`${id}-${n++}.ts`, TMP)
   writeFileSync(file, src)
-  const net: Array<{ id: number; method: string; path: string; outcome?: string | number }> = []
+  const net: Array<{ id: number; method: string; path: string; operation?: string; outcome?: string | number }> = []
   const server = createFakeServer({ onRequest: r => net.push(r), onSettle: s => Object.assign(net.find(r => r.id === s.id)!, s) })
   vi.stubGlobal('fetch', server.fetch)
   const log: string[] = []
@@ -50,5 +50,23 @@ describe('playground examples do what their hints say', () => {
     expect(ok.net.map(r => r.outcome)).toEqual([500, 500, 200])
     expect(ok.log).toEqual(['got Flaky Fred on the third try'])
     expect((await run('retry', [['timeout: 3000', 'timeout: 600']])).log).toEqual(['gave up: timeout 0'])
+  })
+  it('graphql: query and mutation; 404 → GraphQL error with partialData; 500 and slow as over REST; the schema is checked', async () => {
+    const ok = await run('graphql')
+    expect(ok.net.map(r => `${r.method} ${r.path} (${r.operation}) ${r.outcome}`)).toEqual(['POST /graphql (GetUser) 200', 'POST /graphql (RenameUser) 200'])
+    expect(ok.log).toEqual(['Ada Lovelace wrote ["Notes on the Analytical Engine"]', 'renamed to Ada King'])
+    expect((await run('graphql', [["const id = '42'", "const id = '404'"]])).log).toEqual([
+      'http 200',
+      'body: [{"message":"User not found","locations":[{"line":1,"column":27}],"path":["user"]}]',
+      'partial data: {"user":null}',
+      'rename: http 200',
+    ])
+    expect((await run('graphql', [["const id = '42'", "const id = '500'"]])).log).toEqual(['http 500', 'body: {"message":"Internal error"}', 'rename: http 500'])
+    expect((await run('graphql', [["const id = '42'", "const id = 'slow'"]])).log).toEqual(['timeout 0', 'rename: timeout 0'])
+    expect((await run('graphql', [['posts { title }', 'posts { title likes }']])).log).toEqual([
+      'http 200',
+      'body: [{"message":"Cannot query field \\"likes\\" on type \\"Post\\".","locations":[{"line":1,"column":62}]}]',
+      'renamed to Ada King',
+    ])
   })
 })

@@ -1,6 +1,7 @@
 ---
-// The playground: the real liaise build, running in the page against a fake API
-// (../playground/fake-server.ts). Tabs, highlighted code and hint are HTML from the build, so the
+// The playground: the real liaise build, running in the page. Requests to the fake host go to a
+// fake API (../playground/fake-server.ts); any other origin goes out for real
+// (../playground/route-fetch.ts), and both show in the Network panel. Tabs, highlighted code and hint are HTML from the build, so the
 // page reads without JavaScript. On a larger screen the editor (Monaco, ../playground/editor.ts)
 // loads after first paint and replaces the code; on a phone it never loads, and the examples run
 // from the JavaScript compiled here.
@@ -48,6 +49,7 @@ const runnable = Object.fromEntries(await Promise.all(SCENARIOS.map(async (s) =>
         <span data-net-count class="font-mono text-[11px] text-gray-500"></span>
       </div>
       <ul data-net class="max-h-[45%] space-y-px overflow-y-auto px-2 font-mono text-[12px]"></ul>
+      <p data-cors hidden class="px-4 pt-1.5 text-[11px] leading-4 text-amber-300/80">Requests to other sites need that site to allow cross-origin requests (CORS).</p>
       <div class="mt-2 flex items-center justify-between border-t border-white/[0.07] px-4 pt-3.5 pb-2">
         <h3 class="text-[11px] font-medium tracking-wider text-gray-500 uppercase">Console</h3>
       </div>
@@ -73,6 +75,7 @@ const runnable = Object.fromEntries(await Promise.all(SCENARIOS.map(async (s) =>
 
 <script>
   import { createFakeServer, type Outcome } from '../playground/fake-server'
+  import { pickFetch } from '../playground/route-fetch'
   import { SCENARIOS, type Scenario } from '../playground/scenarios'
   import type { MountedEditor } from '../playground/editor'
 
@@ -101,27 +104,32 @@ const runnable = Object.fromEntries(await Promise.all(SCENARIOS.map(async (s) =>
     }
 
     // ---- Output panels -------------------------------------------------------
-    const net = $('[data-net]'), out = $('[data-console]'), count = $('[data-net-count]')
+    const net = $('[data-net]'), out = $('[data-console]'), count = $('[data-net-count]'), cors = $('[data-cors]')
     let t0 = 0
     const stamp = () => `+${String(Date.now() - t0).padStart(4, ' ')}ms`
-    const statusClass = (o: Outcome) =>
+    // A row's outcome: a status, or how it failed ('network' is a real request that never got an answer).
+    type RowOutcome = Outcome | 'network'
+    const statusClass = (o: RowOutcome) =>
       o === 'cancelled' ? 'text-gray-500 line-through decoration-gray-600' :
-      o === 'offline' ? 'text-rose-400' : o >= 500 ? 'text-rose-400' : o >= 400 ? 'text-amber-300' : 'text-emerald-400'
+      o === 'offline' || o === 'network' ? 'text-rose-400' : o >= 500 ? 'text-rose-400' : o >= 400 ? 'text-amber-300' : 'text-emerald-400'
+    function addRow(method: string, where: string, operation?: string) {
+      const li = document.createElement('li')
+      li.className = 'flex items-center gap-2 rounded-md px-2 py-1 hover:bg-white/[0.03]'
+      const op = operation ? ` <span class="text-gray-500">(${esc(operation)})</span>` : ''
+      li.innerHTML = `<span class="w-9 text-gray-500">${esc(method)}</span><span class="min-w-0 flex-1 truncate text-gray-200">${esc(where)}${op}</span><span data-o class="text-gray-500">…</span><span data-ms class="w-14 text-right text-gray-600"></span>`
+      net.append(li); count.textContent = `${net.children.length} request${net.children.length === 1 ? '' : 's'}`
+      net.scrollTop = net.scrollHeight
+      return li
+    }
+    function settleRow(li: HTMLLIElement, outcome: RowOutcome, ms: number) {
+      const o = li.querySelector<HTMLElement>('[data-o]')!
+      o.textContent = String(outcome); o.className = statusClass(outcome)
+      li.querySelector<HTMLElement>('[data-ms]')!.textContent = `${ms}ms`
+    }
     const rows = new Map<number, HTMLLIElement>()
     const server = createFakeServer({
-      onRequest: ({ id, method, path }) => {
-        const li = document.createElement('li')
-        li.className = 'flex items-center gap-2 rounded-md px-2 py-1 hover:bg-white/[0.03]'
-        li.innerHTML = `<span class="w-9 text-gray-500">${esc(method)}</span><span class="min-w-0 flex-1 truncate text-gray-200">${esc(path)}</span><span data-o class="text-gray-500">…</span><span data-ms class="w-14 text-right text-gray-600"></span>`
-        net.append(li); rows.set(id, li); count.textContent = `${rows.size} request${rows.size === 1 ? '' : 's'}`
-        net.scrollTop = net.scrollHeight
-      },
-      onSettle: ({ id, outcome, ms }) => {
-        const li = rows.get(id); if (!li) return
-        const o = li.querySelector<HTMLElement>('[data-o]')!
-        o.textContent = String(outcome); o.className = statusClass(outcome)
-        li.querySelector<HTMLElement>('[data-ms]')!.textContent = `${ms}ms`
-      },
+      onRequest: ({ id, method, path, operation }) => rows.set(id, addRow(method, path, operation)),
+      onSettle: ({ id, outcome, ms }) => { const li = rows.get(id); if (li) settleRow(li, outcome, ms) },
     })
     const fmt = (v: unknown) => typeof v === 'string' ? v : (() => { try { return JSON.stringify(v) } catch { return String(v) } })()
     const esc = (s: string) => s.replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' })[c]!)
@@ -133,12 +141,32 @@ const runnable = Object.fromEntries(await Promise.all(SCENARIOS.map(async (s) =>
     }
 
     // ---- Run -----------------------------------------------------------------
-    // While an example runs, `fetch` is the fake API. The page's own files (the editor's types,
-    // the search index) still load from the site.
+    // While an example runs, `fetch` sends the fake host to the fake API and every other origin out
+    // for real, logged like the fake ones. The page's own files (the editor's types, the search
+    // index) load as usual, unlogged.
     const pageFetch = window.fetch, realFetch = pageFetch.bind(window)
-    const sameOrigin = (input: RequestInfo | URL) =>
-      new URL(input instanceof Request ? input.url : String(input), location.href).origin === location.origin
-    const fakeFetch: typeof fetch = (input, init) => (sameOrigin(input) ? realFetch(input, init) : server.fetch(input, init))
+    async function sendReal(input: RequestInfo | URL, init?: RequestInit) {
+      const request = input instanceof Request ? input : undefined
+      const method = (init?.method ?? request?.method ?? 'GET').toUpperCase()
+      const href = request ? request.url : String(input)
+      let where = href
+      try { const u = new URL(href, location.href); where = u.host + u.pathname + u.search } catch {}
+      const li = addRow(method, where), started = Date.now()
+      try {
+        const response = await realFetch(input, init)
+        settleRow(li, response.status, Date.now() - started)
+        return response
+      } catch (e) {
+        const cancelled = (init?.signal ?? request?.signal)?.aborted
+        settleRow(li, cancelled ? 'cancelled' : 'network', Date.now() - started)
+        if (!cancelled && e instanceof TypeError) cors.hidden = false
+        throw e
+      }
+    }
+    const routedFetch: typeof fetch = (input, init) => {
+      const to = pickFetch(input, { pageOrigin: location.origin })
+      return to === 'fake' ? server.fetch(input, init) : to === 'real' ? sendReal(input, init) : realFetch(input, init)
+    }
     const SUBPATH: Record<string, string> = { '': 'index.js', '/middleware': 'built-in-middleware.js', '/testing': 'testing.js' }
     const withLiaise = (js: string) => js.replace(/from\s+(['"])liaise(\/[a-z]+)?\1/g, (_, _q, sub = '') =>
       `from '${location.origin}${BASE}liaise/${SUBPATH[sub] ?? 'index.js'}'`)
@@ -147,7 +175,7 @@ const runnable = Object.fromEntries(await Promise.all(SCENARIOS.map(async (s) =>
     async function run() {
       if (running) return
       running = true; runButton.disabled = true
-      net.innerHTML = ''; out.innerHTML = ''; rows.clear(); count.textContent = ''; server.reset()
+      net.innerHTML = ''; out.innerHTML = ''; rows.clear(); count.textContent = ''; cors.hidden = true; server.reset()
       const realLog = console.log, realError = console.error
       let url = ''
       t0 = Date.now()
@@ -158,7 +186,7 @@ const runnable = Object.fromEntries(await Promise.all(SCENARIOS.map(async (s) =>
         t0 = Date.now()
         if (errors) print([`${errors} type error${errors > 1 ? 's' : ''} (hover the red underline). Running anyway.`], 'text-amber-300')
         url = URL.createObjectURL(new Blob([withLiaise(js)], { type: 'text/javascript' }))
-        window.fetch = fakeFetch
+        window.fetch = routedFetch
         console.log = (...a: unknown[]) => print(a)
         console.error = (...a: unknown[]) => print(a, 'text-rose-300')
         await import(/* @vite-ignore */ url)
