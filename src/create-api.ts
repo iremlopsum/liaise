@@ -61,7 +61,7 @@ import type { SchemaOutcome } from './utils/validate.js'
 import { sendExchange, sendSharedExchange, AbortedRead } from './utils/exchange.js'
 import type { Exchange } from './utils/exchange.js'
 import { stampClientFetch } from './utils/client-fetch.js'
-import { originalState, nextCopy, pollKeyOf, stampCopier, stampPollId, type CopyState } from './utils/copy.js'
+import { originalState, stampCopier, stampPollId, type CopyState } from './utils/copy.js'
 import type { ApiConfig, CallOptions, EndpointExtras, ErrorResult, Middleware, MiddlewareContext, Result, ResponseType } from './types.js'
 
 // =============================================================================
@@ -1391,10 +1391,10 @@ export function createApi<TRequests extends Record<string, Request<any, any>>>(
 
       // A copy's endpoint names the original's, so poll.ts can share one loop
       // between copies that send the same thing. The original's carry no stamp.
-      if (origin) stampPollId(api[name], origin[name], pollKeyOf(copy))
+      if (origin) stampPollId(api[name], origin[name], copy.pollKey)
     }
 
-    stampCopier(api, (headers, options) => build(nextCopy(copy, headers, options), origin ?? api))
+    stampCopier(api, derive => build(derive(copy), origin ?? api))
     return api
   }
 

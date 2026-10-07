@@ -1,13 +1,13 @@
 import { describe, it, expect } from 'vitest'
 import {
-  COPY, POLL_ID, originalState, nextCopy, pollKeyOf, stampCopier, copierOf, stampPollId, pollIdOf,
+  COPY, POLL_ID, originalState, nextCopy, stampCopier, copierOf, stampPollId, pollIdOf,
 } from '../src/utils/copy.js'
 
 const base = originalState({ 'X-Client': 'web' })
 
 describe('copy state', () => {
-  it('the original: one header source, no lane, dedupe on', () => {
-    expect(base).toEqual({ headers: [{ 'X-Client': 'web' }], lane: '', dedupe: true })
+  it('the original: one header source, no lane, dedupe on, no poll key', () => {
+    expect(base).toEqual({ headers: [{ 'X-Client': 'web' }], lane: '', dedupe: true, pollKey: '' })
   })
 
   it("a copy keeps the client's headers, then a snapshot of what it adds", () => {
@@ -63,10 +63,16 @@ describe('copy state', () => {
   it('the poll key is the lane, marked when dedupe is off', () => {
     const on = nextCopy(base, { cookie: 's=1' }, undefined)
     const off = nextCopy(base, { cookie: 's=1' }, { dedupe: false })
-    expect(pollKeyOf(base)).toBe('')
-    expect(pollKeyOf(on)).toBe(on.lane)
-    expect(pollKeyOf(off)).not.toBe(pollKeyOf(on))
-    expect(pollKeyOf(nextCopy(base, {}, { dedupe: false }))).not.toBe('')
+    expect(base.pollKey).toBe('')
+    expect(on.pollKey).toBe(on.lane)
+    expect(off.pollKey).not.toBe(on.pollKey)
+    expect(nextCopy(base, {}, { dedupe: false }).pollKey).not.toBe('')
+    expect(nextCopy(off, {}, { dedupe: true }).pollKey).toBe(on.pollKey)
+  })
+
+  it("a copy keeps the parent's fields it doesn't set: CopyState is add-only", () => {
+    const newer = { ...base, future: 1 }
+    expect(nextCopy(newer, { cookie: 's=1' }, undefined)).toMatchObject({ future: 1 })
   })
 })
 

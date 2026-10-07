@@ -16,7 +16,7 @@ import type { SchemaOutcome } from './utils/validate.js'
 import { sendExchange, sendSharedExchange, AbortedRead } from './utils/exchange.js'
 import type { Exchange } from './utils/exchange.js'
 import { stampClientFetch } from './utils/client-fetch.js'
-import { originalState, nextCopy, pollKeyOf, stampCopier, stampPollId, type CopyState } from './utils/copy.js'
+import { originalState, stampCopier, stampPollId, type CopyState } from './utils/copy.js'
 import type { CallOptions, EndpointExtras, ErrorResult, Middleware, MiddlewareContext, Result, GraphQLBaseConfig, OperationConfig, GraphQLError } from './types.js'
 
 // ---------------------------------------------------------------------------
@@ -731,9 +731,9 @@ export function createGraphQL(config: any): any {
     const methods: Methods = {}
     for (const [name, operation] of Object.entries(record)) {
       methods[name] = buildMethod(name, operation, copy, prefix + name)
-      if (origin) stampPollId(methods[name], origin[name], pollKeyOf(copy))
+      if (origin) stampPollId(methods[name], origin[name], copy.pollKey)
     }
-    stampCopier(methods, (headers, options) => buildSide(record, nextCopy(copy, headers, options), prefix, origin ?? methods))
+    stampCopier(methods, derive => buildSide(record, derive(copy), prefix, origin ?? methods))
     return methods
   }
 
@@ -754,7 +754,7 @@ export function createGraphQL(config: any): any {
     const result: Record<string, Methods> = {}
     if (queries) result.query = buildSide(queries, copy, 'query:', origin?.query ?? null)
     if (mutations) result.mutation = buildSide(mutations, copy, 'mutation:', origin?.mutation ?? null)
-    stampCopier(result, (headers, options) => buildSplit(nextCopy(copy, headers, options), origin ?? result))
+    stampCopier(result, derive => buildSplit(derive(copy), origin ?? result))
     return result
   }
   return buildSplit(originalState(globalHeaders), null)

@@ -6,14 +6,24 @@
 // different CopyState (create-api.ts `build`, graphql.ts `buildSide`). This
 // file holds that state and the two hidden stamps that connect the pieces:
 //
-// - COPY, on a client: the function withHeaders calls to copy it.
+// - COPY, on a client: the function withHeaders calls to copy it. It takes a
+//   `derive` function (the parent's state → the copy's), so `nextCopy` is
+//   imported by with-headers.ts alone and a bundle that never imports
+//   withHeaders doesn't carry it.
 // - POLL_ID, on each endpoint of a copy: the original client's endpoint and
 //   what the copy adds, so poll.ts shares one loop between copies that send
 //   the same thing, however often they are rebuilt.
 //
 // Both are Symbol.for keys defined non-enumerable, like CLIENT_FETCH: spreads,
 // Object.keys, JSON and logs never see them, and two bundled copies of liaise
-// still agree on them. Not public API, except the two types index.ts names.
+// still agree on them. Not public API, except WithHeadersOptions, which
+// index.ts names.
+//
+// CopyState is ADD-ONLY: never rename or remove a field. Because COPY is a
+// Symbol.for stamp, a bundle holding two copies of liaise can have an older
+// withHeaders derive a newer client's state; nextCopy spreads the parent, so a
+// new field survives that, but a renamed or removed one would leave the client
+// building from a state that lacks it.
 // =============================================================================
 
 import { mergeHeaders } from './headers.js'
@@ -42,13 +52,15 @@ export interface CopyState {
   readonly lane: string
   /** false: no call through this client dedupes. */
   readonly dedupe: boolean
+  /** What poll.ts keys this client's loops by (POLL_ID): the lane, marked when dedupe is off. '' on the original. */
+  readonly pollKey: string
 }
 
-/** What a client's COPY stamp holds: makes a copy of that client. */
-export type Copier = (headers: HeadersInit, options?: WithHeadersOptions) => object
+/** What a client's COPY stamp holds: builds a copy of that client from `derive(its own state)`. */
+export type Copier = (derive: (parent: CopyState) => CopyState) => object
 
 /** The original client's state: its own `headers`, no lane, dedupe as each endpoint says. */
-export const originalState = (headers: HeadersInit | undefined): CopyState => ({ headers: [headers], lane: '', dedupe: true })
+export const originalState = (headers: HeadersInit | undefined): CopyState => ({ headers: [headers], lane: '', dedupe: true, pollKey: '' })
 
 let invalid = 0
 
@@ -73,6 +85,9 @@ let invalid = 0
  * Never throws: added headers `Headers` refuses get a lane no other copy has,
  * and the raw layers are kept instead of a snapshot, so every call fails as a
  * 'network' Result when the merge runs again at call time.
+ *
+ * The poll key is the lane, marked when dedupe is off: such a copy's calls
+ * behave differently, so it polls on a loop of its own.
  */
 export function nextCopy(parent: CopyState, headers: HeadersInit, options: WithHeadersOptions | undefined): CopyState {
   let sources: (HeadersInit | undefined)[] = [...parent.headers, headers]
@@ -85,11 +100,9 @@ export function nextCopy(parent: CopyState, headers: HeadersInit, options: WithH
   } catch {
     lane = `\u0000!${++invalid}`
   }
-  return { headers: sources, lane, dedupe: options?.dedupe ?? parent.dedupe }
+  const dedupe = options?.dedupe ?? parent.dedupe
+  return { ...parent, headers: sources, lane, dedupe, pollKey: dedupe ? lane : `${lane}\u0000-` }
 }
-
-/** A copy's poll key: its lane, marked when dedupe is off (its calls behave differently). */
-export const pollKeyOf = (copy: CopyState): string => (copy.dedupe ? copy.lane : `${copy.lane}\u0000-`)
 
 export function stampCopier(client: object, copier: Copier): void {
   Object.defineProperty(client, COPY, { value: copier })

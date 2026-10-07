@@ -11,7 +11,7 @@
 
 import { ApiError, createNetworkErrorResult } from './result.js'
 import type { EndpointExtras, Result } from './types.js'
-import { copierOf, type WithHeadersOptions } from './utils/copy.js'
+import { copierOf, nextCopy, type WithHeadersOptions } from './utils/copy.js'
 
 /** An endpoint or operation of a client: what every client method is. */
 type Endpoint = ((...args: any[]) => Promise<unknown>) & EndpointExtras
@@ -73,5 +73,5 @@ function standIn(): unknown {
  */
 export function withHeaders<T extends object & ClientShape<T>>(client: T, headers: HeadersInit, options?: WithHeadersOptions): T {
   const copier = copierOf(client)
-  return (copier ? copier(headers, options) : standIn()) as T
+  return (copier ? copier(parent => nextCopy(parent, headers, options)) : standIn()) as T
 }
