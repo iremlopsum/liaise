@@ -288,6 +288,7 @@ await api.listRepos({ page: 2 })               // ✗ compile error: org is requ
 
   ```ts
   defineRequest<undefined>()({ method: 'POST', path: '/ping', responseType: 'none' })  // ✓
+  // @ts-expect-error
   defineRequest<Repo>()({ method: 'POST', path: '/ping', responseType: 'none' })       // ✗
   ```
 
@@ -580,6 +581,7 @@ const withArkType = defineRequest()({
 - **The schema supplies the response type.** You write no type argument, so there's no second type to keep in sync.
 - **`data` is the schema's output.** A schema that transforms changes what you receive, so `data` can differ from the raw response:
 
+  <!-- untyped: needs zod's real output types (z is only a placeholder here), and getUser is not wired into the api from earlier blocks -->
   ```ts
   const getUser = defineRequest()({
     method: 'GET',
@@ -1012,6 +1014,7 @@ for await (const page of paginate(api.listItems, { limit: 50 }, {
 
 - **`next` returns the params for the next page.** It gets the page just loaded and the params that loaded it, so the usual case is a spread. liaise never has to guess whether your API calls it `cursor`, `page_token` or `after`, and the same shape covers every scheme:
 
+  <!-- untyped: two alternative `next` option values shown side by side, not one program -->
   ```ts
   // offset
   next: (p, prev) => p.data.items.length === prev.limit

@@ -8,7 +8,6 @@ declare function redirectToLogin(): void
 declare type User = { id: string; name: string; email?: string }
 declare type Repo = { id: string; name: string }
 declare type Product = { id: string; name: string }
-declare type Report = { id: string; total: number }
 declare const id: string
 declare const order: { items: string[] }
 
@@ -23,15 +22,23 @@ declare const retryMiddleware: typeof import('liaise/middleware').retryMiddlewar
 declare type Middleware = import('liaise').Middleware
 declare type ApiError = import('liaise').ApiError
 declare const Operation: typeof import('liaise').Operation
-declare type Operation<T = any, V = any> = import('liaise').Operation<T, V>
+declare type Operation<V extends object = any, D = any> = import('liaise').Operation<V, D>
 
 // Clients and requests the earlier blocks of a page have already built.
-declare const api: any
-declare const getUser: any
+declare const getUser: import('liaise').Request<{ id: string | number }, User>
+declare const api: ReturnType<typeof import('liaise').createApi<{
+  getUser: import('liaise').Request<{ id: string | number }, User>
+  getProduct: import('liaise').Request<{ id: string | number }, Product>
+  getDoc: import('liaise').Request<{ id: string | number }, { id: string; title: string }>
+  search: import('liaise').Request<{ tag: string }, { id: string }[]>
+  deleteUser: import('liaise').Request<{ id: string | number }, void>
+}>>
+declare const graphql: ReturnType<typeof import('liaise').createGraphQL<{
+  getCategory: import('liaise').Operation<{ id: string }, { category: Category }>
+}>>
 declare const user: { id: string; name: string; getIdToken(): Promise<string> }
-declare const graphql: any
-declare const expect: any
-declare const vi: any
+declare const expect: typeof import('vitest').expect
+declare const vi: typeof import('vitest').vi
 declare const GET_CATEGORY: ReturnType<typeof import('liaise').gql>
 declare type Category = { id: string; name: string; status: string }
 declare type Doc = { id: string; title: string }
@@ -42,8 +49,13 @@ declare function getToken(): string
 declare function refreshToken(): Promise<void>
 declare function logToTracker(error: unknown): void
 
+declare const mockFetch: typeof import('liaise/testing').mockFetch
+declare const jsonResponse: typeof import('liaise/testing').jsonResponse
+
 // Packages the docs import but the library does not depend on.
 declare module 'zod' { export const z: any }
+declare const z: any // the docs use zod's z without repeating the import
+declare namespace z { type infer<T> = any }
 declare module 'valibot' { const v: any; export = v }
 declare module 'arktype' { export const type: any }
 declare module '@sentry/browser' { export function captureException(e: unknown, ctx?: unknown): void; export function captureMessage(m: string, ctx?: unknown): void }
