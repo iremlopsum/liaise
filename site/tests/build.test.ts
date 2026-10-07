@@ -1,6 +1,8 @@
 import { describe, it, expect } from 'vitest'
 import { readFileSync, existsSync, readdirSync } from 'node:fs'
+import { gunzipSync } from 'node:zlib'
 import { SCENARIOS } from '../src/playground/scenarios'
+import { headings } from '../../scripts/changelog.mjs'
 
 const dist = (p: string) => new URL(`../dist/${p}`, import.meta.url)
 const pkg = JSON.parse(readFileSync(new URL('../../package.json', import.meta.url), 'utf8'))
@@ -65,5 +67,35 @@ describe('built site', () => {
       expect(files.size, page).toBeGreaterThan(0)
       for (const [f, text] of files) expect(onDemand(f, text), `${page} loads ${f} up front`).toBe(false)
     }
+  })
+})
+
+describe('front page', () => {
+  const html = () => readFileSync(dist('index.html'), 'utf8')
+  it('shows the newest CHANGELOG version in a pill linking to its release', () => {
+    const newest = headings(readFileSync(new URL('../../CHANGELOG.md', import.meta.url), 'utf8'))[0].version
+    const m = html().match(/<a href="(https:\/\/github\.com\/iremlopsum\/liaise\/releases\/tag\/[^"]+)"[^>]*>\s*<span[^>]*>([^<]+)<\/span>/)
+    expect(m?.[1]).toBe(`https://github.com/iremlopsum/liaise/releases/tag/v${newest}`)
+    expect(m?.[2]).toBe(newest)
+  })
+  it('has exactly five problem rows, each linking to a guide page that exists', () => {
+    const rows = [...html().matchAll(/<a href="(\/liaise\/guide\/[^"]+\/)"[^>]*data-problem/g)].map(m => m[1])
+    expect(rows).toHaveLength(5)
+    for (const r of rows) expect(existsSync(dist(`${r.replace('/liaise/', '')}index.html`)), r).toBe(true)
+  })
+  it('renders all six playground tabs', () => {
+    for (const s of SCENARIOS) expect(html()).toMatch(new RegExp(`<button[^>]*data-id="${s.id}"[^>]*>${s.label}</button>`))
+  })
+  it('loads neither the editor nor graphql-js up front', () => {
+    const files = loadedUpFront('index.html')
+    expect(files.size).toBeGreaterThan(0)
+    for (const [f, text] of files) expect(onDemand(f, text), `loads ${f} up front`).toBe(false)
+  })
+  it('is left out of the search index', () => {
+    expect(html()).not.toContain('data-pagefind-body')
+    const urls = distFiles(/^pagefind\/fragment\/.*\.pf_fragment$/).map(f => JSON.parse(gunzipSync(readFileSync(dist(f))).toString('utf8').replace(/^pagefind_dcd/, '')).url as string)
+    expect(urls.length).toBeGreaterThan(0)
+    expect(urls).toContain('/guide/handling-errors/')
+    expect(urls).not.toContain('/')
   })
 })
