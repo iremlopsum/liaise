@@ -35,6 +35,9 @@ beforeEach(() => {
   git('init', '-q')
   write('package.json', pkg())
   write('tsconfig.json', '{"compilerOptions":{"target":"ES2020"}}')
+  write('tsconfig.build.json', '{"extends":"./tsconfig.json"}')
+  write('tsconfig.types.json', '{"extends":"./tsconfig.json"}')
+  write('tsconfig.test.json', '{"extends":"./tsconfig.json"}')
   write('src/index.ts', 'export {}')
   write('README.md', 'a')
   commit('initial')
@@ -99,6 +102,39 @@ describe('docs-deploy-check', () => {
     git('tag', '-d', 'v1.0.0')
     const r = run()
     expect(r.code).toBe(1)
-    expect(r.err).toContain('no v* tag')
+    expect(r.err).toContain('no v* release tag')
+  })
+
+  it('refuses when tsconfig.build.json or tsconfig.types.json changed', () => {
+    write('tsconfig.build.json', '{"extends":"./tsconfig.json","compilerOptions":{"removeComments":true}}'); commit()
+    let r = run()
+    expect(r.code).toBe(1)
+    expect(r.err).toContain('tsconfig.build.json')
+    write('tsconfig.types.json', '{"extends":"./tsconfig.json","compilerOptions":{"declarationMap":true}}'); commit()
+    r = run()
+    expect(r.err).toContain('tsconfig.types.json')
+  })
+
+  it('passes when only tsconfig.test.json changed (the build does not read it)', () => {
+    write('tsconfig.test.json', '{"extends":"./tsconfig.json","compilerOptions":{"types":["node"]}}'); commit()
+    expect(run().code).toBe(0)
+  })
+
+  it('ignores prerelease tags', () => {
+    write('src/y.ts', 'export {}'); commit()
+    git('tag', 'v1.1.0-rc.1')
+    const r = run()
+    expect(r.code).toBe(1)
+    expect(r.err).toContain('since v1.0.0')
+  })
+
+  it('reports a clean message when package.json cannot be read at the tag', () => {
+    git('rm', '-q', 'package.json'); commit()
+    git('tag', 'v2.0.0')
+    write('package.json', pkg()); commit()
+    const r = run()
+    expect(r.code).toBe(1)
+    expect(r.err).toContain('docs-deploy: cannot read package.json at v2.0.0')
+    expect(r.err).not.toContain('at changedShipped')
   })
 })
