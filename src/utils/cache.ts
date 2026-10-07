@@ -88,6 +88,16 @@ function optionKey(value: unknown, seen: Set<object>): string | null | undefined
   }
 }
 
+/**
+ * The sender part of `cacheMiddleware`'s key: which `fetch` sends the call.
+ * `''` when the client uses the global fetch (nothing stamped), the identity
+ * token for a function, the value for anything else; `null` declines.
+ */
+export function cacheSenderKey(clientFetch: unknown): string | null {
+  if (clientFetch === undefined) return ''
+  return cacheOptionsKey(clientFetch)
+}
+
 function identity(obj: object): string {
   let id = identities.get(obj)
   if (id === undefined) {

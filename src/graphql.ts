@@ -15,6 +15,7 @@ import { runSchema } from './utils/validate.js'
 import type { SchemaOutcome } from './utils/validate.js'
 import { sendExchange, sendSharedExchange, AbortedRead } from './utils/exchange.js'
 import type { Exchange } from './utils/exchange.js'
+import { stampClientFetch } from './utils/client-fetch.js'
 import type { CallOptions, EndpointExtras, ErrorResult, Middleware, MiddlewareContext, Result, GraphQLBaseConfig, OperationConfig, GraphQLError } from './types.js'
 
 // ---------------------------------------------------------------------------
@@ -590,6 +591,7 @@ export function createGraphQL(config: any): any {
             },
             requestName: name,
           }
+          stampClientFetch(context, clientFetch)
 
           // The backstop bounds the whole chain by the operation's own signal,
           // not only the part that reaches fetch — the same one create-api.ts

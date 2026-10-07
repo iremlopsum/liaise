@@ -16,7 +16,8 @@
 
 import type { Middleware, MiddlewareContext, MiddlewareNext, LogOptions, Result, RetryOptions, RetryInfo } from './types.js'
 import { createLogger, loggerFor } from './utils/log.js'
-import { CacheStore, cacheOptionsKey } from './utils/cache.js'
+import { CacheStore, cacheOptionsKey, cacheSenderKey } from './utils/cache.js'
+import { clientFetchOf } from './utils/client-fetch.js'
 import { sendableFetchOptions } from './utils/fetch-options.js'
 import { stableKey } from './utils/stable-key.js'
 import { parseRetryAfter } from './utils/retry-after.js'
@@ -493,6 +494,13 @@ export function cacheMiddleware(options?: {
     // can't key are declined, never guessed.
     const optionsStr = cacheOptionsKey(sendableFetchOptions(ctx.request.fetchOptions))
     if (optionsStr === null) return next()
+    // And which fetch sends it: two clients with their own fetch functions (a
+    // cookie jar, a client certificate) sharing one module-level endpoint must
+    // not share entries. The client stamps its own fetch on the context
+    // (utils/client-fetch.ts); it is keyed by identity, and a client on the
+    // global fetch adds nothing.
+    const senderStr = cacheSenderKey(clientFetchOf(ctx))
+    if (senderStr === null) return next()
     // Who asked and where, not only what: before 5.0.1 the key was name +
     // params, so user B could be served user A's /me (different
     // Authorization), and one Request in two createApi instances shared
@@ -530,7 +538,7 @@ export function cacheMiddleware(options?: {
       })
       urlKey = `${fullUrl.slice(0, qIndex)}?${segments.join('&')}`
     }
-    const key = `${ctx.requestName}|${ctx.request.method}|${urlKey}|${paramsStr}|${headerKey}|${optionsStr}`
+    const key = `${ctx.requestName}|${ctx.request.method}|${urlKey}|${paramsStr}|${headerKey}|${optionsStr}|${senderStr}`
 
     const cached = store.get<Result<unknown>>(key)
     if (cached !== null) {

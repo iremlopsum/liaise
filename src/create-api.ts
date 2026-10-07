@@ -60,6 +60,7 @@ import { runSchema } from './utils/validate.js'
 import type { SchemaOutcome } from './utils/validate.js'
 import { sendExchange, sendSharedExchange, AbortedRead } from './utils/exchange.js'
 import type { Exchange } from './utils/exchange.js'
+import { stampClientFetch } from './utils/client-fetch.js'
 import type { ApiConfig, CallOptions, EndpointExtras, ErrorResult, Middleware, MiddlewareContext, Result, ResponseType } from './types.js'
 
 // =============================================================================
@@ -1171,6 +1172,7 @@ export function createApi<TRequests extends Record<string, Request<any, any>>>(
             },
             requestName: name
           }
+          stampClientFetch(context, clientFetch)
 
           // -----------------------------------------------------------------
           // Step 8: Compose middleware and execute

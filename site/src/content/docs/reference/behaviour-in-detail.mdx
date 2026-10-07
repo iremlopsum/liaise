@@ -7,9 +7,11 @@ This page collects the edge cases the guide links to: exactly what the cache and
 
 ## Cache key
 
-`cacheMiddleware` keys each entry on the endpoint name, the method, the full URL, the params, every request header except `Content-Type`, and the `fetchOptions`. A different `Authorization`, base URL, query value or `credentials` gets its own entry.
+`cacheMiddleware` keys each entry on the endpoint name, the method, the full URL, the params, every request header except `Content-Type`, the `fetchOptions`, and which `fetch` sends it. A different `Authorization`, base URL, query value or `credentials` gets its own entry.
 
-Cookies the browser adds aren't in the key, because they are added below `fetch`, where no middleware can see them. A call with `credentials: 'include'` and one with `'omit'` never share an entry, but two `'include'` calls made before and after a login do. Clear the cache when the user changes (`getUserCache.clear()` in [Cache repeated reads](/guide/retries-caching-and-logging/#cache-repeated-reads)). Neither is a `fetch` you gave the client: two clients whose `fetch` sends different users' identities must not share one `cacheMiddleware`.
+Cookies the browser adds aren't in the key, because they are added below `fetch`, where no middleware can see them. A call with `credentials: 'include'` and one with `'omit'` never share an entry, but two `'include'` calls made before and after a login do. Clear the cache when the user changes (`getUserCache.clear()` in [Cache repeated reads](/guide/retries-caching-and-logging/#cache-repeated-reads)).
+
+A client's own `fetch` is part of the key, by identity. Two clients whose `fetch` functions differ never share an entry, even through one module-level endpoint, while clients on the global `fetch` share as they always did. A `fetch` that adds a user's identity from request context (for example `AsyncLocalStorage` on a server) is still one function for every user, so the cache can't tell them apart. Send that identity as a header instead, which the key includes.
 
 The query string is sorted by name before it goes in the key, so `?a=1&b=2` and `?b=2&a=1` are one entry. It is sorted by the raw, undecoded name, and repeated names keep their order. A query param that a middleware adds before the cache, such as `?lang=de`, is part of the key.
 

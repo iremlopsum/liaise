@@ -5,6 +5,7 @@ import { Request } from '../src/request.js'
 import { cacheMiddleware } from '../src/built-in-middleware.js'
 import type { FetchOptions, Middleware } from '../src/types.js'
 import { createGraphQL, Operation } from '../src/graphql.js'
+import { clientFetchOf } from '../src/utils/client-fetch.js'
 
 afterEach(() => vi.restoreAllMocks())
 
@@ -963,5 +964,81 @@ describe('the cache key includes the fetch options (5.2.0)', () => {
     await api.order({ id: '1' }, { fetchOptions: opaque })
     await api.order({ id: '1' }, { fetchOptions: opaque })
     expect(fetchMock).toHaveBeenCalledTimes(2)
+  })
+})
+
+describe("the cache key includes a client's own fetch", () => {
+  const fetchAs = (name: string) => vi.fn(async () => mockJsonResponse({ user: name }))
+  const me = () => new Request<Record<string, never>, { user: string }>({ method: 'GET', path: '/me', middleware: [cacheMiddleware()] })
+
+  it('two clients with different fetch functions never share an entry through one endpoint', async () => {
+    const getMe = me()
+    const fa = fetchAs('alice')
+    const fb = fetchAs('bob')
+    const alice = createApi({ baseUrl: 'https://x.test', requests: { getMe }, fetch: fa as unknown as typeof fetch })
+    const bob = createApi({ baseUrl: 'https://x.test', requests: { getMe }, fetch: fb as unknown as typeof fetch })
+    const users: unknown[] = []
+    for (const c of [alice, bob, alice, bob]) {
+      const r = await c.getMe()
+      users.push(r.data?.user)
+    }
+    expect(users).toEqual(['alice', 'bob', 'alice', 'bob'])
+    expect(fa).toHaveBeenCalledTimes(1)
+    expect(fb).toHaveBeenCalledTimes(1)
+  })
+
+  it('two clients on the global fetch share an endpoint cache, as before', async () => {
+    const getMe = me()
+    const fetchMock = fetchAs('x')
+    vi.stubGlobal('fetch', fetchMock)
+    const one = createApi({ baseUrl: 'https://x.test', requests: { getMe } })
+    const two = createApi({ baseUrl: 'https://x.test', requests: { getMe } })
+    await one.getMe()
+    await two.getMe()
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+  })
+
+  it('two clients given the same fetch function share entries', async () => {
+    const getMe = me()
+    const f = fetchAs('x')
+    const one = createApi({ baseUrl: 'https://x.test', requests: { getMe }, fetch: f as unknown as typeof fetch })
+    const two = createApi({ baseUrl: 'https://x.test', requests: { getMe }, fetch: f as unknown as typeof fetch })
+    await one.getMe()
+    await two.getMe()
+    expect(f).toHaveBeenCalledTimes(1)
+  })
+
+  it('GraphQL: clients with different fetch functions never share an entry', async () => {
+    const who = new Operation<Record<string, never>, { user: string }>({ operation: 'query { user }', middleware: [cacheMiddleware({ methods: ['POST'] })] })
+    const gql = (name: string) => vi.fn(async () => mockJsonResponse({ data: { user: name } }))
+    const fa = gql('alice')
+    const fb = gql('bob')
+    const alice = createGraphQL({ endpoint: 'https://x.test/graphql', operations: { who }, fetch: fa as unknown as typeof fetch })
+    const bob = createGraphQL({ endpoint: 'https://x.test/graphql', operations: { who }, fetch: fb as unknown as typeof fetch })
+    const users: unknown[] = []
+    for (const c of [alice, bob, alice, bob]) {
+      const r = await c.who()
+      users.push(r.data?.user)
+    }
+    expect(users).toEqual(['alice', 'bob', 'alice', 'bob'])
+    expect(fa).toHaveBeenCalledTimes(1)
+    expect(fb).toHaveBeenCalledTimes(1)
+  })
+
+  it('the stamp is invisible to a middleware that spreads or logs ctx, but readable', async () => {
+    const f = fetchAs('x') as unknown as typeof fetch
+    let seen: Parameters<Middleware>[0] | undefined
+    const capture: Middleware = (ctx, next) => {
+      seen = ctx
+      return next()
+    }
+    const getMe = new Request<Record<string, never>, { user: string }>({ method: 'GET', path: '/me', middleware: [capture] })
+    const api = createApi({ baseUrl: 'https://x.test', requests: { getMe }, fetch: f })
+    await api.getMe()
+    expect(seen).toBeDefined()
+    expect(Object.keys(seen!)).toEqual(['request', 'requestName'])
+    expect(JSON.stringify(seen)).not.toContain('clientFetch')
+    expect(Object.keys({ ...seen })).toEqual(['request', 'requestName'])
+    expect(clientFetchOf(seen!)).toBe(f)
   })
 })
