@@ -125,7 +125,10 @@ export function createGraphQL(config: any): any {
     }
   }
 
-  function buildMethod(name: string, operation: Operation<any, any>) {
+  // `lane` keys the dedupe and share trackers. It is the name, except in a split
+  // client, where a query and a mutation may share a name and must not cancel or
+  // join each other's calls. `name` stays what middleware and the logger see.
+  function buildMethod(name: string, operation: Operation<any, any>, lane: string = name) {
     const method = (variables: object = {}, options: CallOptions = {}): Promise<Result<unknown>> => {
       const execute = (): Promise<Result<unknown>> => {
         /**
@@ -247,7 +250,7 @@ export function createGraphQL(config: any): any {
               // aborted dedupe signal.
               if (operation.config.dedupe && !dedupeController) {
                 const external = ctx.request.signal ?? callerSignal
-                const tracked = dedupeTracker.track(name, external)
+                const tracked = dedupeTracker.track(lane, external)
                 dedupeController = tracked.controller
                 ctx.request.signal = tracked.signal
                 own(tracked.signal, external)
@@ -286,7 +289,7 @@ export function createGraphQL(config: any): any {
               // copy of the one read. A body a middleware replaced with one
               // that can't be compared has no key and is sent as usual.
               const shareKey = operation.config.share === true
-                ? requestKey(name, 'POST', sendUrl, sendHeaders, fetchInit.body ?? null)
+                ? requestKey(lane, 'POST', sendUrl, sendHeaders, fetchInit.body ?? null)
                 : null
               let exchange: Exchange
               if (shareKey === null) {
@@ -625,7 +628,7 @@ export function createGraphQL(config: any): any {
             // entry, or nothing can cancel it — see create-api.ts.
             if (operation.config.dedupe && dedupeController) {
               if (preempted) dedupeController.abort()
-              dedupeTracker.clear(name, dedupeController)
+              dedupeTracker.clear(lane, dedupeController)
             }
             releaseAll()
             // One failed shared operation reports once, whichever of its
@@ -662,8 +665,8 @@ export function createGraphQL(config: any): any {
     }
 
     // Configuration-only headers: no per-call layer and no Content-Type (a call
-    // sets that). A fresh record each time. The split client reuses this
-    // function object, so `gql.query.x` inherits it.
+    // sets that). A fresh record each time. Every method gets its own — the split
+    // client builds `gql.query.x` and `gql.mutation.x` separately (5.1.1).
     return Object.assign(method, {
       // An invalid configured header makes `new Headers()` throw; a public
       // entry point never throws, so that gives {}.
@@ -677,44 +680,46 @@ export function createGraphQL(config: any): any {
     })
   }
 
-  const allOperations: Record<string, Operation<any, any>> = {
-    ...(config.operations ?? {}),
-    ...(config.queries ?? {}),
-    ...(config.mutations ?? {}),
-  }
-
   // share joins the in-flight operation, dedupe cancels it: an operation
   // that sets both is a contradiction, refused here at construction rather
-  // than at call time — a configuration mistake, not a request failure.
-  for (const [name, op] of Object.entries(allOperations)) {
-    if (op.config.share && op.config.dedupe) {
-      throw new Error(
-        `Operation "${name}" sets both share and dedupe. They are opposites — ` +
-        `dedupe cancels the previous call, share joins it. Pick one.`
-      )
+  // than at call time — a configuration mistake, not a request failure. Each
+  // record is checked on its own: merged by name, a mutation would hide a
+  // query of the same name from this check.
+  const records = [config.operations, config.queries, config.mutations] as Array<Record<string, Operation<any, any>> | undefined>
+  for (const record of records) {
+    for (const [name, op] of Object.entries(record ?? {})) {
+      if (op.config.share && op.config.dedupe) {
+        throw new Error(
+          `Operation "${name}" sets both share and dedupe. They are opposites — ` +
+          `dedupe cancels the previous call, share joins it. Pick one.`
+        )
+      }
     }
   }
 
-  const flatMethods: Record<string, Function> = {}
-  for (const [name, operation] of Object.entries(allOperations)) {
-    flatMethods[name] = buildMethod(name, operation)
-  }
-
   if (config.operations) {
+    const flatMethods: Record<string, Function> = {}
+    const all: Record<string, Operation<any, any>> = { ...config.operations, ...(config.queries ?? {}), ...(config.mutations ?? {}) }
+    for (const [name, operation] of Object.entries(all)) {
+      flatMethods[name] = buildMethod(name, operation)
+    }
     return flatMethods
   }
 
+  // Each side is built from its own record, so a query and a mutation may share
+  // a name (GraphQL allows it). Before 5.1.1 the two were merged by name and the
+  // mutation replaced the query under both gql.query.x and gql.mutation.x.
   const result: Record<string, Record<string, Function>> = {}
   if (config.queries) {
     result.query = {}
-    for (const name of Object.keys(config.queries)) {
-      result.query[name] = flatMethods[name]
+    for (const [name, operation] of Object.entries(config.queries as Record<string, Operation<any, any>>)) {
+      result.query[name] = buildMethod(name, operation, `query:${name}`)
     }
   }
   if (config.mutations) {
     result.mutation = {}
-    for (const name of Object.keys(config.mutations)) {
-      result.mutation[name] = flatMethods[name]
+    for (const [name, operation] of Object.entries(config.mutations as Record<string, Operation<any, any>>)) {
+      result.mutation[name] = buildMethod(name, operation, `mutation:${name}`)
     }
   }
   return result
