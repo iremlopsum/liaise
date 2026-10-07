@@ -103,6 +103,9 @@ export function startServer(): Promise<TestServer> {
           res.writeHead(204)
           res.end()
 
+        } else if (method === 'GET' && pathname === '/redirect') {
+          res.writeHead(302, { Location: '/hello' })
+          res.end()
         } else if (pathname.startsWith('/status/')) {
           const code = parseInt(pathname.split('/')[2], 10)
           res.writeHead(isNaN(code) ? 400 : code)

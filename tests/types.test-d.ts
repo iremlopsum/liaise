@@ -1,7 +1,7 @@
 import { describe, it, expectTypeOf } from 'vitest'
 import { createApi } from '../src/create-api.js'
 import { Request } from '../src/request.js'
-import type { MiddlewareContext, CallOptions, RequestConfig, ApiConfig, GraphQLBaseConfig } from '../src/types.js'
+import type { MiddlewareContext, CallOptions, FetchOptions, RequestConfig, ApiConfig, GraphQLBaseConfig } from '../src/types.js'
 import type { ApiErrorKind } from '../src/types.js'
 import { successResult, errorResult, mockFetch } from '../src/testing.js'
 import type { ApiError } from '../src/types.js'
@@ -522,5 +522,26 @@ describe('the fetch option', () => {
   it('refuses something that is not a fetch', () => {
     // @ts-expect-error a string is not a fetch
     createApi({ baseUrl: '/api', requests: {}, fetch: 'fetch' })
+  })
+})
+
+describe('fetchOptions types', () => {
+  it('accepts fetch options at every level', () => {
+    const r = new Request<{ id: string }, User>({ method: 'GET', path: '/users/:id', fetchOptions: { cache: 'no-store' } })
+    const client = createApi({ baseUrl: '/api', requests: { r }, fetchOptions: { credentials: 'include' } })
+    client.r({ id: '1' }, { fetchOptions: { keepalive: true, priority: 'high' } })
+    expectTypeOf<CallOptions['fetchOptions']>().toEqualTypeOf<FetchOptions | undefined>()
+    expectTypeOf<MiddlewareContext['request']['fetchOptions']>().toEqualTypeOf<FetchOptions | undefined>()
+  })
+  it('refuses the fields liaise controls', () => {
+    // @ts-expect-error method is liaise's
+    const a: FetchOptions = { method: 'DELETE' }
+    // @ts-expect-error headers are liaise's
+    const b: FetchOptions = { headers: {} }
+    // @ts-expect-error body is liaise's
+    const c: FetchOptions = { body: 'x' }
+    // @ts-expect-error signal is liaise's
+    const d: FetchOptions = { signal: AbortSignal.abort() }
+    void [a, b, c, d]
   })
 })

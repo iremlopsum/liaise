@@ -37,6 +37,8 @@ The URL is read as written. A `baseUrl` without a leading slash is resolved by t
 
 The tracing headers are `traceparent`, `tracestate`, `baggage`, `sentry-trace`, `x-request-id` and `x-correlation-id`. They identify a request for tracing and don't change the answer. `baggage` can carry tenant or user IDs, and two calls that differ only there still share. Auth headers and cookies always stay in the key.
 
+The `fetchOptions` are part of the key, compared by field name, so their order doesn't matter. Only string, number, boolean and `null` values can be compared; a call whose options hold any other value, such as an object, isn't shared, the same as an upload.
+
 The response is read once, and each caller decodes its own copy, so each has its own `data` for JSON and text. A `Blob`, `ArrayBuffer` or `FormData` result is handed to every caller as the same object, because copying it would cost the bytes `share` saves.
 
 Each caller holds a place in the shared request, counted by a refcount. A caller whose own `signal` or deadline fires gives up its place and stops waiting. When the last caller gives up, the request is aborted. Nobody is left to receive that abort, so it is never reported.

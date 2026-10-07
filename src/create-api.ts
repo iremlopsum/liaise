@@ -48,6 +48,7 @@ import { callLoggerFor } from './utils/log.js'
 import { ShareTracker, requestKey, narrowTag, stampShared, stampPreempted } from './utils/share.js'
 import type { SharedRound } from './utils/share.js'
 import { mergeHeaders, headersRecord } from './utils/headers.js'
+import { mergeFetchOptions, sendableFetchOptions } from './utils/fetch-options.js'
 import { abortKind, propagatesReason } from './utils/abort-kind.js'
 import { anySignal, releaseSignal } from './utils/any-signal.js'
 import { callBudget } from './utils/budget.js'
@@ -412,7 +413,7 @@ export function createApi<TRequests extends Record<string, Request<any, any>>>(
 ): Api<TRequests> {
   // Destructure the config for convenience. Default globalMiddleware to an
   // empty array so we don't need null checks throughout the function.
-  const { baseUrl, requests, middleware: globalMiddleware = [], headers: globalHeaders, onError, timeout: clientTimeout, fetch: clientFetch } = config
+  const { baseUrl, requests, middleware: globalMiddleware = [], headers: globalHeaders, onError, timeout: clientTimeout, fetch: clientFetch, fetchOptions: clientFetchOptions } = config
   // Not a middleware: each call prints its start line before its chain runs
   // and its end line from the post-execution hook, with the Result the caller
   // receives — the backstop's too — so it logs once, with its final outcome
@@ -723,7 +724,13 @@ export function createApi<TRequests extends Record<string, Request<any, any>>>(
               const sendMethod = ctx.request.method
               const sendUrl = ctx.request.url
               const sendHeaders = ctx.request.headers
+              // The fetch options as the middleware left them, without the
+              // fields liaise controls; method, headers and signal are set
+              // over them, so liaise's own values always win (5.2.0). The share
+              // key below takes the same copy, so it is what fetch receives.
+              const sendOptions = sendableFetchOptions(ctx.request.fetchOptions)
               const fetchInit: RequestInit = {
+                ...sendOptions,
                 method: sendMethod,
                 headers: sendHeaders,
                 signal: ctx.request.signal
@@ -765,7 +772,7 @@ export function createApi<TRequests extends Record<string, Request<any, any>>>(
               // and safely (an upload) has no key and is sent as usual.
               const responseType = request.config.responseType ?? 'json'
               const shareKey = request.config.share === true
-                ? requestKey(name, sendMethod, sendUrl, sendHeaders, fetchInit.body ?? null)
+                ? requestKey(name, sendMethod, sendUrl, sendHeaders, fetchInit.body ?? null, sendOptions)
                 : null
               let exchange: Exchange
               if (shareKey === null) {
@@ -1100,6 +1107,10 @@ export function createApi<TRequests extends Record<string, Request<any, any>>>(
           // global (lowest) → per-request → per-call (highest)
           // -----------------------------------------------------------------
           const headers = mergeHeaders(globalHeaders, request.config.headers, options.headers)
+          // The fetch options merge the same way, field by field (5.2.0), into
+          // a fresh object, so a middleware changing ctx.request.fetchOptions
+          // never reaches the configuration or the next call.
+          const fetchOptions = mergeFetchOptions(clientFetchOptions, request.config.fetchOptions, options.fetchOptions)
 
           // -----------------------------------------------------------------
           // Step 6: Serialize the body (for non-query requests)
@@ -1153,6 +1164,7 @@ export function createApi<TRequests extends Record<string, Request<any, any>>>(
               params,
               headers,
               body,
+              fetchOptions,
               signal: callerSignal
             },
             requestName: name

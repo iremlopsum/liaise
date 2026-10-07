@@ -36,6 +36,21 @@ describe('requestKey', () => {
       expect(requestKey('x', 'POST', '/x', h({}), body)).toBeNull()
     }
   })
+  it('keys fetch options by name, ignoring their order, and separates different values', () => {
+    const base = requestKey('me', 'GET', '/me', h({}), null, { credentials: 'include', mode: 'cors' })
+    expect(requestKey('me', 'GET', '/me', h({}), null, { mode: 'cors', credentials: 'include' })).toBe(base)
+    expect(requestKey('me', 'GET', '/me', h({}), null, { credentials: 'omit', mode: 'cors' })).not.toBe(base)
+    expect(requestKey('me', 'GET', '/me', h({}), null)).toBe(requestKey('me', 'GET', '/me', h({}), null, {}))
+  })
+
+  it('a fetch option that is not a primitive gives no key', () => {
+    expect(requestKey('me', 'GET', '/me', h({}), null, { next: { revalidate: 60 } })).toBeNull()
+    expect(requestKey('me', 'GET', '/me', h({}), null, { priority: Infinity })).toBeNull()
+  })
+
+  it('an undefined fetch option is left out', () => {
+    expect(requestKey('me', 'GET', '/me', h({}), null, { credentials: undefined })).toBe(requestKey('me', 'GET', '/me', h({}), null, {}))
+  })
 })
 
 describe('ShareTracker.run (5.1.0)', () => {

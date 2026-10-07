@@ -683,3 +683,15 @@ describe('a custom fetch', () => {
     expect(seen).toEqual([`GET ${server.baseUrl}/hello`])
   })
 })
+
+describe('fetchOptions', () => {
+  it("redirect: 'manual' reaches the real fetch: the 302 comes back instead of being followed", async () => {
+    const hop = new Request<Record<string, never>, unknown>({ method: 'GET', path: '/redirect', fetchOptions: { redirect: 'manual' } })
+    const api = createApi({ baseUrl: server.baseUrl, requests: { hop } })
+    const before = server.callCounts.get('GET /hello') ?? 0
+    const { error } = await api.hop()
+    expect(error?.kind).toBe('http')
+    expect(error?.status).toBe(302)
+    expect(server.callCounts.get('GET /hello') ?? 0).toBe(before)
+  })
+})

@@ -33,6 +33,7 @@ The README badge, the front page and [How it compares](/compare/) quote the REST
 | `Result`, `SuccessResult`, `ErrorResult` | type | What every call returns, and its two branches. |
 | `ApiErrorKind` | type | The union of `error.kind` values. |
 | `CallOptions` | type | The second argument of a call ([CallOptions](/reference/calloptions/)). |
+| `FetchOptions` | type | The options `fetchOptions` takes: `RequestInit` without `method`, `headers`, `body` and `signal` ([Cookies and other fetch options](/guide/defining-endpoints/#cookies-and-other-fetch-options)). |
 | `PaginateOptions` | type | `next`, `maxPages`, and any `CallOptions`. |
 | `Pollable` | type | What `poll` and `pollUntil` take as an endpoint: `(params, options?) => Promise<Result>`, which every endpoint and operation is. |
 | `PollOptions`, `PollUntilOptions` | type | The options of `poll` and `pollUntil` ([poll() and pollUntil() options](/reference/polling-options/)). |

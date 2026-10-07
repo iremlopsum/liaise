@@ -48,12 +48,19 @@ export const TRACING_HEADERS: ReadonlySet<string> = new Set([
 ])
 
 /**
- * The share key: what this request would put on the wire. Two requests with
+ * The share key: what this request would put on the wire (the fetch options included). Two requests with
  * the same key are byte-for-byte the same to the server, so sharing them is
  * safe; anything that differs never shares. `null` means the body can't be
  * compared cheaply and safely (an upload), so the call is never shared.
  */
-export function requestKey(name: string, method: string, url: string, headers: Headers, body: unknown): string | null {
+export function requestKey(
+  name: string,
+  method: string,
+  url: string,
+  headers: Headers,
+  body: unknown,
+  fetchOptions: Record<string, unknown> = {},
+): string | null {
   // A middleware may assign a plain object or tuples to `ctx.request.headers`
   // (fetch accepts them); only a Headers has forEach.
   const h = headers instanceof Headers ? headers : new Headers(headers as HeadersInit)
@@ -68,7 +75,32 @@ export function requestKey(name: string, method: string, url: string, headers: H
     if (!TRACING_HEADERS.has(key)) pairs.push([key, value])
   })
   pairs.sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0))
-  return JSON.stringify([name, normalizeMethod(method), url, pairs, bodyKey])
+  const optionsKey = fetchOptionsKey(fetchOptions)
+  if (optionsKey === null) return null
+  return JSON.stringify([name, normalizeMethod(method), url, pairs, bodyKey, optionsKey])
+}
+
+/**
+ * The fetch options in the share key (5.2.0): sorted by name, so their order
+ * doesn't matter, with primitive values only. Any other value (an object such
+ * as Next.js's `next`, a class instance, a function, a non-finite number)
+ * can't be compared cheaply and safely, so the call isn't shared: the same
+ * rule as an upload body. `undefined` fields are left out, as fetch ignores
+ * them. Not stableKey: it would add ~650 B to the REST-only build, for a field
+ * whose standard values are all strings and booleans.
+ */
+function fetchOptionsKey(options: Record<string, unknown>): Array<[string, string | number | boolean | null]> | null {
+  const pairs: Array<[string, string | number | boolean | null]> = []
+  for (const key of Object.keys(options).sort()) {
+    const value = options[key]
+    if (value === undefined) continue
+    if (value === null || typeof value === 'string' || typeof value === 'boolean' || (typeof value === 'number' && Number.isFinite(value))) {
+      pairs.push([key, value])
+    } else {
+      return null
+    }
+  }
+  return pairs
 }
 
 /**
