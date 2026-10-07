@@ -158,6 +158,19 @@ describe('fetchOptions on createApi', () => {
     for (const init of inits) expect(init).toMatchObject({ credentials: 'include', cache: 'no-store' })
   })
 
+  it('a middleware outside retryMiddleware: every attempt sends its change', async () => {
+    let n = 0
+    const { inits } = recorder(() => (n++ === 0 ? json({}, 503) : json()))
+    vi.spyOn(Math, 'random').mockReturnValue(0)
+    const fresh = defineRequest<{ ok: boolean }>()({ method: 'GET', path: '/users/:id', fetchOptions: { cache: 'no-store' } })
+    const include: Middleware = async (ctx, next) => { ctx.request.fetchOptions = { ...ctx.request.fetchOptions, credentials: 'include' }; return next() }
+    const api = createApi({ baseUrl: 'https://x.test', requests: { fresh }, middleware: [include, retryMiddleware(1)] })
+    const { error } = await api.fresh({ id: '1' })
+    expect(error).toBeNull()
+    expect(inits).toHaveLength(2)
+    for (const init of inits) expect(init).toMatchObject({ credentials: 'include', cache: 'no-store' })
+  })
+
   it('paginate passes them to every page', async () => {
     const { inits } = recorder(() => json({ next: inits.length < 2 ? 'b' : null }))
     const list = defineRequest<{ next: string | null }, { cursor?: string }>()({ method: 'GET', path: '/items' })
