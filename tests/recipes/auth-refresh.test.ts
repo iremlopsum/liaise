@@ -20,7 +20,7 @@ const mock = mockFetch({
 mock.install()
 afterEach(() => mock.restore())
 
-// readme:auth-refresh:start
+// example:auth-refresh:start
 import { createApi, defineRequest, type Middleware } from 'liaise'
 
 type Tokens = { access: string; refresh: string }
@@ -59,7 +59,7 @@ const api = createApi({
     getOrders: defineRequest<Order[]>()({ method: 'GET', path: '/orders' }),
   },
 })
-// readme:auth-refresh:end
+// example:auth-refresh:end
 
 it('five calls that all get a 401 cause one refresh, and all five succeed', async () => {
   const results = await Promise.all(Array.from({ length: 5 }, () => api.getOrders()))

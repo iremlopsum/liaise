@@ -1,0 +1,31 @@
+---
+title: "Add an auth header and refresh the token on a 401"
+description: "One middleware adds the access token to every call, and when several calls get a 401 at once, they all wait for a single token refresh."
+order: 1
+---
+Use this when your API takes a short-lived access token, and you get a new one by sending a refresh token. Say five calls are in flight when the access token expires: all five get a 401 at the same moment. If each one refreshes on its own and your refresh tokens rotate, the first refresh uses up the refresh token the other four send, and the user is logged out.
+
+The fix is one middleware on the client. It adds the token to every call, and on a 401 it refreshes the token and sends the call again. `share: true` on the refresh endpoint makes every call that needs a refresh wait for the same one. If middleware is new to you, [Writing middleware](/guide/writing-middleware/) covers the basics.
+
+Like every recipe in this section, the code below runs against a test, so you can paste it as it is.
+
+<Example name="auth-refresh" />
+
+`tokens` is a module variable here. Keep the tokens wherever your app keeps them: `auth` only reads them and replaces them.
+
+## Why it works
+
+Five calls that all get a 401 at once go through `auth` like this:
+
+1. Each call goes out with the expired token, and each gets a 401.
+2. Each call sees that `tokens.access` is still the token it was sent with, so each calls `api.refresh` with the same refresh token. Those five calls would send the identical request, so `share: true` sends it once and gives every caller the new tokens.
+3. Each call sets the new token and calls `next()` again. All five succeed, and the server saw one refresh.
+
+The `sentWith` check covers a call whose 401 comes back after the refresh has finished. That call finds a different `tokens.access` from the one it was sent with, so it skips the refresh and tries again with the new token.
+
+- **The `requestName` check sends the refresh call straight to `next()`.** `auth` runs on every call through the client, the refresh included. Without the check, the refresh would go out with the expired token, and a 401 from it would start another refresh.
+- **If the refresh fails, `auth` returns the original 401.** The caller gets an `'http'` error with status 401, and can send the user to log in.
+- **Calling `next()` a second time sends the call again**, through every middleware after `auth`, with the new header. A middleware may call `next()` more than once.
+- **A refresh is the write that `share` suits.** `share` turns identical writes made at the same moment into one, and five identical refreshes should be one. For most other writes, think first ([When not to share](/guide/sharing-identical-requests/#when-not-to-share)).
+
+**Next:** [Search as you type](/recipes/search-as-you-type/) keeps a search box's results in step with what the user typed last.

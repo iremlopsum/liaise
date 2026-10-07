@@ -1,0 +1,138 @@
+---
+import '../styles/global.css'
+import Header from '../components/Header.astro'
+import { url } from '../url'
+interface Props { title?: string; description?: string; active?: 'docs' | 'playground' | 'compare'; noindex?: boolean }
+const { title, description, active, noindex } = Astro.props
+const desc = description ?? 'Type-safe REST and GraphQL on plain fetch. Never throws. Zero dependencies.'
+const fullTitle = title ? `${title} · liaise` : 'liaise — Your API calls, minus the surprises.'
+// Absolute, and under the base: Astro.url.pathname already carries /liaise.
+const canonical = new URL(Astro.url.pathname, Astro.site).href
+const ogImage = new URL(`${import.meta.env.BASE_URL.replace(/\/?$/, '/')}og.png`, Astro.site).href
+---
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="description" content={desc} />
+    {noindex ? <meta name="robots" content="noindex" /> : <link rel="canonical" href={canonical} />}
+    <title>{fullTitle}</title>
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="liaise" />
+    <meta property="og:title" content={fullTitle} />
+    <meta property="og:description" content={desc} />
+    {!noindex && <meta property="og:url" content={canonical} />}
+    <meta property="og:image" content={ogImage} />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta property="og:image:alt" content="liaise: Your API calls, minus the surprises." />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content={fullTitle} />
+    <meta name="twitter:description" content={desc} />
+    <meta name="twitter:image" content={ogImage} />
+    <script is:inline>
+      // Apply the theme before first paint, so nothing flashes. Keys start with liaise: because
+      // iremlopsum.github.io, and so its storage, is shared with the owner's other sites.
+      try {
+        const t = localStorage.getItem('liaise:theme')
+        if (t === 'dark' || (!t && matchMedia('(prefers-color-scheme: dark)').matches)) document.documentElement.classList.add('dark')
+      } catch {}
+    </script>
+  </head>
+  <body class="bg-white font-sans text-gray-950 dark:bg-gray-950 dark:text-white">
+    <Header active={active} />
+    <slot />
+
+    <!-- Search -->
+    <dialog id="search" data-base={import.meta.env.BASE_URL} class="m-0 h-full max-h-none w-full max-w-none bg-transparent p-4 backdrop:bg-gray-950/25 backdrop:backdrop-blur-sm sm:p-6 md:pt-[12vh] dark:backdrop:bg-gray-950/60">
+      <div class="mx-auto w-full max-w-xl overflow-hidden rounded-2xl bg-white shadow-2xl ring-1 ring-gray-950/10 dark:bg-gray-900 dark:ring-white/10">
+        <div class="flex items-center gap-3 border-b border-gray-950/5 px-4 dark:border-white/10">
+          <svg viewBox="0 0 16 16" class="size-4 fill-gray-400"><path fill-rule="evenodd" d="M7 2a5 5 0 1 0 2.95 9.04l2.5 2.5a.75.75 0 1 0 1.06-1.06l-2.5-2.5A5 5 0 0 0 7 2ZM3.5 7a3.5 3.5 0 1 1 7 0 3.5 3.5 0 0 1-7 0Z"/></svg>
+          <input id="search-input" type="search" autocomplete="off" spellcheck="false" placeholder="Search the docs" class="h-12 w-full bg-transparent text-[15px] text-gray-950 outline-none dark:text-white placeholder:text-gray-400 [&::-webkit-search-cancel-button]:hidden" />
+          <kbd class="rounded bg-gray-950/5 px-1.5 py-0.5 font-sans text-[11px] text-gray-500 dark:bg-white/10 dark:text-gray-400">esc</kbd>
+        </div>
+        <ul id="search-results" class="max-h-[60vh] overflow-y-auto p-2 empty:hidden"></ul>
+        <p id="search-empty" class="hidden px-4 py-10 text-center text-sm text-gray-500 dark:text-gray-400">No results.</p>
+      </div>
+    </dialog>
+
+    <script is:inline type="module">
+      const root = document.documentElement
+
+      // Theme
+      for (const b of document.querySelectorAll('[data-theme-toggle]'))
+        b.addEventListener('click', () => {
+          const dark = root.classList.toggle('dark')
+          try { localStorage.setItem('liaise:theme', dark ? 'dark' : 'light') } catch {}
+          window.dispatchEvent(new CustomEvent('themechange', { detail: { dark } }))
+        })
+
+      // Copy buttons on code blocks
+      for (const pre of document.querySelectorAll('.doc-prose pre')) {
+        const wrap = document.createElement('div'); wrap.className = 'code-wrap'
+        pre.replaceWith(wrap); wrap.append(pre)
+        const btn = document.createElement('button'); btn.className = 'code-copy'; btn.textContent = 'Copy'
+        btn.addEventListener('click', async () => {
+          await navigator.clipboard.writeText(pre.innerText); btn.textContent = 'Copied'
+          setTimeout(() => (btn.textContent = 'Copy'), 1200)
+        })
+        wrap.append(btn)
+      }
+
+      // Search (Pagefind index built at deploy time; works on any static host)
+      const dialog = document.getElementById('search')
+      const input = document.getElementById('search-input')
+      const list = document.getElementById('search-results')
+      const empty = document.getElementById('search-empty')
+      let pagefind, active = -1
+      const open = async () => {
+        dialog.showModal(); input.select()
+        if (!pagefind) {
+          pagefind = await import(/* @vite-ignore */ `${dialog.dataset.base}pagefind/pagefind.js`).catch(() => null)
+          await pagefind?.options({ baseUrl: dialog.dataset.base })
+        }
+      }
+      for (const b of document.querySelectorAll('[data-search-open]')) b.addEventListener('click', open)
+      window.addEventListener('keydown', (e) => {
+        if ((e.key === 'k' && (e.metaKey || e.ctrlKey)) || (e.key === '/' && !/INPUT|TEXTAREA/.test(document.activeElement?.tagName) && !document.activeElement?.closest('.monaco-editor'))) {
+          e.preventDefault(); open()
+        }
+      })
+      dialog.addEventListener('click', (e) => { if (e.target === dialog) dialog.close() })
+      const items = () => [...list.querySelectorAll('a')]
+      const highlight = (i) => {
+        const all = items(); active = Math.max(0, Math.min(i, all.length - 1))
+        all.forEach((a, j) => a.dataset.active = String(j === active))
+        all[active]?.scrollIntoView({ block: 'nearest' })
+      }
+      input.addEventListener('keydown', (e) => {
+        if (e.key === 'ArrowDown') { e.preventDefault(); highlight(active + 1) }
+        if (e.key === 'ArrowUp') { e.preventDefault(); highlight(active - 1) }
+        if (e.key === 'Enter') { const a = items()[active]; if (a) location.href = a.href }
+      })
+      const esc = (s) => s.replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' })[c])
+      let seq = 0
+      input.addEventListener('input', async () => {
+        const q = input.value.trim(), mine = ++seq
+        if (!q || !pagefind) { list.innerHTML = ''; empty.classList.add('hidden'); return }
+        const res = await pagefind.debouncedSearch(q, {}, 120)
+        if (!res || mine !== seq) return
+        const pages = await Promise.all(res.results.slice(0, 6).map((r) => r.data()))
+        empty.classList.toggle('hidden', pages.length > 0)
+        list.innerHTML = pages.map((p) => {
+          const group = p.meta.group ? `<span class="text-[11px] font-medium uppercase tracking-wide text-gray-400">${esc(p.meta.group)}</span>` : ''
+          const subs = (p.sub_results || []).filter((s) => s.url !== p.url).slice(0, 3)
+          const row = (href, title, excerpt, sub) => `
+            <li><a href="${href}" class="group block rounded-lg px-3 py-2.5 data-[active=true]:bg-accent-soft hover:bg-gray-950/[0.03] dark:hover:bg-white/5 ${sub ? 'ml-4 border-l border-gray-950/10 rounded-l-none dark:border-white/10' : ''}">
+              ${sub ? '' : group}
+              <span class="block text-sm font-medium text-gray-950 group-data-[active=true]:text-accent dark:text-white">${esc(title)}</span>
+              <span class="mt-0.5 line-clamp-2 block text-[13px] text-gray-500 dark:text-gray-400">${excerpt}</span>
+            </a></li>`
+          return row(p.url, p.meta.title, p.excerpt, false) + subs.map((s) => row(s.url, s.title, s.excerpt, true)).join('')
+        }).join('')
+        highlight(0)
+      })
+    </script>
+  </body>
+</html>

@@ -4,15 +4,20 @@ import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 
-const script = join(__dirname, '..', 'scripts', 'check-readme.mjs')
+const script = join(__dirname, '..', 'scripts', 'check-docs.mjs')
 let dir: string
 
-function run(readme: string, tests: Record<string, string>) {
+function run(readme: string, tests: Record<string, string>, pages: Record<string, string> = {}) {
   writeFileSync(join(dir, 'README.md'), readme)
   mkdirSync(join(dir, 'tests', 'recipes'), { recursive: true })
   for (const [name, text] of Object.entries(tests)) writeFileSync(join(dir, 'tests', name), text)
+  mkdirSync(join(dir, 'site'), { recursive: true })
+  for (const [name, text] of Object.entries(pages)) {
+    mkdirSync(join(dir, 'site', name, '..'), { recursive: true })
+    writeFileSync(join(dir, 'site', name), text)
+  }
   try {
-    const out = execFileSync('node', [script, '--readme', join(dir, 'README.md'), '--tests', join(dir, 'tests')], { encoding: 'utf8' })
+    const out = execFileSync('node', [script, '--readme', join(dir, 'README.md'), '--tests', join(dir, 'tests'), '--site', join(dir, 'site')], { encoding: 'utf8' })
     return { code: 0, out }
   } catch (e: any) {
     return { code: e.status as number, out: String(e.stdout) + String(e.stderr) }
@@ -20,12 +25,12 @@ function run(readme: string, tests: Record<string, string>) {
 }
 
 const block = (name: string, code: string) => `<!-- tested: ${name} -->\n\n\`\`\`ts\n${code}\n\`\`\`\n`
-const region = (name: string, code: string) => `// readme:${name}:start\n${code}\n// readme:${name}:end\n`
+const region = (name: string, code: string) => `// example:${name}:start\n${code}\n// example:${name}:end\n`
 
-beforeEach(() => { dir = mkdtempSync(join(tmpdir(), 'check-readme-')) })
+beforeEach(() => { dir = mkdtempSync(join(tmpdir(), 'check-docs-')) })
 afterEach(() => { rmSync(dir, { recursive: true, force: true }) })
 
-describe('check-readme', () => {
+describe('check-docs', () => {
   it('passes when every tested block equals its region', () => {
     const r = run(block('a', 'const x = 1'), { 'recipes/a.test.ts': region('a', 'const x = 1') })
     expect(r.code).toBe(0)
@@ -53,11 +58,11 @@ describe('check-readme', () => {
   it('reports a test region with no README block', () => {
     const r = run('# nothing\n', { 'recipes/a.test.ts': region('orphan', 'x()') })
     expect(r.code).toBe(1)
-    expect(r.out).toMatch(/"orphan".*not in the README/)
+    expect(r.out).toMatch(/"orphan".*is used by neither the README nor a page/)
   })
 
   it('reports a start marker with no end marker', () => {
-    const r = run(block('a', 'x()'), { 'recipes/a.test.ts': '// readme:a' + ':start\nx()\n' })
+    const r = run(block('a', 'x()'), { 'recipes/a.test.ts': '// example:a' + ':start\nx()\n' })
     expect(r.code).toBe(1)
     expect(r.out).toMatch(/"a".*no matching end/)
   })
@@ -83,5 +88,23 @@ describe('check-readme', () => {
   it('ignores anchors inside code blocks', () => {
     const r = run('## A\n\n```md\n[x](#not-a-real-link)\n```\n', {})
     expect(r.code).toBe(0)
+  })
+
+  it('accepts a region used only by a site page', () => {
+    const r = run('# nothing\n', { 'recipes/a.test.ts': region('only-site', 'x()') }, { 'guide/a.mdx': '<Example name="only-site" />\n' })
+    expect(r.code).toBe(0)
+    expect(r.out).toMatch(/1 site include/)
+  })
+
+  it('reports a site include naming no region', () => {
+    const r = run('# nothing\n', {}, { 'guide/a.mdx': 'Text\n\n<Example name="ghost" />\n' })
+    expect(r.code).toBe(1)
+    expect(r.out).toMatch(/guide\/a\.mdx.*"ghost".*no test region/s)
+  })
+
+  it('still compares README copies byte-for-byte (whitespace-normalised)', () => {
+    const r = run(block('a', 'const x = 1'), { 'recipes/a.test.ts': region('a', 'const x = 2') }, {})
+    expect(r.code).toBe(1)
+    expect(r.out).toMatch(/"a".*line 1/s)
   })
 })

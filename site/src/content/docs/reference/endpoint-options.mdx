@@ -1,0 +1,23 @@
+---
+title: "Endpoint options"
+description: "Every option a REST endpoint takes in defineRequest or new Request, with its type, its default and what it does."
+order: 3
+---
+This page lists every option a REST endpoint takes. Look here when you write a `defineRequest` or a `new Request` and need an option's exact type or default.
+
+`defineRequest<T>()(config)` and `new Request(config)` both take a `RequestConfig`. [Defining endpoints](/guide/defining-endpoints/) explains their type arguments.
+
+| Option | Type | Default | What it does |
+| ------ | ---- | ------- | ------------ |
+| `method` | `'GET' \| 'POST' \| 'PUT' \| 'PATCH' \| 'DELETE'` | required | The HTTP method. |
+| `path` | `string` | required | The path after `baseUrl`. Each `:name` is filled from the params ([Path params](/guide/defining-endpoints/#path-params)). A `#` is refused ([URL fragments](/reference/behaviour-in-detail/#url-fragments)). |
+| `middleware` | `Middleware[]` | — | Runs on every call to this endpoint, after client middleware and before call middleware. |
+| `headers` | `HeadersInit` | — | Sent with every call to this endpoint. Replaces the client's value for the same header. |
+| `responseType` | `'json' \| 'text' \| 'blob' \| 'arrayBuffer' \| 'formData' \| 'none'` | `'json'` | How the response body is read ([Reading responses](/guide/reading-responses/)). |
+| `schema` | `StandardSchemaV1` | — | Checks a 2xx body, and `data` becomes the schema's output. With `defineRequest`, it also supplies the response type ([Validating responses](/guide/validating-responses/)). |
+| `dedupe` | `boolean` | `false` | A new call cancels the one still running ([Drop stale calls with dedupe](/guide/cancelling-deadlines-and-stale-requests/#drop-stale-calls-with-dedupe)). |
+| `share` | `boolean` | `false` | Calls that would send the identical request share one network request ([Sharing identical requests](/guide/sharing-identical-requests/)). Can't be combined with `dedupe`: `createApi` throws if both are set. |
+| `bodyAs` | `'query' \| 'body'` | `'query'` for `GET` and `DELETE`, `'body'` for the rest | Where the params that aren't in the path go ([Query string or body](/guide/defining-endpoints/#query-string-or-body)). |
+| `timeout` | `number` (ms) | the client's `timeout` | One deadline for the whole call, retries included. Replaces the client's, and `0` turns it off ([Set a deadline with timeout](/guide/cancelling-deadlines-and-stale-requests/#set-a-deadline-with-timeout)). Under `share`, it is also the shared request's deadline ([Share key and refcount](/reference/behaviour-in-detail/#share-key-and-refcount)). |
+
+**Next:** [Operation options](/reference/operation-options/) lists what one GraphQL operation can set.

@@ -1,6 +1,7 @@
 node_modules
 dist
 *.tsbuildinfo
+.DS_Store
 .superpowers
 .worktrees
 BACKLOG.md
@@ -9,5 +10,5 @@ BACKLOG.md
 # these from disk, so ignoring them costs nothing operationally.
 /CLAUDE.md
 /architecture.md
-docs/
+/docs/
 .claude/

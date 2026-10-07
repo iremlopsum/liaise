@@ -8,7 +8,7 @@ let mock: ReturnType<typeof mockFetch>
 beforeEach(() => Sentry.captureException.mockClear())
 afterEach(() => mock.restore())
 
-// readme:report-errors:start
+// example:report-errors:start
 import { createApi } from 'liaise'
 
 const api = createApi({
@@ -22,7 +22,7 @@ const api = createApi({
     })
   },
 })
-// readme:report-errors:end
+// example:report-errors:end
 
 const serve = (r: Response | (() => Response)) => { mock = mockFetch({ 'GET /api/users/:id': r }); mock.install() }
 

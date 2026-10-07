@@ -1,0 +1,57 @@
+---
+title: "Testing your code"
+description: "liaise/testing gives you a fetch stub that matches routes, so your tests run liaise's real pipeline instead of a canned Result."
+order: 12
+---
+This page shows how to test code that calls liaise. Read it when you write unit tests for anything that uses your client.
+
+`liaise/testing` gives you a `fetch` stub that matches routes. Your tests then run the real pipeline, from URL building, headers and body to parsing and your own middleware. A stubbed API method that returns a canned `Result` drifts away from what liaise actually does. The stub needs no test runner, so it works in Vitest, Jest or anything else.
+
+<Example name="testing" />
+
+`api` is your client, created with `baseUrl: '/api'`. Nothing in it changes for the test, because the stub replaces only `fetch`. The route captures `id` from the URL, so `data` is `{ id: '42', name: 'Ada' }`, and `mock.restore()` puts the real `fetch` back.
+
+## Routes
+
+- **Routes are keyed as `"METHOD /path"`.** Each `:token` segment is captured and passed to a route function as `{ params, request }`.
+- **A route value is a `Response`, a route function, or an array of either.** `jsonResponse` builds a `Response` with a JSON body, or you can build your own.
+- **An array is a sequence.** Each matching call takes the next entry, and the last entry repeats once the others are used up. That suits "fail twice, then succeed":
+
+  ```ts
+  const mock = mockFetch({
+    'GET /api/flaky': [jsonResponse(null, { status: 503 }), jsonResponse({ ok: true })],
+  })
+  ```
+
+- **`mock.calls` records every request** as `{ method, url, headers, body }`. `mock.callCount('GET /api/users/:id')` and `mock.lastCall(...)` take the same `"METHOD /path"` keys as the routes.
+
+## Unmatched routes
+
+A request that matches no route makes the stub throw, so a typo in a path can't pass quietly. liaise catches every `fetch` rejection, so your code sees an ordinary `Result` with `kind: 'network'` and the `Error` in `error.body`. Its message names the method, the URL and every route you defined. Assert on the result, because the call itself never rejects.
+
+```ts
+const r = await api.getUser({ id: '42' })   // routes only define 'GET /api/user/:id'
+expect(r.error?.kind).toBe('network')
+expect(String(r.error?.body)).toMatch(/no route matched GET \/api\/users\/42/)
+```
+
+`api` is a client created with `baseUrl: '/api'`.
+
+An empty array for a route behaves the same way, with a descriptive `Error` in `error.body`.
+
+## Stubbing a Result directly
+
+To stub at the `Result` level instead of the `fetch` level, `successResult(data)` and `errorResult(status, body)` build a well-formed `Result`. This uses Vitest's `vi.spyOn`, and any runner's equivalent works the same way:
+
+```ts
+import { successResult, errorResult } from 'liaise/testing'
+
+vi.spyOn(api, 'getUser').mockResolvedValue(successResult({ id: '42', name: 'Ada' }))
+vi.spyOn(api, 'getUser').mockResolvedValue(errorResult(404, { message: 'not found' }))
+```
+
+Stubbing this way skips the real pipeline, so prefer `mockFetch` when you can.
+
+More of the stub's behaviour, such as how it handles a signal, is under [liaise/testing](/reference/liaisetesting/).
+
+**Next:** That's the guide. The recipes put these pieces together for common tasks, starting with [Add an auth header and refresh the token on a 401](/recipes/add-an-auth-header-and-refresh-the-token-on-a-401/).

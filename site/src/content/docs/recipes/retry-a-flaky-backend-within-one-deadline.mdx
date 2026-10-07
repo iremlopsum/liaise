@@ -1,0 +1,24 @@
+---
+title: "Retry a flaky backend within one deadline"
+description: "Retry 5xx responses, rate limits and dropped connections with retryMiddleware, and let one timeout bound every attempt and every wait."
+order: 7
+---
+Use this when a backend sometimes fails with a 5xx, a rate limit or a dropped connection, a second try usually works, and you still want an answer within a fixed time.
+
+Add `retryMiddleware` with a `retryOn` that picks those failures, and give the endpoint a `timeout`. The `timeout` covers every attempt and every wait between them.
+
+<Example name="flaky-backend" />
+
+Against a server that answers a 503, then a 429, then drops the connection, and then sends the report, `api.getReport()` returns the report after four requests. Against a server that answers 404, it returns the 404 after one.
+
+## Why it works
+
+- **`retryOn` picks the failures worth another try.** On its own, `retryMiddleware` retries only 5xx responses. This one adds 429 and dropped connections. Any other 4xx, such as a 404, comes back at once.
+- **A dropped connection is matched by `kind: 'network'`, not by `status: 0`.** A call that timed out or was cancelled has status 0 too, and `retryOn` leaves both alone.
+- **`max: 3` allows three retries**, so up to four attempts. Before each retry it waits a random time, up to a delay that starts at 250 ms and doubles each time. When a response carries a `Retry-After` header, it waits as long as the server asks instead, up to 30 seconds ([RetryOptions](/reference/built-in-middleware-options/#retryoptions)).
+- **`timeout: 3000` is one deadline for the whole call.** If it passes during an attempt or a wait, the call ends with `kind: 'timeout'`. So the caller hears back within three seconds, however many retries are left: with the report, with the last failure once the retries run out, or with a timeout.
+- **The middleware is on the client**, so every endpoint's calls are retried. To retry only some endpoints, list it in their `middleware` instead ([Three levels of settings](/start/how-it-fits-together/#three-levels-of-settings)).
+
+More on both pieces: [Retry failed calls](/guide/retries-caching-and-logging/#retry-failed-calls) and [Set a deadline with timeout](/guide/cancelling-deadlines-and-stale-requests/#set-a-deadline-with-timeout).
+
+**Next:** [Give each attempt its own timeout](/recipes/give-each-attempt-its-own-timeout/) drops an attempt that hangs and starts a fresh one.

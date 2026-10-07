@@ -1,0 +1,68 @@
+---
+title: "Handling errors"
+description: "Every call returns { data, error }, and error.kind says which of six things went wrong, so each failure can get its own handling."
+order: 2
+---
+This page shows what a call gives back when it fails, and how to handle each kind of failure. Read it when you write the code that shows an error to the user or reports it.
+
+Plain `fetch` reports failures three different ways. A 500 resolves like a success, being offline throws, and a hung server never answers. In liaise every call returns `{ data, error }`, and `error.kind` names what went wrong. Nothing is thrown, so there is no `try` to write:
+
+<Example name="handling-errors" />
+
+`show`, `redirectToLogin` and `report` stand for your own code. Each failure reaches its own branch: a 401 goes to the login page, a 500 shows its status, being offline and a hung server each get their own message, and a body that isn't JSON is reported.
+
+## The six kinds
+
+| `kind` | What happened | `status` | What you usually do | Reported to [`onError`](#reporting-errors-with-onerror)? |
+| ------ | ------------- | -------- | ------------------- | ---------------------- |
+| `'http'` | The server answered with a non-2xx status. | The response's status | Handle it by status, or show it | Yes |
+| `'network'` | No response arrived, because you're offline or DNS or CORS failed. Params liaise refuses before sending also land here. | `0` | Show an offline message, or retry | Yes |
+| `'timeout'` | Your [`timeout`](/guide/cancelling-deadlines-and-stale-requests/#set-a-deadline-with-timeout) passed. | `0` | Say it's slow | Yes |
+| `'abort'` | The call was cancelled by your signal, or replaced by a newer [`dedupe`](/guide/cancelling-deadlines-and-stale-requests/#drop-stale-calls-with-dedupe) call. | `0` | Ignore it | **No** |
+| `'parse'` | A 2xx body didn't parse as its `responseType`, or failed your [schema](/guide/validating-responses/). | The response's status | Report it | Yes |
+| `'middleware'` | Your [middleware](/guide/writing-middleware/) threw. | `0` | Fix your code | Yes |
+
+- **Check `error` first.** After `if (error) return`, `data` has your response type, so you never write `data!`.
+- **Branch on `error.kind`, not on `status`.** Four kinds share `status: 0`, and each needs different handling.
+- **A non-2xx response is always `'http'`**, even when its body doesn't parse. liaise checks the status before it reads the body, so a 500 with broken JSON is still a 500, and [`retryMiddleware`](/guide/retries-caching-and-logging/#retry-failed-calls) still retries it.
+- For an endpoint that sends no body, declare `responseType: 'none'`. Widening the type to `| null` doesn't work, because an empty body is a `'parse'` error. See [Reading responses](/guide/reading-responses/).
+- **`response` is for the status and headers.** liaise has already read its body to produce `data` or `error.body`, so `response.json()` throws "Body has already been read". A `Response` you build yourself for `successResult()` in tests keeps its body.
+- Every field of `error` is listed under [`ApiError`](/reference/result-and-apierror/).
+
+## Trying again with retry()
+
+Every `Result` carries `retry()`, which runs the same call again. It goes through all your middleware, so an auth header is set again and logging runs again:
+
+```ts
+const { error, retry } = await api.getUser({ id: '42' })
+
+if (error?.status === 401) {
+  await refreshToken()
+  const second = await retry() // a fresh call through every middleware
+  if (!second.error) show(second.data.name)
+}
+```
+
+`refreshToken` stands for your own token refresh. To retry automatically, use [`retryMiddleware`](/guide/retries-caching-and-logging/#retry-failed-calls).
+
+## Reporting errors with onError
+
+`onError` on `createApi` is one place to send every error to your tracker.
+
+```ts
+const api = createApi({
+  baseUrl: 'https://api.example.com',
+  requests: { getUser },
+  onError: (error) => logToTracker(error),
+})
+```
+
+`logToTracker` stands for your error tracker, such as Sentry.
+
+- It runs once per call, after all your middleware has finished. A call that a retry middleware rescues from a 500 never reaches it. When calls [share](/guide/sharing-identical-requests/) one failed request, it runs once for all of them.
+- It isn't called for `'abort'`, because a cancellation isn't a failure. A `'timeout'` is reported, because it's a deadline you missed.
+- It only watches. The caller gets the same `Result` either way.
+
+[Report errors to Sentry](/recipes/report-errors-to-sentry/) uses `onError` to send unexpected failures to Sentry and skip the expected 4xx.
+
+**Next:** [Sending data](/guide/sending-data/) shows where each param goes: the path, the query string or the body.

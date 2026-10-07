@@ -1,28 +1,17 @@
 // Turns results.json into results.md, and with `--splice <readme>` into the README's comparison block.
 import { readFileSync, writeFileSync } from 'node:fs'
+import { NAMES as names, OVERHEAD, cell } from './cells.mjs'
 
 // Absolute, so links into compare/ also work on npm, which doesn't ship compare/.
 const REPO = 'https://github.com/iremlopsum/liaise/blob/main/compare'
 const START = '<!-- compare:start -->', END = '<!-- compare:end -->'
-const names = ['fetch', 'axios', 'ky', 'ofetch', 'liaise']
-const methodFor = { 'http-500': 'getJson', offline: 'getJson', hang: 'getJson', 'broken-json': 'getJson', 'empty-204': 'getJson',
-  'missing-param': 'getUser', 'search-race': 'search', 'refresh-stampede': 'getWithAuth', deadline: 'getWithDeadline', 'wrong-shape': 'getValidated' }
-const timingRows = new Set(['hang', 'deadline'])
 
 const results = JSON.parse(readFileSync(new URL('./results.json', import.meta.url), 'utf8'))
 const esc = s => String(s).replaceAll('|', '\\|')
 const table = (head, rows) => [`| ${head.map(esc).join(' | ')} |`, `| ${head.map((_, i) => (i ? ':--' : '---')).join(' | ')} |`, ...rows.map(r => `| ${r.map(esc).join(' | ')} |`)].join('\n')
-const handWritten = n => typeof n === 'string' && /\bhand-written\b/.test(n)
-
-function cell(s, name, variant) {
-  const r = s.results[name]
-  const res = r[variant]
-  const notes = variant === 'configured' ? r.notes : r.defaultNotes
-  let text = res.outcome
-  if (timingRows.has(s.id) && res.outcome !== '—' && !/ after \d/.test(` ${res.outcome}`)) text += `, ${res.ms} ms`
-  return text + (handWritten(notes?.[methodFor[s.id]]) ? '*' : '')
-}
-const outcomes = variant => table(['Scenario', ...names], results.scenarios.map(s => [s.title, ...names.map(n => cell(s, n, variant))]))
+// The table marks a cell that needed hand-written code with `*`.
+const cellText = (s, name, variant) => { const c = cell(s, name, variant); return c.text + (c.kind === 'code' ? '*' : '') }
+const outcomes = variant => table(['Scenario', ...names], results.scenarios.map(s => [s.title, ...names.map(n => cellText(s, n, variant))]))
 
 const kb = b => (b / 1024).toFixed(1)
 const sizeNames = [...names, 'liaise + retryMiddleware']
@@ -41,7 +30,7 @@ function liaiseDefaultSentence() {
   return `Out of the box, liaise ${parts.join(' and ')}. See Table B in [compare/results.md](${REPO}/results.md).`
 }
 const fmt = x => `${x.median.toLocaleString('en-US')} (${x.min.toLocaleString('en-US')}–${x.max.toLocaleString('en-US')})`
-const overheadTable = () => table(['Library', 'Sequential', 'Concurrent (50 in flight)'], names.map(n => [n, fmt(results.overhead[n].sequential), fmt(results.overhead[n].concurrent)]))
+const overheadTable = () => table(['Library', 'Sequential', `Concurrent (${OVERHEAD.inFlight} in flight)`], names.map(n => [n, fmt(results.overhead[n].sequential), fmt(results.overhead[n].concurrent)]))
 const overheadLine = () => `Request overhead on localhost, sequential (median requests per second): ${names.map(n => `${n} ${results.overhead[n].sequential.median.toLocaleString('en-US')}`).join(', ')}.`
 
 function notesSection() {
@@ -98,7 +87,7 @@ fetch is built into the runtime; its row is the call site only, the floor rather
 
 ## Table D. Requests per second on localhost
 
-Median (min–max) of 10 interleaved rounds of 2,000 calls each, after 2,000 warm-up calls per library. ${meta.overheadNote}. Differences under about 5% are noise.
+Median (min–max) of ${OVERHEAD.rounds} interleaved rounds of ${OVERHEAD.calls.toLocaleString('en-US')} calls each, after ${OVERHEAD.warmup.toLocaleString('en-US')} warm-up calls per library. ${meta.overheadNote}. Differences under about ${OVERHEAD.noise * 100}% are noise.
 
 ${overheadTable()}
 

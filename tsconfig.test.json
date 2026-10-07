@@ -7,7 +7,8 @@
     "paths": {
       "liaise": ["./src/index.ts"],
       "liaise/middleware": ["./src/built-in-middleware.ts"],
-      "liaise/testing": ["./src/testing.ts"]
+      "liaise/testing": ["./src/testing.ts"],
+      "zod": ["./tests/helpers/zod.ts"]
     }
   },
   "include": ["src/**/*.ts", "tests/**/*.ts"],

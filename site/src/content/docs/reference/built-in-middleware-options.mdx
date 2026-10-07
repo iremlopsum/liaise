@@ -1,0 +1,66 @@
+---
+title: "Built-in middleware options"
+description: "Every option of retryMiddleware, cacheMiddleware and logging, with its type, its default and what it does."
+order: 9
+---
+This page lists the options of the middleware in `liaise/middleware`, and of the clients' `log` option. Look here when you tune retries, the cache or logging. [Retries, caching and logging](/guide/retries-caching-and-logging/) shows when to use each one.
+
+## RetryOptions
+
+`retryMiddleware(options)` takes a `RetryOptions`. `retryMiddleware(n)` is short for `retryMiddleware({ max: n })`, and `retryMiddleware()` means `{ max: 3 }`.
+
+| Option | Type | Default | What it does |
+| ------ | ---- | ------- | ------------ |
+| `max` | `number` | `3` | Retries after the first attempt. `max: 2` means up to 3 calls in all. |
+| `delay` | `'exponential' \| 'linear' \| (attempt: number) => number` | `'exponential'` | The wait before each retry. Exponential is `baseDelay * 2^(attempt-1)` and linear is `baseDelay * attempt`. A function gets the 1-based attempt and returns milliseconds. If it throws or returns `NaN` or an infinite number, the exponential wait is used, and a negative wait counts as `0`. |
+| `baseDelay` | `number` (ms) | `250` | The first wait, before jitter and `Retry-After`. |
+| `maxDelay` | `number` (ms) | `30000` | The longest any wait can be, a `Retry-After` value included. `Infinity` means no cap. |
+| `jitter` | `boolean` | `true` | Waits a random time between 0 and the computed delay, so many clients don't retry at the same moment. Never applied to a `Retry-After` value. |
+| `respectRetryAfter` | `boolean` | `true` | Uses the server's `Retry-After` header, in seconds or as a date, in place of the computed wait. `maxDelay` still caps it. A value it can't read is ignored. |
+| `retryOn` | `(result: Result<unknown>, attempt: number) => boolean` | `r => (r.error?.status ?? 0) >= 500` | Whether to retry. It gets the 1-based number of the attempt it would start, and is called even once `max` is reached. If it throws, the call isn't retried. |
+| `onRetry` | `(info: RetryInfo) => void` | — | Called before each wait. Its return value is ignored, and if it throws, the call goes on. |
+
+The default `retryOn` retries only a 5xx. A 4xx, a 429 and a network error come back as they are, unless your `retryOn` says otherwise ([Retry failed calls](/guide/retries-caching-and-logging/#retry-failed-calls)). A cancel or a deadline during a wait ends the call with `kind: 'abort'` or `'timeout'`.
+
+`RetryInfo`, the argument to `onRetry`:
+
+| Field | What it holds |
+| ----- | ------------- |
+| `attempt` | The retry about to run, counting from 1. |
+| `max` | The configured `max`. |
+| `delay` | The wait about to start, in milliseconds, after jitter and `Retry-After`. |
+| `result` | The `Result` that caused this retry. |
+
+## Cache options
+
+`cacheMiddleware(options)` returns a middleware with a `clear()` method, typed `CacheMiddleware`. Each call makes its own store.
+
+| Option | Type | Default | What it does |
+| ------ | ---- | ------- | ------------ |
+| `ttl` | `number` (ms) | `300000` (5 minutes) | How long an entry is served. An expired entry is removed when it is next read. |
+| `maxSize` | `number` | `50` | How many entries the store keeps. When it is full, the oldest entry is dropped. |
+| `debug` | `boolean` | `false` | Logs `[liaise cache] HIT` or `MISS`, with the endpoint and its params, to the console. |
+
+Only successes are stored. `clear()` empties the store, and passing the middleware in `skipMiddleware` skips it for one call ([Cache repeated reads](/guide/retries-caching-and-logging/#cache-repeated-reads)). What goes into the key is under [Cache key](/reference/behaviour-in-detail/#cache-key).
+
+## Log options
+
+The `log` option of both clients takes a boolean or a `LogOptions`, and `logMiddleware(options)` takes a `LogOptions`. `log: true` and a bare `logMiddleware` mean `{ enabled: true, data: false }`. With `log` left out or `false`, nothing is logged.
+
+| Option | Type | Default | What it does |
+| ------ | ---- | ------- | ------------ |
+| `enabled` | `boolean` | `true` | Turns logging on or off. With `false`, `log` does nothing and costs nothing, and `logMiddleware` passes every call straight through. |
+| `data` | `boolean` | `false` | Also prints each call's data, or its `error.body` on failure. An object or array goes to `console.table`, anything else to `console.log`, which is also used where `console.table` is missing. |
+
+Each call logs one line when it starts and one when it ends:
+
+```text
+[liaise] → <method> <endpoint> <url>
+[liaise] ← <endpoint> OK (<ms>ms)
+[liaise] ← <endpoint> ERROR <status> (<ms>ms)
+[liaise] ← <endpoint> OK (<ms>ms, shared)
+```
+
+The time covers everything that runs inside the logger. For `log` that is the whole call, and for `logMiddleware` it is the middleware after it and the request. An error with no response logs status `0`. Either end line ends in `, shared` when the call joined a [shared](/guide/sharing-identical-requests/) request. A console that throws never fails the call.
+
+**Next:** [liaise/testing](/reference/liaisetesting/) lists the test helpers and how the stub behaves.

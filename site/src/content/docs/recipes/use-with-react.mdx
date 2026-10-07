@@ -1,0 +1,33 @@
+---
+title: "Use with React"
+description: "Load data in useEffect and cancel the call in the effect's cleanup, so an answer for an old id or an unmounted component never reaches state."
+order: 4
+---
+Use this when a component loads data in `useEffect` without a query library. If the component unmounts, or its `id` changes, before the answer arrives, the old call still finishes, and without a cleanup it writes its answer into state.
+
+Cancel the call in the effect's cleanup, and skip the `'abort'` it ends with. This hook uses React's `useEffect` and `useState`, imported from `react`. `api` and `User` are from [Quick start](/start/quick-start/).
+
+<Example name="react-effect" />
+
+A component reads the three states the hook returns:
+
+```tsx
+function Profile({ id }: { id: string }) {
+  const { user, failed } = useUser(id)
+  if (failed) return <p>Couldn't load the profile.</p>
+  if (!user) return <p>Loading…</p>
+  return <h1>{user.name}</h1>
+}
+```
+
+## Why it works
+
+React runs an effect's cleanup before it runs the effect again with a new `id`, and once more when the component unmounts. The cleanup aborts that run's controller, so its call ends with `kind: 'abort'`, and the `.then` returns before `setState`. Only the call for the current `id` can write to state, so a fast navigation never writes stale data into a component that has moved on.
+
+- **In development, Strict Mode runs one extra setup and cleanup** before the first real setup ([`useEffect`](https://react.dev/reference/react/useEffect)). The first call is cancelled and skipped like any other, and the second one loads the user.
+- **A cancelled call isn't reported to `onError`**, so leaving a page never reaches your error tracker.
+- **Every other failure sets `{ failed: true }`.** Keep `error` in state instead if the component needs to tell a 404 from being offline ([Handling errors](/guide/handling-errors/)).
+
+For caching, refetching and sharing data between components, use [TanStack Query with liaise](/recipes/use-with-tanstack-query/). TanStack aborts the query's signal when the query is no longer needed, so you don't write the cleanup yourself.
+
+**Next:** [Load the current user into a store](/recipes/load-the-current-user-into-a-store/) stops several components from each asking for the same user.

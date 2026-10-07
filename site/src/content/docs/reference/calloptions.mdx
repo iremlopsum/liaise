@@ -1,0 +1,24 @@
+---
+title: "CallOptions"
+description: "The options one call takes as its second argument, with their types and defaults."
+order: 5
+---
+This page lists the options you can pass to a single call, as its second argument: `api.getUser(params, options)`. Look here when one call needs its own headers, middleware, signal or deadline.
+
+GraphQL calls take the same options. [`paginate`](/guide/pagination/) takes them too, and applies them to every page.
+
+| Option | Type | Default | What it does |
+| ------ | ---- | ------- | ------------ |
+| `middleware` | `Middleware[]` | — | Runs after the client's and the endpoint's middleware. Under `share`, what it changes in the request is part of what is compared. |
+| `skipMiddleware` | `Middleware[]` | — | Middleware to leave out of this call, matched by reference ([Skipping a middleware for one call](/guide/writing-middleware/#skipping-a-middleware-for-one-call)). |
+| `headers` | `HeadersInit` | — | Replaces the client's and the endpoint's value for the same header. Under `share` they are part of what is compared, so identical per-call headers share. |
+| `signal` | `AbortSignal` | — | Cancels the call, which ends with `kind: 'abort'`, even while a middleware is stuck ([Cancel with a signal](/guide/cancelling-deadlines-and-stale-requests/#cancel-with-a-signal)). Under `share`, it releases only this caller. |
+| `timeout` | `number` (ms) | the endpoint's `timeout`, else the client's | Replaces the endpoint's and the client's deadline for this call. `0` turns it off. Under `share`, it bounds only this caller's wait ([Share key and refcount](/reference/behaviour-in-detail/#share-key-and-refcount)). |
+
+Every `timeout`, on the client, an endpoint, an operation or a call, is read the same way:
+
+- A fractional value is rounded down to whole milliseconds, with a minimum of 1 ms.
+- A value above the timer limit of 2³¹ − 1 ms is capped there.
+- Zero, a negative number or `NaN` means no deadline.
+
+**Next:** [getHeaders()](/reference/getheaders/) shows the headers an endpoint sends from its configuration.

@@ -1,0 +1,38 @@
+---
+title: "Upgrading, contributing, licence"
+description: "Which version these docs describe, where the docs for older versions are, how to upgrade and contribute, and the licence."
+order: 2
+---
+This page covers the project around the code. It says which version these docs describe and where to find docs for an older one, then how to upgrade, how to contribute, and the licence.
+
+## Which version these docs describe
+
+This site documents the latest published version of liaise, the one shown in the header. It has no pages for older versions. For those, read the README at that version's tag on GitHub:
+
+- **5.0.x:** the [README at 5.0.3](https://github.com/iremlopsum/liaise/blob/v5.0.3/README.md).
+- **4.x**, published as `@iremlopsum/apify`: the [README at 4.4.3](https://github.com/iremlopsum/liaise/blob/v4.4.3/README.md).
+
+Every release in the changelog has a tag, so the README for any other version is at `https://github.com/iremlopsum/liaise/blob/v<version>/README.md`.
+
+## Upgrading
+
+liaise follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html), so a change that can break your code comes in a new major version.
+
+- **[MIGRATION.md](https://github.com/iremlopsum/liaise/blob/main/MIGRATION.md)** says what to change when an upgrade needs it. Only releases that need action appear there. If a version isn't listed, upgrading to it needs no changes.
+- **[CHANGELOG.md](https://github.com/iremlopsum/liaise/blob/main/CHANGELOG.md)** lists what changed in every release. The same notes are on [GitHub Releases](https://github.com/iremlopsum/liaise/releases).
+
+Coming from `@iremlopsum/apify`? That is liaise's old name. Switching takes two steps, listed in [Upgrading to 5.0.0](https://github.com/iremlopsum/liaise/blob/main/MIGRATION.md#upgrading-to-500).
+
+## Contributing
+
+Bug reports, fixes and ideas are welcome. [CONTRIBUTING.md](https://github.com/iremlopsum/liaise/blob/main/CONTRIBUTING.md) explains how to report a bug, run the tests, and the few rules a pull request is checked against.
+
+- **To report a bug**, open a [bug report](https://github.com/iremlopsum/liaise/issues/new?template=bug_report.yml). A small piece of code that shows the problem helps most: the endpoint, the call, what you expected and what you got. If it happens on one runtime only, say which one and which version.
+- **To suggest a feature**, open a [feature request](https://github.com/iremlopsum/liaise/issues/new?template=feature_request.yml) and start with the problem you're trying to solve. liaise stays small on purpose, so a problem that middleware or a few lines of your own code can't solve has the best chance.
+- **A pull request** is checked against a few rules. It adds no runtime dependencies, every public call still returns a `Result` instead of throwing, every fix comes with a test that fails without the fix, and the docs change with the code. CONTRIBUTING.md lists them all, with the commands CI runs.
+
+## Licence
+
+liaise is released under the MIT licence. The full text is in [LICENSE](https://github.com/iremlopsum/liaise/blob/main/LICENSE).
+
+That's the end of the docs. To start building, go to [Quick start](/start/quick-start/). Issues, releases and the code are on [GitHub](https://github.com/iremlopsum/liaise).

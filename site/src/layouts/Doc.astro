@@ -1,0 +1,121 @@
+---
+import type { CollectionEntry } from 'astro:content'
+import Base from './Base.astro'
+import { getNav } from '../nav'
+import pkg from '../../../package.json'
+
+interface Props { entry: CollectionEntry<'docs'>; headings: { depth: number; slug: string; text: string }[] }
+const { entry, headings } = Astro.props
+const { groups, flat } = await getNav()
+const index = flat.findIndex((i) => i.id === entry.id)
+const prev = flat[index - 1]
+const next = flat[index + 1]
+const group = flat[index]?.group
+const toc = headings.filter((h) => h.depth === 2 || h.depth === 3)
+const editUrl = `https://github.com/iremlopsum/liaise/edit/main/site/src/content/docs/${entry.id}${entry.filePath?.endsWith('.mdx') ? '.mdx' : '.md'}`
+---
+<Base title={entry.data.title} description={entry.data.description} active="docs">
+  <div class="mx-auto max-w-[90rem] lg:grid lg:grid-cols-[17rem_minmax(0,1fr)] xl:grid-cols-[17rem_minmax(0,1fr)_15rem]">
+    <!-- Mobile: section menu -->
+    <div class="sticky top-14 z-30 flex items-center gap-2 border-b border-gray-950/5 bg-white/90 px-4 py-2.5 text-sm backdrop-blur lg:hidden dark:border-white/10 dark:bg-gray-950/90">
+      <button data-menu-toggle class="flex items-center gap-2 text-gray-600 dark:text-gray-400">
+        <svg viewBox="0 0 16 16" class="size-4 fill-current"><path d="M2 4.75A.75.75 0 0 1 2.75 4h10.5a.75.75 0 0 1 0 1.5H2.75A.75.75 0 0 1 2 4.75Zm0 3.5a.75.75 0 0 1 .75-.75h10.5a.75.75 0 0 1 0 1.5H2.75A.75.75 0 0 1 2 8.25Zm.75 2.75a.75.75 0 0 0 0 1.5h10.5a.75.75 0 0 0 0-1.5H2.75Z"/></svg>
+        {group}
+      </button>
+      <span class="text-gray-300 dark:text-gray-600">/</span>
+      <span class="truncate font-medium">{entry.data.title}</span>
+    </div>
+
+    <!-- Sidebar -->
+    <aside data-sidebar class="[scrollbar-width:thin] [scrollbar-color:var(--color-gray-200)_transparent] dark:[scrollbar-color:var(--color-gray-800)_transparent] fixed inset-x-0 top-[6.5rem] bottom-0 z-30 hidden overflow-y-auto bg-white px-6 py-8 lg:sticky lg:top-14 lg:block lg:h-[calc(100dvh-3.5rem)] lg:border-r lg:border-gray-950/5 lg:bg-transparent lg:px-8 dark:bg-gray-950 lg:dark:border-white/10 lg:dark:bg-transparent">
+      <nav class="space-y-8">
+        {groups.map((g) => (
+          <div>
+            <h3 class="text-[13px] font-semibold tracking-tight text-gray-950 dark:text-white">{g.label}</h3>
+            <ul class="mt-3 space-y-0.5 border-l border-gray-950/[0.07] dark:border-white/10">
+              {g.items.map((i) => (
+                <li>
+                  <a
+                    href={i.href}
+                    aria-current={i.id === entry.id ? 'page' : undefined}
+                    class:list={[
+                      '-ml-px block border-l py-1 pl-4 text-[13.5px] leading-5 transition-colors',
+                      i.id === entry.id
+                        ? 'border-accent font-medium text-accent'
+                        : 'border-transparent text-gray-600 hover:border-gray-400 hover:text-gray-950 dark:text-gray-400 dark:hover:border-gray-500 dark:hover:text-white',
+                    ]}
+                  >{i.title}</a>
+                </li>
+              ))}
+            </ul>
+          </div>
+        ))}
+      </nav>
+    </aside>
+
+    <!-- Article -->
+    <main class="min-w-0 px-4 pt-10 pb-24 sm:px-6 lg:px-12 xl:px-16">
+      <article class="mx-auto max-w-[46rem]" data-pagefind-body data-pagefind-meta={`group:${group}`}>
+        <p class="text-[13px] font-semibold text-accent" data-pagefind-ignore>{group}</p>
+        <h1 class="mt-2 text-3xl font-semibold tracking-tight text-balance text-gray-950 sm:text-[2.5rem] sm:leading-[1.15] dark:text-white" data-pagefind-meta="title">{entry.data.title}</h1>
+        <div class="doc-prose prose prose-gray mt-8 max-w-none prose-p:leading-7 prose-li:leading-7">
+          <slot />
+        </div>
+      </article>
+
+      <div class="mx-auto mt-16 max-w-[46rem]">
+        <div class="grid gap-3 sm:grid-cols-2">
+          {prev ? (
+            <a href={prev.href} class="group rounded-xl px-4 py-3 ring-1 ring-gray-950/[0.07] transition hover:ring-gray-950/20 dark:ring-white/10 dark:hover:ring-white/25">
+              <span class="text-xs text-gray-500 dark:text-gray-400">Previous</span>
+              <span class="mt-0.5 block text-sm font-medium group-hover:text-accent">← {prev.title}</span>
+            </a>
+          ) : <span />}
+          {next && (
+            <a href={next.href} class="group rounded-xl px-4 py-3 text-right ring-1 ring-gray-950/[0.07] transition hover:ring-gray-950/20 dark:ring-white/10 dark:hover:ring-white/25">
+              <span class="text-xs text-gray-500 dark:text-gray-400">Next</span>
+              <span class="mt-0.5 block text-sm font-medium group-hover:text-accent">{next.title} →</span>
+            </a>
+          )}
+        </div>
+        <div class="mt-10 flex items-center justify-between border-t border-gray-950/5 pt-6 text-[13px] text-gray-500 dark:text-gray-400 dark:border-white/10">
+          <a href={editUrl} class="hover:text-gray-950 dark:hover:text-white">Edit this page on GitHub</a>
+          <span>liaise {pkg.version} · MIT</span>
+        </div>
+      </div>
+    </main>
+
+    <!-- On this page -->
+    <aside class="sticky top-14 hidden h-[calc(100dvh-3.5rem)] overflow-y-auto py-10 pr-8 xl:block">
+      {toc.length > 0 && (
+        <nav data-toc>
+          <h3 class="text-[13px] font-semibold tracking-tight">On this page</h3>
+          <ul class="mt-3 space-y-2 text-[13px]">
+            {toc.map((h) => (
+              <li class={h.depth === 3 ? 'pl-3' : ''}>
+                <a href={`#${h.slug}`} data-slug={h.slug} class="block text-gray-500 transition-colors hover:text-gray-950 data-[active=true]:font-medium data-[active=true]:text-accent dark:text-gray-400 dark:hover:text-white">{h.text}</a>
+              </li>
+            ))}
+          </ul>
+        </nav>
+      )}
+    </aside>
+  </div>
+
+  <script is:inline>
+    // Mobile menu
+    document.querySelector('[data-menu-toggle]')?.addEventListener('click', () =>
+      document.querySelector('[data-sidebar]').classList.toggle('hidden'))
+    // Keep the current sidebar item in view
+    document.querySelector('[data-sidebar] a.text-accent')?.scrollIntoView({ block: 'center' })
+    // Highlight the section being read
+    const links = [...document.querySelectorAll('[data-toc] a')]
+    const targets = links.map((a) => document.getElementById(a.dataset.slug)).filter(Boolean)
+    const mark = () => {
+      let current = targets[0]
+      for (const t of targets) if (t.getBoundingClientRect().top < 120) current = t
+      for (const a of links) a.dataset.active = String(a.dataset.slug === current?.id)
+    }
+    addEventListener('scroll', mark, { passive: true }); mark()
+  </script>
+</Base>

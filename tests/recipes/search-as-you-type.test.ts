@@ -18,7 +18,7 @@ const mock = mockFetch({
 mock.install()
 afterEach(() => mock.restore())
 
-// readme:search-as-you-type:start
+// example:search-as-you-type:start
 import { createApi, defineRequest } from 'liaise'
 
 const search = defineRequest<Repo[], { q: string }>()({
@@ -34,7 +34,7 @@ async function onInput(q: string) {
   if (error) return showError(error)
   render(data)
 }
-// readme:search-as-you-type:end
+// example:search-as-you-type:end
 
 it('shows only the latest search, even when an older one answers last', async () => {
   await Promise.all([onInput('r'), onInput('re'), onInput('rea')])

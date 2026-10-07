@@ -15,7 +15,7 @@ const mock = mockFetch({
 beforeEach(() => mock.install())
 afterEach(() => mock.restore())
 
-// readme:tanstack-query:start
+// example:tanstack-query:start
 import type { Result } from 'liaise'
 
 // TanStack Query expects a failed query to throw. Do it here, at your edge.
@@ -35,7 +35,7 @@ export const userQuery = (id: string) => ({
 // Vue:    useQuery(computed(() => userQuery(id.value)))
 // Svelte: createQuery(() => userQuery(id))
 // Solid:  useQuery(() => userQuery(id()))
-// readme:tanstack-query:end
+// example:tanstack-query:end
 
 const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
 

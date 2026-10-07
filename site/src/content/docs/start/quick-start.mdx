@@ -1,0 +1,39 @@
+---
+title: "Quick start"
+description: "Install liaise, describe two endpoints, create a client and make your first typed call."
+order: 2
+---
+This page takes you from install to a first typed call. Start here when you want to try liaise in a project; [The problem it solves](/start/the-problem-it-solves/) says why you might.
+
+## Install
+
+```bash
+npm install liaise
+```
+
+liaise has no dependencies and uses the standard `fetch`. CI tests it on Node 20, 22 and 24, and [Where it runs](/choosing/where-it-runs/) covers browsers, Bun, Deno, Cloudflare Workers and React Native.
+
+Coming from `@iremlopsum/apify`? That is liaise's old name. Switching takes two steps, listed in [MIGRATION.md](https://github.com/iremlopsum/liaise/blob/main/MIGRATION.md#upgrading-to-500).
+
+## Make your first call
+
+Define two endpoints, create a client, and make a call. `https://api.example.com` stands for your API's base URL.
+
+<Example name="quick-start" />
+
+`defineRequest<User>()({ ... })` is two calls on purpose. The first takes the response type you write, and the second infers the params from the path. [Defining endpoints](/guide/defining-endpoints/) explains why it can't be one.
+
+## What you just got
+
+- **The path decides the params.** `/users/:id` makes `id` required, so `api.getUser({ userId: '42' })` is a compile error. A call whose `id` is still `undefined` at runtime returns an error before anything is sent.
+- **Every other param comes from the second type.** `createUser` takes `{ name: string; email: string }`. It is a `POST`, so `api.createUser({ name, email })` sends them as a JSON body.
+- **`data` is typed from `defineRequest<User>`.** You never annotate a call.
+- **Nothing throws, not even when you're offline.** Every failure comes back in `error`, and `error.kind` names it: `'http'`, `'network'`, `'timeout'`, `'abort'`, `'parse'` or `'middleware'`.
+- **Checking `error` first narrows `data` to `User`**, so you never write `data!`.
+
+**Next:** [How it fits together](/start/how-it-fits-together/) names the pieces you just used and follows one call through them. If you have a task in mind, go straight to it:
+
+- [Handling errors](/guide/handling-errors/)
+- [Add an auth header and refresh the token on a 401](/recipes/add-an-auth-header-and-refresh-the-token-on-a-401/)
+- [Use with TanStack Query](/recipes/use-with-tanstack-query/)
+- [Use with React](/recipes/use-with-react/)

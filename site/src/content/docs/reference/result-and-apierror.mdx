@@ -1,0 +1,74 @@
+---
+title: "Result and ApiError"
+description: "The fields of the Result every call returns, and of the ApiError a failed call carries."
+order: 7
+---
+This page lists the fields of the `Result` every call returns, and of the `ApiError` a failed call carries. Look here when you need a field's exact type, or what it holds for each kind of failure.
+
+## Result
+
+Every call returns a `Result`. `data` and `error` are never both set, so checking `error` narrows `data`.
+
+```ts
+interface SuccessResult<TResponse> {
+  data: TResponse
+  error: null
+  response: Response                       // always present on success
+  retry: () => Promise<Result<TResponse>>
+}
+
+interface ErrorResult<TResponse> {
+  data: null
+  error: ApiError
+  response: Response | null                // null when no response arrived
+  retry: () => Promise<Result<TResponse>>
+}
+
+type Result<TResponse> = SuccessResult<TResponse> | ErrorResult<TResponse>
+```
+
+- **`response` is set for `'http'` and `'parse'` errors**, where the server answered. It is `null` for `'network'`, `'abort'`, `'timeout'` and `'middleware'`.
+- **`response` is for the status and headers.** liaise has already read its body to produce `data` or `error.body`, so `response.json()` throws.
+- **`retry()` runs the same call again**, with the same params and options, through every middleware, and with a fresh deadline ([Trying again with retry()](/guide/handling-errors/#trying-again-with-retry)).
+
+## ApiError
+
+`ApiError` is the `error` of a failed call. It is a plain class and doesn't extend `Error`. Every property is read-only.
+
+| Property | Type | What it holds |
+| -------- | ---- | ------------- |
+| `kind` | `ApiErrorKind` | What went wrong. [The six kinds](/guide/handling-errors/#the-six-kinds) says what each one means. |
+| `status` | `number` | The response's status for `'http'` and `'parse'`. `0` for `'network'`, `'abort'`, `'timeout'` and `'middleware'`. |
+| `statusText` | `string` | The response's status text, `'GraphQL Error'` for a GraphQL error, and `''` when no response arrived. |
+| `body` | `unknown` | The error body, the thrown value, or what a check refused. It depends on the kind, as [What body holds](#what-body-holds) lists. |
+| `headers` | `Headers` | The response headers. Empty when no response arrived. |
+| `request` | `{ method, url, params }` | The failed request. `url` is the address with the params filled in, and on GraphQL it is the endpoint. `url` is `baseUrl` plus the path template only when the URL couldn't be built. `params` is the params or variables as the caller passed them. |
+| `partialData` | `unknown` (optional) | For a GraphQL error, the data the server sent with the errors. `undefined` for every REST error. |
+
+```ts
+type ApiErrorKind = 'http' | 'network' | 'abort' | 'timeout' | 'parse' | 'middleware'
+```
+
+You can check for an `ApiError` with `instanceof`:
+
+```ts
+import { ApiError } from 'liaise'
+
+if (error instanceof ApiError) {
+  console.error(error.kind, error.status)
+}
+```
+
+To build one yourself, for example in a middleware that answers early, call `new ApiError({ ... })` with every property in the table. Only `partialData` is optional.
+
+## What body holds
+
+| `kind` | `error.body` |
+| ------ | ------------ |
+| `'http'` | The response body, read as the endpoint's `responseType` says, or as JSON under `'none'`. `null` when it is empty or doesn't parse ([Error bodies](/guide/reading-responses/#error-bodies)). On GraphQL, a non-2xx body is read as JSON, and a 2xx with `errors` gives the `GraphQLError[]` ([GraphQL errors](/guide/graphql/#graphql-errors)). |
+| `'parse'` | The schema's issues, or the value the validator threw ([When the response doesn't match](/guide/validating-responses/#when-the-response-doesnt-match)). The error thrown while reading a body that doesn't parse as its `responseType`. `''` for a 2xx with an empty body under `'json'`. On GraphQL, the raw text of a 2xx with neither `data` nor `errors` ([Empty bodies](/reference/behaviour-in-detail/#empty-bodies)). |
+| `'network'` | The error `fetch` threw, such as a `TypeError`. When liaise can't build the request, such as for a path param it refuses, the `TypeError` that says why. |
+| `'timeout'`, `'abort'` | The reason the call's signal aborted with, or the error that carried it ([Abort classification](/reference/behaviour-in-detail/#abort-classification)). For a deadline, that is an error named `TimeoutError`. |
+| `'middleware'` | The value the middleware threw. |
+
+**Next:** [MiddlewareContext](/reference/middlewarecontext/) lists what a middleware receives.

@@ -1,0 +1,26 @@
+---
+title: "Where it runs"
+description: "The runtimes CI tests liaise on, the ones it should work on, and why it fits any framework."
+order: 3
+---
+Read this page to check that liaise runs where your code runs. liaise has no dependencies. It uses `fetch` and the standard web types that come with it, such as `Headers` and `AbortController`.
+
+## Runtimes
+
+| Runtime | Status |
+| ------- | ------ |
+| Node 20, 22, 24 | Tested in CI |
+| Browsers, Bun, Deno, Cloudflare Workers | Should work (standard `fetch`), not tested in CI |
+| React Native | Uses its built-in `fetch`, not tested in CI |
+
+"Should work" means each of these has the standard `fetch` liaise uses, but CI doesn't run the tests there. If something breaks on one of them, a [bug report](https://github.com/iremlopsum/liaise/issues/new?template=bug_report.yml) that names the runtime and its version helps.
+
+## React Native
+
+On React Native, where `AbortSignal.timeout` is missing, [`timeout`](/guide/cancelling-deadlines-and-stale-requests/#set-a-deadline-with-timeout) falls back to a timer, so a deadline still ends the call with kind `'timeout'`. If the runtime drops abort reasons, a call that runs out of time may come back as `'abort'` instead of `'timeout'` ([the six kinds](/guide/handling-errors/#the-six-kinds)).
+
+## Any framework
+
+liaise has no hooks and no framework code. A client is a plain object of functions that return promises, so it works in React, Vue, Svelte, Solid, Angular, server loaders, workers and scripts. The recipes show it with [TanStack Query](/recipes/use-with-tanstack-query/), [React](/recipes/use-with-react/), [a store](/recipes/load-the-current-user-into-a-store/) and [a server](/recipes/one-me-per-page-view-on-the-server/).
+
+**Next:** That's Choosing liaise. The reference lists every option and export, starting with [createApi options](/reference/createapi-options/).

@@ -1,0 +1,52 @@
+name: Docs
+
+# Docs-only deploy (typo fixes, new pages). Refuses when library code changed since the latest
+# release, so unreleased behaviour never reaches the live docs; that path is a release instead.
+# Started by the owner from the Actions tab.
+on:
+  workflow_dispatch:
+
+permissions: {}
+
+# No workflow-level concurrency: the deploy job holds the `pages` group (shared with
+# release.yml's docs-deploy), and a run holding the same group twice would wait on itself.
+
+jobs:
+  # The guard, the builds and the site's tests. This job installs and runs third-party
+  # packages, so it can only read the repo: no token here can deploy.
+  build:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+      - run: node scripts/docs-deploy-check.mjs
+      - run: npm ci && npm run build
+      - run: npm ci --prefix site && npm --prefix site run build && npm --prefix site test
+      - uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
+        with:
+          path: site/dist
+
+  # Holds the Pages token and runs nothing but actions/deploy-pages.
+  deploy:
+    needs: build
+    concurrency:
+      group: pages
+      cancel-in-progress: false
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - id: deploy
+        uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346 # v5.0.1

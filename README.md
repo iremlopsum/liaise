@@ -254,6 +254,7 @@ const api = createApi({ baseUrl: 'https://api.example.com', requests: { listRepo
 
 await api.listRepos({ org: 'acme' })           // GET /orgs/acme/repos
 await api.listRepos({ org: 'acme', page: 2 })  // GET /orgs/acme/repos?page=2
+// @ts-expect-error
 await api.listRepos({ page: 2 })               // ✗ compile error: org is required
 ```
 
@@ -287,6 +288,7 @@ await api.listRepos({ page: 2 })               // ✗ compile error: org is requ
 
   ```ts
   defineRequest<undefined>()({ method: 'POST', path: '/ping', responseType: 'none' })  // ✓
+  // @ts-expect-error
   defineRequest<Repo>()({ method: 'POST', path: '/ping', responseType: 'none' })       // ✗
   ```
 
@@ -579,6 +581,7 @@ const withArkType = defineRequest()({
 - **The schema supplies the response type.** You write no type argument, so there's no second type to keep in sync.
 - **`data` is the schema's output.** A schema that transforms changes what you receive, so `data` can differ from the raw response:
 
+  <!-- untyped: needs zod's real output types (z is only a placeholder here), and getUser is not wired into the api from earlier blocks -->
   ```ts
   const getUser = defineRequest()({
     method: 'GET',
@@ -606,16 +609,17 @@ const withArkType = defineRequest()({
 
 - A validator that throws is a `'parse'` error too, with the thrown value in `error.body`.
 - **Only a 2xx body is validated.** A non-2xx body is diagnostic and often a different shape, so it is left alone.
-- **The GraphQL `Operation` ([GraphQL](#graphql)) takes `schema` too**, and validates the response's `data`. There the response type stays explicit, because only `defineRequest` infers it:
+- **The GraphQL `Operation` ([GraphQL](#graphql)) takes `schema` too**, and validates the response's whole `data` object, which is keyed by the fields the query selects. There the response type stays explicit, because only `defineRequest` infers it:
 
   ```ts
   import { Operation, gql } from 'liaise'
 
   const UserSchema = z.object({ id: z.string(), name: z.string() })
+  const MeSchema = z.object({ me: UserSchema }) // data is { me: { id, name } }
 
-  const me = new Operation<Record<string, never>, z.infer<typeof UserSchema>>({
+  const me = new Operation<Record<string, never>, z.infer<typeof MeSchema>>({
     operation: gql`query { me { id name } }`,
-    schema: UserSchema,
+    schema: MeSchema,
   })
   ```
 
@@ -984,8 +988,42 @@ const reportServerErrors: Middleware = async (ctx, next) => {
 
 ### Pagination
 
-Many list endpoints return one page at a time. `paginate` walks through the pages and gives you one `Result` per page:
+Many list endpoints return one page at a time. `paginate` asks for a page only when you ask for the next one, so you can load page 1, then page 2 when the reader wants more, or walk every page in a loop:
 
+<!-- tested: pagination -->
+```ts
+import { createApi, defineRequest, paginate } from 'liaise'
+
+type Item = { id: string; name: string }
+type Page = { items: Item[]; cursor?: string }
+
+const listItems = defineRequest<Page, { limit: number; cursor?: string }>()({
+  method: 'GET',
+  path: '/items',
+})
+
+const api = createApi({ baseUrl: 'https://api.example.com', requests: { listItems } })
+
+const pages = paginate(api.listItems, { limit: 50 }, {
+  next: (p, prev) => (p.data.cursor ? { ...prev, cursor: p.data.cursor } : undefined),
+})
+// Nothing has been fetched yet.
+
+async function loadMore() {
+  const { value: page, done } = await pages.next() // one request per click
+  if (done) return hideLoadMore()
+  if (page.error) return showError(page.error)
+  render(page.data.items)
+}
+```
+
+`render`, `showError` and `hideLoadMore` stand for your own code, and your "Load more" button calls `loadMore`. Creating `pages` sends nothing, and each click sends one request: `/items?limit=50`, then `?limit=50&cursor=…` with the cursor from the page before, until a page comes back without one and the next click finds `done`.
+
+#### Walking every page
+
+For an export or a sync job, where you want every page, loop over the pages with `for await`:
+
+<!-- tested: pagination-walk -->
 ```ts
 import { createApi, defineRequest, paginate } from 'liaise'
 
@@ -1007,10 +1045,27 @@ for await (const page of paginate(api.listItems, { limit: 50 }, {
 }
 ```
 
-`render` stands for your own code.
+The loop asks for `/items?limit=50`, then for `?limit=50&cursor=…` with each page's `cursor`, and stops after the first page that comes back without one. `break` stops it sooner, and no further page is requested.
+
+#### Going straight to a page
+
+`paginate` only moves forward, from each page to the one after it. A numbered pager ("go to page 7") or a cursor kept in the URL needs one particular page, so there you don't need `paginate`. Keep the page number or the cursor in your own state, and call the endpoint with it:
+
+```ts
+// The cursor lives in the URL, so a reload or a shared link opens the same page.
+const cursor = new URLSearchParams(location.search).get('cursor') ?? undefined
+const { data, error } = await api.listItems({ limit: 50, cursor })
+if (error) showError(error)
+else render(data.items)
+```
+
+Your "Next" link then carries `data.cursor` in its URL. With a numbered pager it's the same call with the number the reader picked, such as `{ limit: 50, page: 7 }` for an API that pages by number.
+
+#### Getting to the next page
 
 - **`next` returns the params for the next page.** It gets the page just loaded and the params that loaded it, so the usual case is a spread. liaise never has to guess whether your API calls it `cursor`, `page_token` or `after`, and the same shape covers every scheme:
 
+  <!-- untyped: two alternative `next` option values shown side by side, not one program -->
   ```ts
   // offset
   next: (p, prev) => p.data.items.length === prev.limit
@@ -1023,10 +1078,17 @@ for await (const page of paginate(api.listItems, { limit: 50 }, {
     : undefined
   ```
 
-- **Return `undefined` or `null` to stop.**
-- **An error page ends the walk.** You get the error page, and then the loop ends, because there is no data to read the next cursor from. You see what failed. The loop never stops quietly.
+- **Return `undefined` or `null` to stop.** A `for await` loop ends there, and the next `pages.next()` gives `done` without sending a request.
+
+#### When to stop
+
+- **An error page ends it.** You get the error page, and then a loop ends, or the next `pages.next()` gives `done`, because there is no data to read the next cursor from. You see what failed. It never stops quietly.
 - **`maxPages` has no default.** Set it if you want a ceiling, as in `paginate(api.listItems, { limit: 50 }, { next, maxPages: 100 })`. liaise doesn't pick a number, because a silent cut-off at an arbitrary page looks exactly like reaching the last one.
-- **Every other option applies to every page.** Any of the [`CallOptions`](#calloptions), such as `signal`, `timeout` or `headers`, goes with each request, so one signal cancels the whole walk.
+- **A page you don't ask for is never requested.** Breaking out of a `for await` loop sends no further request, and neither does a `pages` you stop calling `next()` on.
+
+#### Options and pages
+
+- **Every other option applies to every page.** Any of the [`CallOptions`](#calloptions), such as `signal`, `timeout` or `headers`, goes with each request, so one signal cancels every page, whether you walk them or load them one at a time.
 - **`paginate` yields pages.** Read the items from each page yourself. Flattening them would mean guessing which field holds the array.
 
 ### GraphQL
@@ -1048,7 +1110,7 @@ const GET_CATEGORY = gql`
   }
 `
 
-const getCategory = new Operation<{ id: string }, Category>({
+const getCategory = new Operation<{ id: string }, { category: Category }>({
   operation: GET_CATEGORY,
 })
 
@@ -1061,14 +1123,14 @@ const graphql = createGraphQL({
 const { data, error, response, retry } = await graphql.getCategory({ id: '123' })
 ```
 
-`Operation<TVariables, TData>` takes the variables type first and the response type second. `gql` marks the string as GraphQL for your editor.
+`Operation<TVariables, TData>` takes the variables type first and the type of the response's `data` second. `data` is keyed by the fields the query selects, so here it is `{ category: Category }`. `gql` marks the string as GraphQL for your editor.
 
 An operation with no variables is called without arguments. Write `Record<string, never>` as its variables type:
 
 ```ts
 type Viewer = { id: string; name: string }
 
-const getViewer = new Operation<Record<string, never>, Viewer>({
+const getViewer = new Operation<Record<string, never>, { viewer: Viewer }>({
   operation: gql`query { viewer { id name } }`,
 })
 
@@ -1085,10 +1147,10 @@ To keep queries and mutations apart, use the `queries` and `mutations` keys inst
 const graphql = createGraphQL({
   endpoint: 'https://api.example.com/graphql',
   queries: {
-    getCategory: new Operation<{ id: string }, Category>({ operation: GET_CATEGORY }),
+    getCategory: new Operation<{ id: string }, { category: Category }>({ operation: GET_CATEGORY }),
   },
   mutations: {
-    updateCategory: new Operation<{ id: string; name: string }, Category>({
+    updateCategory: new Operation<{ id: string; name: string }, { updateCategory: Category }>({
       operation: gql`
         mutation UpdateCategory($id: String!, $name: String!) {
           updateCategory(id: $id, name: $name) { id name status }
@@ -1563,7 +1625,7 @@ With enough of your own code, every library gets the right result in almost ever
 
 ky is the closest alternative. Apart from throwing instead of returning errors, it differs from liaise in two rows of the table. Its search as you type needs code, and it sends the undefined path param. Out of the box, ky is the only one that times out, and it retries, as ofetch does. In size, liaise is larger than ofetch and smaller than ky and axios.
 
-In request overhead, liaise ties fetch and ofetch. axios handles about 17% and ky about 14% fewer requests per second than liaise. Overhead is measured in microseconds; on a real network each request takes milliseconds.
+In request overhead, one request at a time, liaise ties fetch and ofetch; axios handles about 17% and ky about 14% fewer requests per second than liaise. With 50 requests in flight, liaise ties ofetch and fetch handles about 6% more requests per second than liaise (the measured ranges overlap), while ky handles about 14% and axios about 18% fewer. Overhead is measured in microseconds; on a real network each request takes milliseconds.
 
 ### Where it runs
 
@@ -1739,7 +1801,7 @@ type Result<TResponse> = SuccessResult<TResponse> | ErrorResult<TResponse>
 | `statusText` | `string` | The response's status text, `'GraphQL Error'` for a GraphQL error, and `''` when no response arrived. |
 | `body` | `unknown` | For `'http'`, the error body, or `null` when it is empty or doesn't parse. For `'parse'`, what the [Validating responses](#validating-responses) and [Reading responses](#reading-responses) rules say. Otherwise, the thrown value. |
 | `headers` | `Headers` | The response headers. Empty when no response arrived. |
-| `request` | `{ method, url, params }` | The failed request. `url` is the address with the params filled in. It is the path template only when the URL couldn't be built. |
+| `request` | `{ method, url, params }` | The failed request. `url` is the address with the params filled in. It is `baseUrl` plus the path template only when the URL couldn't be built. |
 | `partialData` | `unknown` (optional) | For a GraphQL error, the data the server sent with the errors. `undefined` for every REST error. |
 
 ```ts
@@ -1999,6 +2061,7 @@ A `#` written into a `path` or a `baseUrl` is refused, because a fragment is nev
 `defineRequest` also refuses a fragment in a `path` literal, at compile time:
 
 ```ts
+// @ts-expect-error
 defineRequest<Doc>()({ method: 'GET', path: '/docs#section' })
 //                                          ^ Property '__fragmentInPath' is missing:
 //                                            a URL fragment is never sent to the server

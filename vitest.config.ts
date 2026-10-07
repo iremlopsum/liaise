@@ -6,12 +6,15 @@ const src = (file: string) => fileURLToPath(new URL(`./src/${file}`, import.meta
 export default defineConfig({
   // README examples import 'liaise' by its published name. These aliases point
   // that name at src/, so a tested README block is byte-identical to the test
-  // that runs it (scripts/check-readme.mjs) and needs no build first.
+  // that runs it (scripts/check-docs.mjs) and needs no build first.
   resolve: {
     alias: [
       { find: /^liaise$/, replacement: src('index.ts') },
       { find: /^liaise\/middleware$/, replacement: src('built-in-middleware.ts') },
       { find: /^liaise\/testing$/, replacement: src('testing.ts') },
+      // Docs examples import { z } from 'zod'. The package has no zod dependency, so tests
+      // get a stand-in built on Standard Schema (tests/helpers/zod.ts says what it covers).
+      { find: /^zod$/, replacement: fileURLToPath(new URL('./tests/helpers/zod.ts', import.meta.url)) },
     ],
   },
   test: {
@@ -29,7 +32,9 @@ export default defineConfig({
     //
     // `compare/` is the library comparison harness: its own package.json, its
     // own dependencies, never part of this suite.
-    exclude: [...configDefaults.exclude, '**/.worktrees/**', 'compare/**'],
+    // `site/` is the docs site: its own package.json and its own vitest run, which
+    // reads a built `site/dist` this suite never has.
+    exclude: [...configDefaults.exclude, '**/.worktrees/**', 'compare/**', 'site/**'],
     typecheck: { tsconfig: './tsconfig.test.json', include: ['tests/**/*.test.ts', 'tests/**/*.test-d.ts'], only: true },
   }
 })

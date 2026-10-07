@@ -14,7 +14,7 @@ const mock = mockFetch({
 mock.install()
 afterEach(() => mock.restore())
 
-// readme:server-loaders:start
+// example:server-loaders:start
 import { createApi, defineRequest } from 'liaise'
 
 const me = defineRequest<User>()({ method: 'GET', path: '/me', share: true })
@@ -31,7 +31,7 @@ async function renderPage(req: IncomingRequest) {
   ])
   return { header, cart }
 }
-// readme:server-loaders:end
+// example:server-loaders:end
 
 it('shares within a page view and never across users', async () => {
   const [alice, bob] = await Promise.all([

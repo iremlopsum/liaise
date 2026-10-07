@@ -1,0 +1,31 @@
+{
+  "name": "liaise-site",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "predev": "node scripts/copy-liaise.mjs",
+    "dev": "astro dev",
+    "prebuild": "node scripts/copy-liaise.mjs",
+    "build": "astro build && pagefind --site dist",
+    "preview": "astro preview",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@astrojs/markdown-remark": "^7.3.2",
+    "@astrojs/mdx": "^8.0.3",
+    "@astrojs/sitemap": "3.7.4",
+    "@fontsource-variable/inter": "^5.3.0",
+    "@fontsource/ibm-plex-mono": "^5.3.0",
+    "@tailwindcss/typography": "^0.5.20",
+    "@tailwindcss/vite": "^4.3.3",
+    "astro": "^7.3.6",
+    "graphql": "17.0.2",
+    "monaco-editor": "0.52.2",
+    "pagefind": "^1.5.2",
+    "tailwindcss": "^4.3.3"
+  },
+  "devDependencies": {
+    "vite": "8.3.3",
+    "vitest": "^4.1.11"
+  }
+}

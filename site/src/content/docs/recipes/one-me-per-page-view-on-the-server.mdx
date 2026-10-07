@@ -1,0 +1,22 @@
+---
+title: "One /me per page view on the server"
+description: "Loaders that run in parallel for one page share one /me request, and a page for another user never joins it."
+order: 6
+---
+Use this when you render pages on a server, and several of a page's loaders, running in parallel, each need the current user. There is no store to hold the user between them, so each loader asks for it.
+
+Use one client for the whole server, `share: true` on the endpoint, and the user's cookie as a per-call header. `User` and `IncomingRequest` stand for your types; `cookie` stands for however you pass the user's identity.
+
+<Example name="server-loaders" />
+
+## Why it works
+
+Both loaders for one page send the same cookie, so their requests are identical, and `share` sends one. A page for another user sends a different cookie, so its call never joins. Two pages rendering at once for two users make two requests, and each page gets its own user.
+
+- **Sharing compares the request as it is sent**, after all your middleware, headers included. The cookie is a header, so one user's call never joins another's.
+- **Only calls in flight at the same moment share.** A loader that starts after the request has settled sends a new one.
+- **The comparison sees only the headers in `ctx.request.headers`.** If something outside liaise adds the user's identity, such as a patched global `fetch` or instrumentation that reads request context, liaise can't see it, and `share` is unsafe in that setup ([On a server](/guide/sharing-identical-requests/#on-a-server)).
+
+Inside React Server Components, React's [`cache()`](https://react.dev/reference/react/cache) gives one /me per page view too. React clears it for each server request.
+
+**Next:** [Retry a flaky backend within one deadline](/recipes/retry-a-flaky-backend-within-one-deadline/) retries the failures worth a second try, and still answers on time.

@@ -1,0 +1,129 @@
+---
+// One setup's outcome table, rendered twice: a table from md up, one card per scenario below.
+// Every cell is a button that opens the setup note for that library's call. The columns are the
+// libraries (CONTENDERS); plain fetch is the baseline for size and overhead, not a column here.
+import { CONTENDERS, METHOD_FOR, cell, data, measured, VARIANTS, KINDS, noteFor, noteParts, guideFor, codeCounts, liaiseCode, pathParam, type Variant } from '../compare'
+import { url } from '../url'
+
+interface Props { variant: Variant; hidden?: boolean }
+const { variant, hidden = false } = Astro.props
+const v = VARIANTS[variant]
+const popId = (name: string, method: string) => `cmp-${variant}-${name}-${method}`
+const methods = [...new Set(Object.values(METHOD_FOR))]
+
+const titleLink = 'font-medium text-gray-950 underline decoration-gray-950/20 underline-offset-[3px] hover:decoration-accent dark:text-white dark:decoration-white/25'
+---
+<section id={`cmp-${variant}`} data-variant={variant} hidden={hidden} aria-label={v.label}>
+  <p class="max-w-3xl text-[14px] leading-6 text-gray-600 dark:text-gray-400">
+    <strong class="font-semibold text-gray-950 dark:text-white">{v.label}.</strong> {v.blurb}
+  </p>
+
+  <!-- md and up: one table, the scenario column stays put while the rest scrolls. Like the cards,
+       not indexed (spec §9): search finds the prose about the results, not 200 cells. -->
+  <div class="mt-4 hidden overflow-x-auto rounded-xl ring-1 ring-gray-950/[0.08] md:block dark:ring-white/10" data-pagefind-ignore>
+    <table class="w-full min-w-[52rem] border-collapse text-left">
+      <thead>
+        <tr class="border-b border-gray-950/[0.08] dark:border-white/10">
+          <th scope="col" class="sticky left-0 z-10 w-[15rem] bg-gray-50 px-4 py-3 text-[12px] font-medium text-gray-500 dark:bg-gray-900 dark:text-gray-400">Scenario</th>
+          {CONTENDERS.map((n) => (
+            <th scope="col" data-col={n} class="bg-gray-50 px-3.5 py-3 text-[13px] font-semibold text-gray-950 dark:bg-gray-900 dark:text-white">
+              {n}<span class="block font-mono text-[11px] font-normal text-gray-500 dark:text-gray-400">{measured.versions[n]}</span>
+            </th>
+          ))}
+        </tr>
+      </thead>
+      <tbody class="divide-y divide-gray-950/[0.06] dark:divide-white/[0.08]">
+        {data.scenarios.map((s) => (
+          <tr>
+            <th scope="row" class="sticky left-0 z-10 bg-white px-4 py-3 align-top text-[13px] leading-5 font-normal shadow-[inset_-1px_0_0_var(--color-gray-100)] dark:bg-gray-950 dark:shadow-[inset_-1px_0_0_rgb(255_255_255/0.08)]">
+              <a href={url(guideFor(s.id))} data-scenario={s.id} class={titleLink}>{s.title}</a>
+            </th>
+            {CONTENDERS.map((n) => {
+              const c = cell(s, n, variant)
+              return (
+                <td class="p-1 align-top">
+                  <button type="button" data-cell={`${variant}/${s.id}/${n}`} data-kind={c.kind} popovertarget={popId(n, METHOD_FOR[s.id])} aria-haspopup="dialog" class="cmp-cell">
+                    <span>{c.text}</span>
+                    <span class="cmp-mark" data-mark={c.kind}>{KINDS[c.kind].label}</span>
+                  </button>
+                </td>
+              )
+            })}
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  </div>
+
+  <!-- Phones: one card per scenario, a row per library. -->
+  <ol class="mt-4 space-y-3 md:hidden" data-pagefind-ignore>
+    {data.scenarios.map((s) => (
+      <li class="rounded-xl ring-1 ring-gray-950/[0.08] dark:ring-white/10">
+        <h3 class="px-4 pt-3.5 pb-1 text-[14px] leading-6"><a href={url(guideFor(s.id))} data-scenario={s.id} class={titleLink}>{s.title}</a></h3>
+        <ul class="divide-y divide-gray-950/[0.06] px-1.5 pb-1.5 dark:divide-white/[0.08]">
+          {CONTENDERS.map((n) => {
+            const c = cell(s, n, variant)
+            return (
+              <li class="grid grid-cols-[4.25rem_minmax(0,1fr)] items-start gap-1">
+                <span class="px-2.5 py-2 text-[13px] leading-5 font-semibold text-gray-950 dark:text-white">{n}</span>
+                <button type="button" data-cell={`${variant}/${s.id}/${n}`} data-kind={c.kind} popovertarget={popId(n, METHOD_FOR[s.id])} aria-haspopup="dialog" class="cmp-cell">
+                  <span>{c.text}</span>
+                  <span class="cmp-mark" data-mark={c.kind}>{KINDS[c.kind].label}</span>
+                </button>
+              </li>
+            )
+          })}
+        </ul>
+      </li>
+    ))}
+  </ol>
+
+  <div class="mt-5 max-w-3xl space-y-2 text-[14px] leading-6 text-gray-600 dark:text-gray-400">
+    <p data-fact={`code-count-${variant}`}>Cells that needed hand-written code: {codeCounts(variant)}.</p>
+    {variant === 'configured' && <p data-fact="liaise-code">{liaiseCode}</p>}
+    {variant === 'configured' && pathParam && <p data-fact="path-param">{pathParam}</p>}
+    {variant === 'configured' && <p>Milliseconds are shown only where timing is the point.</p>}
+    {variant === 'default' && <p>A 204 and a slow server are normal. An error, or still waiting, in those rows is a failure.</p>}
+  </div>
+
+  <!-- The setup notes, one per library and call; several cells can open the same one. -->
+  <div data-pagefind-ignore>
+    {CONTENDERS.map((n) => methods.map((m) => {
+      const note = noteFor(n, variant, m)
+      const id = popId(n, m)
+      return (
+        <div id={id} popover="auto" role="dialog" aria-label={`${n}, ${v.short.toLowerCase()}: setup for ${m}`} class="cmp-pop">
+          <p class="cmp-pop-head"><strong>{n}</strong> <span>{v.short}</span> <code>{m}</code></p>
+          <p class="cmp-pop-note">
+            {note === undefined
+              ? (variant === 'default' ? 'Called the most obvious way, with no options set.' : 'This call sets no option of its own.')
+              : noteParts(note).map((p) => ('href' in p ? <a href={p.href}>{p.label}</a> : 'code' in p ? <code>{p.code}</code> : <span>{p.text}</span>))}
+          </p>
+          <button type="button" popovertarget={id} popovertargetaction="hide" aria-label="Close" class="cmp-pop-close">
+            <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><path d="M4 4l8 8M12 4l-8 8"/></svg>
+          </button>
+        </div>
+      )
+    }))}
+  </div>
+</section>
+
+<style is:global>
+  @reference "../styles/global.css";
+  /* A cell, its marker and its setup note. Classes here, not inline: the page renders 200 cells and 60 notes. */
+  .cmp-cell { @apply flex w-full flex-col items-start gap-1.5 rounded-lg px-2.5 py-2 text-left text-[13px] leading-5 text-gray-800 transition-colors hover:bg-gray-950/[0.035] focus-visible:outline-2 focus-visible:outline-accent dark:text-gray-200 dark:hover:bg-white/[0.06]; }
+  .cmp-mark { @apply inline-flex shrink-0 rounded px-1.5 font-mono text-[11px] leading-[18px]; }
+  .cmp-mark[data-mark='value'] { @apply text-gray-500 ring-1 ring-gray-950/10 ring-inset dark:text-gray-400 dark:ring-white/15; }
+  .cmp-mark[data-mark='throws'] { @apply bg-gray-950/[0.06] text-gray-700 dark:bg-white/10 dark:text-gray-300; }
+  .cmp-mark[data-mark='code'] { @apply bg-accent-soft text-accent; }
+  .cmp-mark[data-mark='none'] { @apply text-gray-500 ring-1 ring-gray-950/10 ring-inset dark:text-gray-400 dark:ring-white/10; }
+  .cmp-pop { @apply max-h-[calc(100dvh-2rem)] w-[min(22rem,calc(100vw-2rem))] overflow-y-auto rounded-xl bg-white p-4 text-left text-gray-700 shadow-xl ring-1 ring-gray-950/10 dark:bg-gray-900 dark:text-gray-300 dark:ring-white/10; }
+  .cmp-pop-head { @apply flex items-baseline gap-2 pr-8 text-[12px] text-gray-500 dark:text-gray-400; }
+  .cmp-pop-head strong { @apply font-semibold text-gray-950 dark:text-white; }
+  .cmp-pop-head code { @apply font-mono text-[11px]; }
+  .cmp-pop-note { @apply mt-2 text-[13px] leading-6 break-words; }
+  .cmp-pop-note a { @apply font-medium text-gray-950 underline decoration-accent underline-offset-2 dark:text-white; }
+  .cmp-pop-note code { @apply font-mono text-[12px]; }
+  .cmp-pop-close { @apply absolute top-2.5 right-2.5 grid size-7 place-items-center rounded-md text-gray-400 hover:bg-gray-950/5 hover:text-gray-700 dark:hover:bg-white/10 dark:hover:text-white; }
+  .cmp-pop-close svg { @apply size-3.5; }
+</style>

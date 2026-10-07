@@ -9,7 +9,7 @@ mock.install()
 const log = vi.spyOn(console, 'log').mockImplementation(() => {})
 const err = vi.spyOn(console, 'error').mockImplementation(() => {})
 
-// readme:quick-start:start
+// example:quick-start:start
 import { createApi, defineRequest } from 'liaise'
 
 type User = { id: string; name: string; email: string }
@@ -36,7 +36,7 @@ if (error) {
 } else {
   console.log(data.name) // data is a User here
 }
-// readme:quick-start:end
+// example:quick-start:end
 
 mock.restore()
 

@@ -19,7 +19,7 @@ const mock = mockFetch({
 mock.install()
 afterEach(() => { mock.restore(); vi.restoreAllMocks() })
 
-// readme:per-attempt-timeout:start
+// example:per-attempt-timeout:start
 import { createApi } from 'liaise'
 import type { Middleware } from 'liaise'
 import { retryMiddleware } from 'liaise/middleware'
@@ -39,7 +39,7 @@ const api = createApi({
     perAttempt(5_000),
   ],
 })
-// readme:per-attempt-timeout:end
+// example:per-attempt-timeout:end
 
 it('a timed-out attempt is retried with a fresh limit', async () => {
   vi.spyOn(Math, 'random').mockReturnValue(0)

@@ -1,0 +1,24 @@
+---
+title: "createApi options"
+description: "Every option createApi takes, with its type, its default and what it does."
+order: 1
+---
+This page lists every option `createApi(config)` takes. Look here when you set up a REST client and need an option's exact type or default.
+
+The config is an `ApiConfig`.
+
+| Option | Type | Default | What it does |
+| ------ | ---- | ------- | ------------ |
+| `baseUrl` | `string` | required | Goes in front of every endpoint's path. It may carry a query string ([baseUrl query merging](/reference/behaviour-in-detail/#baseurl-query-merging)). A `#` in it is refused ([URL fragments](/reference/behaviour-in-detail/#url-fragments)). |
+| `requests` | an object of endpoints | required | Each key becomes a method on the client, such as `api.getUser`. Each value is an endpoint from `defineRequest` or `new Request` ([Endpoint options](/reference/endpoint-options/)). |
+| `middleware` | `Middleware[]` | — | Runs on every call, before endpoint and call middleware ([Writing middleware](/guide/writing-middleware/)). |
+| `headers` | `HeadersInit` | — | Sent with every call. An endpoint or a call can replace a header ([Three levels of settings](/start/how-it-fits-together/#three-levels-of-settings)). |
+| `timeout` | `number` (ms) | no deadline | One deadline for every call, retries included. An endpoint or a call can set its own, and `0` there turns it off ([Set a deadline with timeout](/guide/cancelling-deadlines-and-stale-requests/#set-a-deadline-with-timeout)). |
+| `log` | `boolean \| LogOptions` | off | Logs every call to the console ([Log every call](/guide/retries-caching-and-logging/#log-every-call), [Log options](/reference/built-in-middleware-options/#log-options)). |
+| `onError` | `(error: ApiError) => void` | — | Called once per failed call, after all middleware. Calls that share one failed request count as one. Never for `'abort'`. If it throws, the caller still gets its `Result` ([Reporting errors with onError](/guide/handling-errors/#reporting-errors-with-onerror)). |
+
+`createApi` returns a client with one method for each key of `requests`. A method takes the params and an optional [CallOptions](/reference/calloptions/), and returns a promise of a [Result](/reference/result-and-apierror/). The params are optional when the endpoint takes none. Each method also has [getHeaders()](/reference/getheaders/).
+
+`createApi` throws if an endpoint sets both `share` and `dedupe`, because the two are opposites ([When not to share](/guide/sharing-identical-requests/#when-not-to-share)). That is a configuration mistake, so it surfaces when you create the client. A call never throws. Every failure comes back in its `Result`.
+
+**Next:** [createGraphQL options](/reference/creategraphql-options/) lists the options of the GraphQL client.

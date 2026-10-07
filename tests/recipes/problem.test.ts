@@ -12,7 +12,7 @@ const api = createApi({
   },
 })
 
-// readme:problem-after:start
+// example:problem-after:start
 async function submit(order: { items: string[] }) {
   const { data, error } = await api.placeOrder(order)
   if (!error) return show(`Order ${data.id} confirmed`)
@@ -24,7 +24,7 @@ async function submit(order: { items: string[] }) {
     case 'parse':   return show('The server sent something unexpected.')
   }
 }
-// readme:problem-after:end
+// example:problem-after:end
 
 describe('the problem section, after', () => {
   let mock: ReturnType<typeof mockFetch>

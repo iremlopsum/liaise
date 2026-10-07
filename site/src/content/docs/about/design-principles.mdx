@@ -1,0 +1,36 @@
+---
+title: "Design principles"
+description: "The six choices liaise is built on, and the reason for each."
+order: 1
+---
+This page explains the six choices liaise is built on, and why it makes each one. Read it when you want to know why the API looks the way it does, or whether its trade-offs suit your project.
+
+## Never throws
+
+A thrown error doesn't show up in a function's type, so nothing reminds you to catch it, and one missed `try` breaks the page. A returned error is part of the type. TypeScript makes you check `error` before you can read `data`, and every failure arrives in the same shape. [Handling errors](/guide/handling-errors/) shows that shape and the six kinds of failure.
+
+The one exception is a configuration mistake. An endpoint or a GraphQL operation that sets both `share` and `dedupe` throws when you create the client, so you find the mistake straight away ([When not to share](/guide/sharing-identical-requests/#when-not-to-share)).
+
+## Zero dependencies
+
+Every dependency of liaise would also be a dependency of your app, with more to download, audit and update. liaise uses only what the runtime already has: `fetch`, `Headers`, `AbortController` and the other web types. Validators plug in through Standard Schema, which is only an interface, so schema support adds no package either ([Validating responses](/guide/validating-responses/)). The size of each entry point is under [Exports](/reference/exports/).
+
+## Middleware over interceptors
+
+Separate request and response interceptors split one job in two. State that both halves need rides on the request config, and resending means calling the client again from inside the response interceptor. A middleware wraps the whole call, so one function can set a header, read the result, retry, or answer from a cache.
+
+The built-in `retryMiddleware`, `cacheMiddleware` and `logMiddleware` are ordinary middleware, so anything they do, yours can do too. [Writing middleware](/guide/writing-middleware/) shows how.
+
+## Types by inference
+
+Types you write at each call site drift away from the endpoint they describe. In liaise you write the types once, on the endpoint, and the path supplies the path params. `createApi` carries them to every call, so a renamed param or a changed response is a compile error where it is used. [Defining endpoints](/guide/defining-endpoints/) shows how.
+
+## Any runtime
+
+liaise needs only `fetch` and the standard web types, so one client works in a browser, on a server, in a worker or in a script. Code that moves between them needs no second client and no adapter. [Where it runs](/choosing/where-it-runs/) lists what CI tests.
+
+## Any framework
+
+A client is a plain object of functions that return promises. That fits every UI framework, and code with no framework at all, and there is nothing to rewrite when you switch. Query libraries expect a failed call to throw, so you convert at that one edge, as the [TanStack Query recipe](/recipes/use-with-tanstack-query/) does.
+
+**Next:** [Upgrading, contributing, licence](/about/upgrading-contributing-licence/) says which version these docs describe, and how to upgrade or contribute.

@@ -1,0 +1,22 @@
+---
+title: "Load the current user into a store"
+description: "With share: true on /me, components that all find the store empty on first render join one request instead of each sending their own."
+order: 5
+---
+Use this when several components need the current user, and each loads it into a shared store. The header, sidebar and avatar each check the store on first render, find it empty, and each ask for the user, so the server gets the same request three times.
+
+Set `share: true` on the endpoint, so calls made at the same moment join one request. `User` is your type.
+
+<Example name="store-me" />
+
+## Why it works
+
+All three components call `loadUser()` during the first render. The store is empty for all of them, so all three call `api.me()`. The three calls would send the identical request, so `share` sends it once, and each caller gets the user in its own `Result`. The server sees `GET /me` once.
+
+- **`share` keeps nothing once the request has settled.** A call made after that sends a new request. Here the store holds the user by then, so later renders return early and make no call.
+- **If the call fails, the store stays empty**, and the next `loadUser()` tries again.
+- What makes two requests identical, and what each caller gets, is under [Sharing identical requests](/guide/sharing-identical-requests/).
+
+[TanStack Query](https://tanstack.com/query/latest/docs/framework/react/overview) dedupes this case too; this recipe is for apps that use a plain store.
+
+**Next:** [One /me per page view on the server](/recipes/one-me-per-page-view-on-the-server/) does the same on a server, where there is no store.
