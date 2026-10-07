@@ -5,6 +5,41 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [5.2.0] — 2026-10-07
+
+Adds polling, `fetchOptions` for `credentials`, `mode`, `cache` and the rest of `RequestInit`, and a client's own `fetch`. `cacheMiddleware` now caches only `GET` and `HEAD` unless you say otherwise; see [MIGRATION.md](./MIGRATION.md#upgrading-to-520).
+
+### Added
+
+- **`poll` and `pollUntil`** ([Polling](https://iremlopsum.github.io/liaise/guide/polling/)). Both take any endpoint from `createApi` or `createGraphQL`.
+  - `poll(endpoint, params, callback, { every })` asks at once, then again `every` ms after each answer, and hands every `Result` to the callback until `stop()` or its `signal`. Requests never overlap.
+  - `pollUntil(endpoint, params, { every, until, giveUpAfter })` resolves once and never rejects. It resolves with the first success `until` accepts, an error that waiting can't fix (a 4xx other than 408 and 429, a GraphQL error, `'parse'`, `'middleware'`), a `'timeout'` after `giveUpAfter`, or an `'abort'` from its `signal`.
+  - A failure keeps polling, with longer waits. A `Retry-After` on a 429 or a 503 is honoured.
+  - In a browser, polling pauses while the tab is hidden (`inBackground: true` keeps it going), and callers asking one endpoint the same thing share one request loop. On a server each caller gets its own, because sharing is decided before your middleware adds a user's credentials.
+- **`fetchOptions`** on `createApi`, `createGraphQL`, an endpoint or `Operation`, and a call ([Cookies and other fetch options](https://iremlopsum.github.io/liaise/guide/defining-endpoints/#cookies-and-other-fetch-options)). It takes `credentials`, `mode`, `cache`, `redirect`, `keepalive`, `priority` and anything else `RequestInit` has, except `method`, `headers`, `body` and `signal`, which liaise sets itself. Levels merge field by field, the most specific winning, and middleware reads and changes them as `ctx.request.fetchOptions`. Calls whose options differ never `share` a request. New type: `FetchOptions`.
+- **A client's own `fetch`:** `createApi({ fetch })` and `createGraphQL({ fetch })`, for undici, a Cloudflare service binding (in a wrapper) or `mockFetch().fetch`. Without it, liaise uses the global `fetch`, looked up on every call, as before.
+- **`cacheMiddleware({ methods })`:** the methods it caches. The default is `['GET', 'HEAD']`.
+- **`RecordedCall.init`** in `liaise/testing`: a copy of the init `fetch` received, so a test can check `credentials` or `keepalive`.
+
+### Changed
+
+- **`cacheMiddleware` caches only `GET` and `HEAD` by default.** A call with any other method goes to the network and is never stored. Before, it cached any method, so a cached `POST` answered the next identical create with the first one's response. To keep caching a read sent as a `POST`, such as a search or a GraphQL query, pass `methods: ['POST']`.
+- **The cache key includes the `fetchOptions` and the client's own `fetch`.** An object in the options, such as an HTTP agent, is compared by identity, and two clients with different `fetch` functions never share an entry. Clients on the global `fetch` share entries as before.
+
+### Documentation
+
+From an outside review of the docs site:
+
+- Handling errors explains that a call liaise refuses to send, such as one with an `undefined` path param, comes back as `'network'` like being offline, and how to tell the two apart. GraphQL errors on a 2xx are listed under `'http'`, and the example `switch` is exhaustive.
+- Retries show how to retry only the methods that are safe to send twice.
+- Quick start sets a `timeout`, since there is no default, and calls `createUser`. It also says liaise is ESM only, which `moduleResolution` settings work, and which TypeScript versions it is tested with.
+- Two recipes were wrong. The React hook showed the previous user after the `id` changed, and the per-attempt timeout replaced the caller's signal, so a cancel left the request running.
+- New notes: `Request` hides the Fetch API's `Request`, typing an error body, GraphQL types are written by hand, and what liaise doesn't do (streaming responses, server-sent events, progress, WebSockets).
+- The Compare page links to the site, and every size figure says which build it measures. The comparison was rerun on 5.2.0.
+- Fixed: scrollbars in dark mode, tables on phones, and the playground showing a timed-out request as "cancelled".
+
+Sizes, gzipped: a REST-only import is 6.5 kB (was 6.2 kB), and 8.9 kB with `poll` and `pollUntil`. The core entry is 10.4 kB (was 7.6 kB), and 11.7 kB with all the middleware (was 9.2 kB).
+
 ## [5.1.2] — 2026-10-07
 
 Fixes `responseType: 'none'` calls that never settled on a cloned response, and moves the documentation to its own site.
@@ -1176,6 +1211,7 @@ Initial release of the rewritten client. Reconstructed from the release commit
   `ArrayBuffer` and strings
 - Response parsing as `json`, `text`, `blob`, `arrayBuffer` or `formData`
 
+[5.2.0]: https://github.com/iremlopsum/liaise/compare/v5.1.2...v5.2.0
 [5.1.2]: https://github.com/iremlopsum/liaise/compare/v5.1.1...v5.1.2
 [5.1.1]: https://github.com/iremlopsum/liaise/compare/v5.1.0...v5.1.1
 [5.1.0]: https://github.com/iremlopsum/liaise/compare/v5.0.3...v5.1.0

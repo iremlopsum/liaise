@@ -8,6 +8,26 @@ For the full record of what changed in each release, see [CHANGELOG.md](./CHANGE
 
 ---
 
+## Upgrading to 5.2.0
+
+One change can need action: **`cacheMiddleware` now caches only `GET` and `HEAD`.** Nothing breaks: a call it no
+longer caches goes to the network, as if it had no cache. If you cached a read that is sent as a `POST`, pass
+`methods`:
+
+```ts
+// A search sent as a POST:
+cacheMiddleware({ ttl: 60_000, methods: ['POST'] })
+```
+
+GraphQL sends every operation as a `POST`, so a cache on a query operation needs `methods: ['POST']` too. Put it
+on the query operations, never on the client, where it would also cache mutations.
+
+The cache key now also includes the `fetchOptions` and the client's own `fetch`. It lives in memory, so there is
+nothing to clear. If you build a `RecordedCall` from `liaise/testing` by hand, add `init: {}`. Everything else in
+5.2.0 is new and opt-in: `poll` and `pollUntil`, `fetchOptions`, a client's own `fetch`.
+
+---
+
 ## Upgrading to 5.1.2
 
 No action needed. A `responseType: 'none'` call no longer hangs when its `Response` is a clone, as a
