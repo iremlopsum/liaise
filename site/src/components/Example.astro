@@ -3,8 +3,9 @@
 import { Code } from 'astro:components'
 import { findRegions } from '../../../scripts/examples.mjs'
 interface Props { name: string }
+declare const __LIAISE_TESTS_DIR__: string // the repo's tests/, set in astro.config.mjs
 const { name } = Astro.props
-const { regions } = findRegions(new URL('../../../tests', import.meta.url).pathname)
+const { regions } = findRegions(__LIAISE_TESTS_DIR__)
 const region = regions.get(name)
 if (!region) throw new Error(`<Example name="${name}">: no test region // example:${name}:start`)
 ---
