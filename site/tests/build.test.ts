@@ -77,6 +77,14 @@ describe('front page', () => {
     const m = html().match(/<a href="(https:\/\/github\.com\/iremlopsum\/liaise\/releases\/tag\/[^"]+)"[^>]*>\s*<span[^>]*>([^<]+)<\/span>/)
     expect(m?.[1]).toBe(`https://github.com/iremlopsum/liaise/releases/tag/v${newest}`)
     expect(m?.[2]).toBe(newest)
+    const sentence = html().match(/releases\/tag\/[^"]+"[^>]*>\s*<span[^>]*>[^<]*<\/span>\s*([^<]*?)\s*<span aria-hidden/)?.[1] ?? ''
+    expect(sentence.length).toBeGreaterThan(0)
+    expect(sentence).not.toContain('`')
+    expect(sentence).not.toContain('](')
+  })
+  it('states the gzipped size from compare/results.json', () => {
+    const results = JSON.parse(readFileSync(new URL('../../compare/results.json', import.meta.url), 'utf8'))
+    expect(html()).toContain(`about ${Math.round(results.sizes.liaise.gzip / 1024)}&nbsp;kB gzipped`)
   })
   it('has exactly five problem rows, each linking to a guide page that exists', () => {
     const rows = [...html().matchAll(/<a href="(\/liaise\/guide\/[^"]+\/)"[^>]*data-problem/g)].map(m => m[1])
