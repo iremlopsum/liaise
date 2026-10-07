@@ -49,7 +49,7 @@ The two results that `pollUntil` builds itself hold:
 | ----- | ----- |
 | `data`, `response` | `null` |
 | `error.status` | `0` |
-| `error.request` | The `method` and `url` of the most recent request, and the `params` you passed. If no request was sent, because the signal was already aborted, the tab was hidden, or a middleware answered without calling `next()`, `method` and `url` are empty strings. |
+| `error.request` | The `method` and `url` of the most recent request that was sent, and the `params` you passed. An attempt that a middleware answered without calling `next()` sent nothing, so it doesn't change them. If no request was sent yet, because the signal was already aborted, the tab was hidden, or a middleware answered every attempt, `method` and `url` are empty strings. |
 | `retry()` | Runs the whole `pollUntil` again, with the same arguments. |
 
 An endpoint that throws instead of returning a `Result`, which a liaise endpoint never does but a hand-written function might, has its throw reported and turned into a `kind: 'middleware'` error. `poll` delivers it and goes on polling, and `pollUntil` resolves with it.

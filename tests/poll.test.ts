@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { createApi, createGraphQL, defineRequest, Operation, gql, poll } from '../src/index.js'
-import { mockFetch, jsonResponse } from '../src/testing.js'
-import type { Result } from '../src/index.js'
+import { mockFetch, jsonResponse, successResult } from '../src/testing.js'
+import type { CallOptions, Result } from '../src/index.js'
 
 type Stats = { n: number }
 let mock: ReturnType<typeof mockFetch>
@@ -48,7 +48,7 @@ describe('poll: the interval', () => {
     stop()
   })
 
-  it("an every that isn't a positive finite number asks once", async () => {
+  it("an every below 1, or one that isn't finite, asks once", async () => {
     for (const every of [0, -5, Number.NaN, Number.POSITIVE_INFINITY]) {
       const api = client()
       const stop = poll(api.getStats, {}, () => {}, { every })
@@ -370,6 +370,31 @@ describe('poll: backoff', () => {
     expect((await gaps(12_000))[0]).toBe(10_000)
     stop()
   })
+
+  it('a Retry-After on a 503 raises the wait the same way', async () => {
+    vi.spyOn(Math, 'random').mockReturnValue(0)
+    const api = sequence([503], { 'retry-after': '10' })
+    const stop = poll(api.getStats, {}, () => {}, { every: 1000 })
+    expect((await gaps(12_000))[0]).toBe(10_000)
+    stop()
+  })
+
+  it('maxEvery caps a Retry-After too', async () => {
+    vi.spyOn(Math, 'random').mockReturnValue(0)
+    const api = sequence([429], { 'retry-after': '600' })
+    const stop = poll(api.getStats, {}, () => {}, { every: 1000, maxEvery: 3000 })
+    expect((await gaps(5000))[0]).toBe(3000)
+    stop()
+  })
+
+  it('callers sharing a poll use the smallest maxEvery', async () => {
+    vi.spyOn(Math, 'random').mockReturnValue(0.999999)
+    const api = sequence([500, 500, 500, 500])
+    const a = poll(api.getStats, {}, () => {}, { every: 1000, maxEvery: 5000 })
+    const b = poll(api.getStats, {}, () => {}, { every: 1000, maxEvery: 3000 })
+    expect(await gaps(10_000)).toEqual([2000, 3000, 3000])
+    a(); b()
+  })
 })
 
 describe('poll: a hidden tab', () => {
@@ -472,5 +497,109 @@ describe('poll: any liaise endpoint', () => {
     expect(seen[0].error?.kind).toBe('middleware')
     expect(seen[1].error).toBeNull()
     stop()
+  })
+})
+
+describe('poll: what the docs promise', () => {
+  it('equal headers objects, and an equal timeout, share one request per tick', async () => {
+    const api = client()
+    const stops = [
+      poll(api.getStats, {}, () => {}, { every: 1000, headers: { 'x-tenant': 'a' } }),
+      poll(api.getStats, {}, () => {}, { every: 1000, headers: { 'x-tenant': 'a' } }),
+    ]
+    await flush()
+    expect(mock.calls).toHaveLength(1)
+    stops.push(
+      poll(api.getStats, {}, () => {}, { every: 1000, timeout: 5000 }),
+      poll(api.getStats, {}, () => {}, { every: 1000, timeout: 5000 }),
+    )
+    await flush()
+    expect(mock.calls).toHaveLength(2)
+    stops.forEach(stop => stop())
+  })
+
+  it('skipMiddleware, or a Headers instance, gets a shared poll of its own', async () => {
+    const api = client()
+    const skip = (_: unknown, next: () => Promise<Result<unknown>>) => next()
+    const stops = [
+      poll(api.getStats, {}, () => {}, { every: 1000, skipMiddleware: [skip] }),
+      poll(api.getStats, {}, () => {}, { every: 1000, skipMiddleware: [skip] }),
+    ]
+    await flush()
+    expect(mock.calls).toHaveLength(2)
+    stops.push(
+      poll(api.getStats, {}, () => {}, { every: 1000, headers: new Headers({ 'x-tenant': 'a' }) }),
+      poll(api.getStats, {}, () => {}, { every: 1000, headers: new Headers({ 'x-tenant': 'a' }) }),
+    )
+    await flush()
+    expect(mock.calls).toHaveLength(4)
+    stops.forEach(stop => stop())
+  })
+
+  it("URLSearchParams, FormData, Blob and ArrayBuffer params can't be compared: each caller gets its own poll", async () => {
+    mock = mockFetch({ 'POST /upload': () => jsonResponse({ ok: true }) })
+    mock.install()
+    const upload = defineRequest<{ ok: boolean }, URLSearchParams | FormData | Blob | ArrayBuffer>()({ method: 'POST', path: '/upload' })
+    const api = createApi({ baseUrl: 'https://api.test', requests: { upload } })
+    const form = new FormData()
+    form.set('x', '1')
+    const stops = [
+      // Equal but separate, then the very same object twice: neither shares.
+      poll(api.upload, new URLSearchParams({ x: '1' }), () => {}, { every: 1000 }),
+      poll(api.upload, new URLSearchParams({ x: '1' }), () => {}, { every: 1000 }),
+      ...[form, new Blob(['x']), new ArrayBuffer(2)].flatMap(body => [
+        poll(api.upload, body, () => {}, { every: 1000 }),
+        poll(api.upload, body, () => {}, { every: 1000 }),
+      ]),
+    ]
+    await flush()
+    expect(mock.calls).toHaveLength(8)
+    stops.forEach(stop => stop())
+  })
+
+  it("a caller's signal isn't passed to the requests: aborting it leaves a shared request running", async () => {
+    // A hand-written Pollable sees exactly the options each request gets.
+    const controller = new AbortController()
+    const passed: Array<AbortSignal | undefined> = []
+    const endpoint = async (_: object, options?: CallOptions) => { passed.push(options?.signal); return successResult({ n: 1 }) }
+    const own = poll(endpoint, {}, () => {}, { every: 1000, signal: controller.signal })
+    await flush()
+    expect(passed[0]).toBeInstanceOf(AbortSignal)
+    expect(passed[0]).not.toBe(controller.signal)
+    own()
+
+    const signals: AbortSignal[] = []
+    const api = client({ 'GET /stats': ({ request }) => { signals.push(request.signal); return new Promise(r => setTimeout(() => r(jsonResponse({ n: 1 })), 3000)) } })
+    const a = new AbortController()
+    const b: Result<Stats>[] = []
+    poll(api.getStats, {}, () => {}, { every: 1000, signal: a.signal })
+    const stopB = poll(api.getStats, {}, r => b.push(r), { every: 1000 })
+    await vi.advanceTimersByTimeAsync(100)
+    a.abort()
+    expect(signals).toHaveLength(1)
+    expect(signals[0].aborted).toBe(false)
+    await vi.advanceTimersByTimeAsync(2900)
+    expect(ns(b)).toEqual([1])
+    stopB()
+  })
+
+  it('per-request headers and timeout go with every request', async () => {
+    const api = client()
+    const stop = poll(api.getStats, {}, () => {}, { every: 1000, headers: { 'x-tenant': 'a' } })
+    await flush()
+    await vi.advanceTimersByTimeAsync(1000)
+    expect(mock.calls.map(c => c.headers.get('x-tenant'))).toEqual(['a', 'a'])
+    stop(); mock.restore()
+
+    // Fake timers drive the per-request deadline only through the setTimeout fallback.
+    vi.stubGlobal('AbortSignal', Object.assign(function () {}, AbortSignal, { timeout: undefined }))
+    vi.spyOn(Math, 'random').mockReturnValue(0)
+    const hangs = client({ 'GET /stats': ({ request }) => new Promise((_, reject) => request.signal.addEventListener('abort', () => reject(request.signal.reason))) })
+    const kinds: string[] = []
+    const stop2 = poll(hangs.getStats, {}, r => kinds.push(r.error?.kind ?? 'ok'), { every: 1000, timeout: 50 })
+    await vi.advanceTimersByTimeAsync(50)
+    await vi.advanceTimersByTimeAsync(1100)
+    expect(kinds).toEqual(['timeout', 'timeout'])
+    stop2()
   })
 })

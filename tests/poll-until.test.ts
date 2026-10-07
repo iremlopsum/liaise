@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { createApi, createGraphQL, defineRequest, gql, Operation, poll, pollUntil } from '../src/index.js'
-import { mockFetch, jsonResponse } from '../src/testing.js'
-import type { Result } from '../src/index.js'
+import { mockFetch, jsonResponse, successResult } from '../src/testing.js'
+import type { Middleware, Result } from '../src/index.js'
 
 type Job = { id: string; status: 'queued' | 'running' | 'done' }
 let mock: ReturnType<typeof mockFetch>
@@ -280,5 +280,97 @@ describe('pollUntil: how it ends, and what it leaves behind', () => {
     vi.stubGlobal('reportError', vi.fn())
     const api = jobs(['done'])
     await expect(pollUntil(api.getJob, { id: '7' }, undefined as never)).resolves.toMatchObject({ error: { kind: 'middleware' } })
+  })
+})
+
+describe('pollUntil: what the docs promise', () => {
+  /** A stub document whose visibility the test controls. */
+  function tab() {
+    const doc = Object.assign(new EventTarget(), { visibilityState: 'visible' as 'visible' | 'hidden' })
+    vi.stubGlobal('document', doc)
+    return {
+      hide() { doc.visibilityState = 'hidden'; doc.dispatchEvent(new Event('visibilitychange')) },
+      show() { doc.visibilityState = 'visible'; doc.dispatchEvent(new Event('visibilitychange')) },
+    }
+  }
+
+  it('giveUpAfter keeps counting in a hidden tab: timeout at giveUpAfter, nothing sent', async () => {
+    tab().hide()
+    const api = jobs(['done'])
+    const pending = pollUntil(api.getJob, { id: '7' }, { every: 1000, until: isDone, giveUpAfter: 5000 })
+    await vi.advanceTimersByTimeAsync(4999)
+    expect(await settled(pending)).toBe(false)
+    await vi.advanceTimersByTimeAsync(1)
+    expect(await settled(pending)).toBe(true)
+    expect((await pending).error?.kind).toBe('timeout')
+    expect(mock.calls).toHaveLength(0)
+  })
+
+  it('keeps polling through a 304, and resolves on a later answer', async () => {
+    vi.spyOn(Math, 'random').mockReturnValue(0)
+    let i = 0
+    mock = mockFetch({ 'GET /jobs/:id': ({ params }) => (i++ === 0 ? new Response(null, { status: 304 }) : jsonResponse({ id: params.id, status: 'done' })) })
+    mock.install()
+    const api = createApi({ baseUrl: 'https://api.test', requests: { getJob: defineRequest<Job>()({ method: 'GET', path: '/jobs/:id' }) } })
+    const statuses: number[] = []
+    const stop = poll(api.getJob, { id: '7' }, r => statuses.push(r.error ? r.error.status : 200), { every: 1000 })
+    const pending = pollUntil(api.getJob, { id: '7' }, { every: 1000, until: isDone })
+    await vi.advanceTimersByTimeAsync(100)
+    expect(statuses).toEqual([304]) // the first answer was a 304 error…
+    expect(await settled(pending)).toBe(false) // …and it didn't end pollUntil
+    await vi.advanceTimersByTimeAsync(1000)
+    expect(await settled(pending)).toBe(true)
+    expect((await pending).error).toBeNull()
+    expect(mock.calls).toHaveLength(2)
+    stop()
+  })
+
+  it("the abort result's error.body is the signal's reason", async () => {
+    const api = jobs(['queued'])
+    const reason = new Error('user left')
+    const controller = new AbortController()
+    const pending = pollUntil(api.getJob, { id: '7' }, { every: 1000, until: isDone, signal: controller.signal })
+    await vi.advanceTimersByTimeAsync(0)
+    controller.abort(reason)
+    expect((await pending).error?.body).toBe(reason)
+    const early = await pollUntil(api.getJob, { id: '7' }, { every: 1000, until: isDone, signal: AbortSignal.abort(reason) })
+    expect(early.error?.body).toBe(reason)
+  })
+
+  it("names no request when none was sent: method and url are '', params as given", async () => {
+    const api = jobs(['done'])
+    const params = { id: '7' }
+    const aborted = await pollUntil(api.getJob, params, { every: 1000, until: isDone, signal: AbortSignal.abort() })
+    expect(aborted.error?.request).toEqual({ method: '', url: '', params })
+    tab().hide()
+    const pending = pollUntil(api.getJob, params, { every: 1000, until: isDone, giveUpAfter: 1000 })
+    await vi.advanceTimersByTimeAsync(1000)
+    expect((await pending).error?.request).toEqual({ method: '', url: '', params })
+    expect(mock.calls).toHaveLength(0)
+  })
+
+  it('error.request names the most recent request that was sent, not an attempt a middleware answered', async () => {
+    const api = jobs(['queued'])
+    // Marks each attempt's URL, sends only the first, and answers the rest with that first Result.
+    let attempt = 0
+    let first: Result<unknown> | undefined
+    const answerAfterFirst: Middleware = async (ctx, next) => {
+      attempt++
+      ctx.request.url = `${ctx.request.url}?attempt=${attempt}`
+      return first ?? (first = await next())
+    }
+    const pending = pollUntil(api.getJob, { id: '7' }, { every: 1000, until: isDone, giveUpAfter: 3500, middleware: [answerAfterFirst] })
+    await vi.advanceTimersByTimeAsync(3500)
+    const { error } = await pending
+    expect(attempt).toBe(4)
+    expect(mock.calls).toHaveLength(1)
+    expect(error?.request).toMatchObject({ method: 'GET', url: 'https://api.test/jobs/7?attempt=1' })
+
+    // A middleware that never calls next(): nothing is sent, so nothing is named.
+    const neverSends: Middleware = async () => successResult({ id: '8', status: 'queued' })
+    const r = pollUntil(api.getJob, { id: '8' }, { every: 1000, until: isDone, giveUpAfter: 1500, middleware: [neverSends] })
+    await vi.advanceTimersByTimeAsync(1500)
+    expect((await r).error?.request).toMatchObject({ method: '', url: '' })
+    expect(mock.calls).toHaveLength(1)
   })
 })

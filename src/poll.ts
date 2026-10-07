@@ -18,8 +18,8 @@ export type Pollable<P extends object, R> = (params: P, options?: CallOptions) =
 /** Options for `poll`, plus any `CallOptions`, which apply to every request. */
 export interface PollOptions extends Omit<CallOptions, 'signal'> {
   /**
-   * Milliseconds to wait after each response before asking again. A value that
-   * isn't a positive finite number asks once and never repeats.
+   * Milliseconds to wait after each response before asking again. A value below
+   * 1, or one that isn't finite, asks once and never repeats.
    */
   every: number
   /** Keep polling while the browser tab is hidden. Default `false`: pause, and ask at once when it's visible again. */
