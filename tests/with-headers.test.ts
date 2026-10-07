@@ -337,7 +337,7 @@ describe('withHeaders: share and cache stay safe', () => {
 
 describe("withHeaders: everything else is the client's", () => {
   const setup = () => {
-    const own = mockFetch({ 'GET /me': () => jsonResponse({ cookie: null }), 'GET /slow': () => new Promise<Response>(() => {}) })
+    const own = mockFetch({ 'GET /me': () => jsonResponse({ cookie: null }), 'GET /slow': async () => { await new Promise(r => setTimeout(r, 200)); return jsonResponse({ cookie: null }) } })
     const onError = vi.fn()
     const spy = vi.spyOn(console, 'log').mockImplementation(() => {})
     const api = createApi({
