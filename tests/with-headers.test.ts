@@ -119,6 +119,45 @@ describe('withHeaders: headers', () => {
   })
 })
 
+describe('withHeaders: never throws', () => {
+  it("an invalid header value: every call is a 'network' Result, getHeaders() is {}, nothing is sent", async () => {
+    serve()
+    const api = makeApi()
+    let copy!: typeof api
+    expect(() => { copy = withHeaders(api, { 'X-Bad': 'a\nb' }) }).not.toThrow()
+    const result = await copy.me()
+    expect(result.error?.kind).toBe('network')
+    expect(result.error?.body).toBeInstanceOf(TypeError)
+    expect(copy.me.getHeaders()).toEqual({})
+    expect(mock.calls).toHaveLength(0)
+  })
+
+  it("something that isn't a client gets a stand-in whose calls are 'network' Results", async () => {
+    const junk = withHeaders({} as ReturnType<typeof makeApi>, { cookie: 'x' })
+    const result = await junk.me()
+    expect(result.error?.kind).toBe('network')
+    expect(String(result.error?.body)).toMatch(/isn't a client from createApi or createGraphQL/)
+    const deeper = await (junk as unknown as { query: { who: () => Promise<{ error: { kind: string } }> } }).query.who()
+    expect(deeper.error.kind).toBe('network')
+  })
+
+  it('the stand-in is not a promise, so awaiting it resolves', async () => {
+    const junk = withHeaders(null as unknown as ReturnType<typeof makeApi>, {})
+    await expect(Promise.race([
+      Promise.resolve(junk).then(() => 'resolved'),
+      new Promise(r => setTimeout(() => r('hung'), 50)),
+    ])).resolves.toBe('resolved')
+  })
+
+  it('a spread client gets the stand-in, and its message says why', async () => {
+    const api = makeApi()
+    const spread = withHeaders({ ...api } as typeof api, { cookie: 'x' })
+    const result = await spread.me()
+    expect(result.error?.kind).toBe('network')
+    expect(String(result.error?.body)).toMatch(/spread/)
+  })
+})
+
 describe('withHeaders: dedupe', () => {
   it('copies that add the same headers share a lane: a new copy per keystroke still cancels the stale call', async () => {
     serve(20)

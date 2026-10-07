@@ -115,4 +115,13 @@ describe('withHeaders: GraphQL', () => {
     const chained = withHeaders(withHeaders(graph, { 'X-A': '1', 'X-B': '1' }).query, { 'X-B': '2' })
     expect(chained.who.getHeaders()).toMatchObject({ 'x-a': '1', 'x-b': '2' })
   })
+
+  it("GraphQL: an invalid header value is a 'network' Result and getHeaders() is {}", async () => {
+    serve()
+    const graph = createGraphQL({ endpoint, operations: { who: op() } })
+    const copy = withHeaders(graph, { 'X Bad': '1' })
+    expect((await copy.who()).error?.kind).toBe('network')
+    expect(copy.who.getHeaders()).toEqual({})
+    expect(mock.calls).toHaveLength(0)
+  })
 })
