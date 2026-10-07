@@ -18,6 +18,7 @@ import type { Middleware, MiddlewareContext, MiddlewareNext, LogOptions, Result,
 import { createLogger, loggerFor } from './utils/log.js'
 import { CacheStore } from './utils/cache.js'
 import { stableKey } from './utils/stable-key.js'
+import { parseRetryAfter } from './utils/retry-after.js'
 
 // Re-exported so consumers of the `./middleware` entry point can name these
 // types directly (e.g. a shared `onRetry` handler, or a reusable options
@@ -51,26 +52,6 @@ function sleep(ms: number, signal?: AbortSignal): Promise<void> {
     const timer = setTimeout(() => { cleanup(); resolve() }, ms)
     signal?.addEventListener('abort', onAbort, { once: true })
   })
-}
-
-/**
- * Parses a `Retry-After` header value in either wire format defined by the
- * HTTP spec — delta-seconds (`"120"`) or an HTTP-date (`"Wed, 21 Oct ...
- * GMT"`). Returns the delay in milliseconds, or `null` if the value is
- * missing, blank, or unparseable in both formats (so the caller can fall
- * back to the computed backoff instead of retrying with `NaN`, throwing, or
- * — for a whitespace-only value, which `Number()` coerces to `0` — silently
- * retrying immediately).
- */
-function parseRetryAfter(value: string | null): number | null {
-  if (!value) return null
-  const trimmed = value.trim()
-  if (!trimmed) return null
-  const seconds = Number(trimmed)
-  if (Number.isFinite(seconds) && seconds >= 0) return seconds * 1000
-  const when = Date.parse(trimmed)
-  if (Number.isNaN(when)) return null
-  return Math.max(0, when - Date.now())
 }
 
 /**

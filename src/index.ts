@@ -25,6 +25,12 @@ export { paginate } from './paginate.js'
 /** Options for `paginate` — `next`, `maxPages`, and any CallOptions. */
 export type { PaginateOptions } from './paginate.js'
 
+/** Asks an endpoint again on an interval; callers asking the same thing share one poll. */
+export { poll } from './poll.js'
+
+/** Options and the endpoint shape for `poll`. */
+export type { Pollable, PollOptions, PollUntilOptions } from './poll.js'
+
 // ---------------------------------------------------------------------------
 // Error class — exported as a value so consumers can use `instanceof`
 // ---------------------------------------------------------------------------
