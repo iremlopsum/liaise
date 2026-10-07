@@ -6,6 +6,7 @@ import sitemap from '@astrojs/sitemap'
 import { fileURLToPath } from 'node:url'
 
 import rehypeBaseLinks from './plugins/rehype-base-links.mjs'
+import rehypeScrollTables from './plugins/rehype-scroll-tables.mjs'
 import monacoCssWithEditor from './plugins/vite-monaco-css.mjs'
 
 // GitHub Pages project site: served under /liaise/ (no custom domain, owner 2026-10-07).
@@ -22,5 +23,5 @@ export default defineConfig({
     // own import.meta.url points into dist/ once bundled, where ../../../tests is site/tests.
     define: { __LIAISE_TESTS_DIR__: JSON.stringify(fileURLToPath(new URL('../tests/', import.meta.url))) },
   },
-  markdown: { shikiConfig: { theme: 'github-dark-default' }, rehypePlugins: [[rehypeBaseLinks, { base: '/liaise' }]] },
+  markdown: { shikiConfig: { theme: 'github-dark-default' }, rehypePlugins: [[rehypeBaseLinks, { base: '/liaise' }], rehypeScrollTables] },
 })

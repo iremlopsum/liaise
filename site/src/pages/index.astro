@@ -43,7 +43,7 @@ const code = (s: string) => s.replace(/`([^`]+)`/g, '<code class="rounded-md bg-
         <div class="mt-8 flex flex-wrap items-center gap-3">
           <a href={url('/start/quick-start/')} class="rounded-full bg-gray-950 px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-gray-800 dark:bg-white dark:text-gray-950 dark:hover:bg-gray-200">Get started</a>
           <button data-copy-install class="group inline-flex items-center gap-3 rounded-full px-4 py-2.5 font-mono text-[13px] text-gray-700 ring-1 ring-gray-950/10 ring-inset transition hover:ring-gray-950/20 dark:text-gray-300 dark:ring-white/10 dark:hover:ring-white/20">
-            <span><span class="text-gray-400 select-none">$ </span>npm install liaise</span>
+            <span><span class="text-gray-400 select-none">$ </span><span data-copy-text>npm install liaise</span></span>
             <span data-label class="font-sans text-[12px] text-gray-500 dark:text-gray-400 group-hover:text-gray-600 dark:group-hover:text-gray-300">Copy</span>
           </button>
         </div>
@@ -89,11 +89,4 @@ const code = (s: string) => s.replace(/`([^`]+)`/g, '<code class="rounded-md bg-
       </div>
     </footer>
   </main>
-  <script is:inline>
-    document.querySelector('[data-copy-install]')?.addEventListener('click', async (e) => {
-      await navigator.clipboard.writeText('npm install liaise')
-      const l = e.currentTarget.querySelector('[data-label]'); l.textContent = 'Copied'
-      setTimeout(() => (l.textContent = 'Copy'), 1200)
-    })
-  </script>
 </Base>

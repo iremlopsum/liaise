@@ -2,7 +2,8 @@
 import Logo from './Logo.astro'
 import { url } from '../url'
 import pkg from '../../../package.json'
-const { active = 'docs' } = Astro.props
+// No default: a page that is in no section (the front page) marks none.
+const { active } = Astro.props
 const link = (key: string) =>
   key === active
     ? 'text-gray-950 dark:text-white font-medium'
