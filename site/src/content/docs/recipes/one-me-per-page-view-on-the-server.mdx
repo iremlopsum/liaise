@@ -5,7 +5,7 @@ order: 6
 ---
 Use this when you render pages on a server, and several of a page's loaders, running in parallel, each need the current user. There is no store to hold the user between them, so each loader asks for it.
 
-Use one client for the whole server, `share: true` on the endpoint, and the user's cookie as a per-call header. `User` and `IncomingRequest` stand for your types; `cookie` stands for however you pass the user's identity.
+Use one client for the whole server, `share: true` on the endpoint, and a copy of the client for each page view that sends the user's cookie ([withHeaders()](/reference/withheaders/)). `User` and `IncomingRequest` stand for your types; `cookie` stands for however you pass the user's identity.
 
 <Example name="server-loaders" />
 

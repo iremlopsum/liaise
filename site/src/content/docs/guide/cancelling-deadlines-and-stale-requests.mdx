@@ -67,6 +67,7 @@ api.searchUsers({ q: 'hel' })  // this one completes
 ```
 
 - **It works per endpoint.** A call to one endpoint never cancels a call to another.
+- **Copies from [`withHeaders()`](/reference/withheaders/) that add the same headers dedupe together**, and copies with different headers never cancel each other's calls. `{ dedupe: false }` turns it off for a copy.
 - **A replaced call ends with `kind: 'abort'`**, so your code can ignore it.
 - **It works together with your own signal and a `timeout`.** Whichever fires first ends the call.
 - It can't be combined with [`share`](/guide/sharing-identical-requests/), which does the opposite.

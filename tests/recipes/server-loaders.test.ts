@@ -15,7 +15,7 @@ mock.install()
 afterEach(() => mock.restore())
 
 // example:server-loaders:start
-import { createApi, defineRequest } from 'liaise'
+import { createApi, defineRequest, withHeaders } from 'liaise'
 
 const me = defineRequest<User>()({ method: 'GET', path: '/me', share: true })
 
@@ -24,10 +24,11 @@ const me = defineRequest<User>()({ method: 'GET', path: '/me', share: true })
 const api = createApi({ baseUrl: 'https://users.internal', requests: { me } })
 
 async function renderPage(req: IncomingRequest) {
-  const asUser = { headers: { cookie: req.headers.cookie ?? '' } }
+  // A copy of the client that sends this user's cookie on every call.
+  const user = withHeaders(api, { cookie: req.headers.cookie ?? '' })
   const [header, cart] = await Promise.all([
-    api.me({}, asUser).then(r => r.data?.name),   // header loader
-    api.me({}, asUser).then(r => r.data?.cartId), // cart loader
+    user.me().then(r => r.data?.name),   // header loader
+    user.me().then(r => r.data?.cartId), // cart loader
   ])
   return { header, cart }
 }
