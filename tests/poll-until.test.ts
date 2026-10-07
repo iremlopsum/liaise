@@ -279,7 +279,6 @@ describe('pollUntil: how it ends, and what it leaves behind', () => {
   it('never rejects, even for options that are not an object', async () => {
     vi.stubGlobal('reportError', vi.fn())
     const api = jobs(['done'])
-    const r = await pollUntil(api.getJob, { id: '7' }, undefined as never)
-    expect(r.error?.kind).toBe('middleware')
+    await expect(pollUntil(api.getJob, { id: '7' }, undefined as never)).resolves.toMatchObject({ error: { kind: 'middleware' } })
   })
 })
