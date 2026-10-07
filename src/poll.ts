@@ -12,6 +12,7 @@ import type { CallOptions, Middleware, Result, SuccessResult } from './types.js'
 import { ApiError, createNetworkErrorResult } from './result.js'
 import { stableKey } from './utils/stable-key.js'
 import { parseRetryAfter } from './utils/retry-after.js'
+import { pollIdOf } from './utils/copy.js'
 
 /** Any liaise endpoint: a `createApi` method or a `createGraphQL` operation. */
 export type Pollable<P extends object, R> = (params: P, options?: CallOptions) => Promise<Result<R>>
@@ -295,15 +296,21 @@ function join(
   const shareable = typeof window !== 'undefined' && typeof endpoint === 'function'
   const paramsKey = shareable ? stableKey(snapshot) : null
   const optionsKey = paramsKey === null ? null : stableKey(callOptions)
-  const key = paramsKey === null || optionsKey === null ? null : `${paramsKey}|${optionsKey}`
-  let byKey = polls.get(endpoint)
+  // A copy from withHeaders names the original client's endpoint and what the
+  // copy adds (src/utils/copy.ts), so copies that send the same thing share one
+  // poll however often they are rebuilt, and copies with different headers never
+  // do. Its key starts with NUL or is '', and a stableKey never starts with NUL.
+  const id = shareable ? pollIdOf(endpoint) : undefined
+  const owner: object = id?.origin ?? endpoint
+  const key = paramsKey === null || optionsKey === null ? null : `${id?.key ?? ''}${paramsKey}|${optionsKey}`
+  let byKey = polls.get(owner)
   let shared = key === null ? undefined : byKey?.get(key)
   if (!shared) {
     shared = new SharedPoll(endpoint, snapshot, callOptions, poll => {
-      if (key !== null && polls.get(endpoint)?.get(key) === poll) polls.get(endpoint)!.delete(key)
+      if (key !== null && polls.get(owner)?.get(key) === poll) polls.get(owner)!.delete(key)
     })
     if (key !== null) {
-      if (!byKey) polls.set(endpoint, (byKey = new Map()))
+      if (!byKey) polls.set(owner, (byKey = new Map()))
       byKey.set(key, shared)
     }
   }

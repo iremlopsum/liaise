@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { AsyncLocalStorage } from 'node:async_hooks'
-import { createApi, createGraphQL, defineRequest, Operation, gql, poll } from '../src/index.js'
+import { createApi, createGraphQL, defineRequest, Operation, gql, poll, withHeaders } from '../src/index.js'
 import { mockFetch, jsonResponse, successResult } from '../src/testing.js'
 import type { CallOptions, Middleware, Result } from '../src/index.js'
 
@@ -961,5 +961,77 @@ describe('poll: what the docs promise', () => {
     await vi.advanceTimersByTimeAsync(1100)
     expect(kinds).toEqual(['timeout', 'timeout'])
     stop2()
+  })
+})
+
+describe('poll: copies from withHeaders', () => {
+  it('copies rebuilt with the same headers share one loop', async () => {
+    shareable()
+    const api = client()
+    const stopA = poll(withHeaders(api, { cookie: 's=a' }).getStats, {}, () => {}, { every: 1000 })
+    const stopB = poll(withHeaders(api, { cookie: 's=a' }).getStats, {}, () => {}, { every: 1000 })
+    await flush()
+    expect(mock.calls).toHaveLength(1)
+    stopA(); stopB()
+  })
+
+  it('different headers, or dedupe: false, get a loop of their own', async () => {
+    shareable()
+    const api = client()
+    const stops = [
+      poll(withHeaders(api, { cookie: 's=a' }).getStats, {}, () => {}, { every: 1000 }),
+      poll(withHeaders(api, { cookie: 's=b' }).getStats, {}, () => {}, { every: 1000 }),
+      poll(withHeaders(api, { cookie: 's=a' }, { dedupe: false }).getStats, {}, () => {}, { every: 1000 }),
+    ]
+    await flush()
+    expect(mock.calls).toHaveLength(3)
+    expect(mock.calls.map(c => c.headers.get('cookie'))).toEqual(['s=a', 's=b', 's=a'])
+    stops.forEach(stop => stop())
+  })
+
+  it('a chained copy shares with a direct copy that sends the same headers', async () => {
+    shareable()
+    const api = client()
+    const chained = withHeaders(withHeaders(api, { cookie: 's=x' }), { cookie: 's=a' })
+    const direct = withHeaders(api, { cookie: 's=a' })
+    const stopA = poll(chained.getStats, {}, () => {}, { every: 1000 })
+    const stopB = poll(direct.getStats, {}, () => {}, { every: 1000 })
+    await flush()
+    expect(mock.calls).toHaveLength(1)
+    stopA(); stopB()
+  })
+
+  it("a copy that adds nothing shares the original's loop", async () => {
+    shareable()
+    const api = client()
+    const stopA = poll(api.getStats, {}, () => {}, { every: 1000 })
+    const stopB = poll(withHeaders(api, {}).getStats, {}, () => {}, { every: 1000 })
+    await flush()
+    expect(mock.calls).toHaveLength(1)
+    stopA(); stopB()
+  })
+
+  it('without a window, copies never share', async () => {
+    const api = client()
+    const stopA = poll(withHeaders(api, { cookie: 's=a' }).getStats, {}, () => {}, { every: 1000 })
+    const stopB = poll(withHeaders(api, { cookie: 's=a' }).getStats, {}, () => {}, { every: 1000 })
+    await flush()
+    expect(mock.calls).toHaveLength(2)
+    stopA(); stopB()
+  })
+
+  it('split GraphQL sides share with the original side, however the copy was reached', async () => {
+    shareable()
+    mock = mockFetch({ 'POST /graphql': () => jsonResponse({ data: { stats: { n: 1 } } }) })
+    mock.install()
+    const getStats = new Operation<Record<string, never>, { stats: Stats }>({ operation: gql`query GetStats { stats { n } }` })
+    const graph = createGraphQL({ endpoint: 'https://api.test/graphql', queries: { getStats } })
+    const viaRoot = withHeaders(graph, { cookie: 's=a' }).query.getStats
+    const viaSide = withHeaders(graph.query, { cookie: 's=a' }).getStats
+    const stopA = poll(viaRoot, {}, () => {}, { every: 1000 })
+    const stopB = poll(viaSide, {}, () => {}, { every: 1000 })
+    await flush()
+    expect(mock.calls).toHaveLength(1)
+    stopA(); stopB()
   })
 })
