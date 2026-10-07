@@ -181,6 +181,21 @@ describe('pollUntil', () => {
     stop()
   })
 
+  it("a shorter-every joiner that leaves at once doesn't bring the next request forward", async () => {
+    shareable()
+    const api = jobs(['done'])
+    const stop = poll(api.getJob, { id: '7' }, () => {}, { every: 3000 })
+    await vi.advanceTimersByTimeAsync(20) // answered at 0 ms: the next request is due at 3000 ms
+    // A pollUntil that the last answer already satisfies, and a poll stopped at once.
+    expect((await pollUntil(api.getJob, { id: '7' }, { every: 50, until: isDone })).error).toBeNull()
+    poll(api.getJob, { id: '7' }, () => {}, { every: 50 })()
+    await vi.advanceTimersByTimeAsync(2979) // 2999 ms
+    expect(mock.calls).toHaveLength(1)
+    await vi.advanceTimersByTimeAsync(1) // 3000 ms
+    expect(mock.calls).toHaveLength(2)
+    stop()
+  })
+
   it('until throwing, where there is no document, is logged as until', async () => {
     const log = vi.spyOn(console, 'error').mockImplementation(() => {})
     const api = jobs(['done'])
@@ -342,6 +357,16 @@ describe('pollUntil: how it ends, and what it leaves behind', () => {
     expect((await pending).error).toBeNull()
     await vi.advanceTimersByTimeAsync(5000)
     expect(mock.calls).toHaveLength(2)
+
+    // Ended by giveUpAfter: its timer must not throw (uncaught there, it would crash Node).
+    mock.restore()
+    const stuck = jobs(['queued'])
+    const timedOut = pollUntil(stuck.getJob, { id: '7' }, { every: 50, until: isDone, giveUpAfter: 120, signal })
+    let thrown: unknown
+    await vi.advanceTimersByTimeAsync(120).catch((error: unknown) => { thrown = error })
+    expect(thrown).toBeUndefined()
+    expect(await settled(timedOut)).toBe(true)
+    expect((await timedOut).error?.kind).toBe('timeout')
   })
 
   it('params that are undefined are passed on as they are', async () => {

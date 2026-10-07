@@ -22,7 +22,7 @@ Neither one throws. Called with options it can't use, such as none at all, `poll
 
 Every other option is one of the [`CallOptions`](/reference/calloptions/): `headers`, `timeout`, `middleware` and `skipMiddleware`. Each goes with every request, and is part of what decides whether callers [share a poll](/guide/polling/#several-callers-one-poll).
 
-Polls are shared in browsers and React Native. On a server (no `window`) each call gets its own poll, because sharing is decided before your middleware runs and a server handles many users.
+Polls are shared in browsers and React Native. On a server (no `window`) each call gets its own poll, because sharing is decided before your middleware runs and a server handles many users. The check is `typeof window`. A server that defines a global `window`, such as Deno 1.x or a global jsdom, shares like a browser. There, pass the user's token in the poll's `headers` option, which is part of what decides sharing.
 
 ## PollUntilOptions
 

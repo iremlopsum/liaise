@@ -44,7 +44,7 @@ In the example, a 404 for an export that doesn't exist ends the wait at once wit
 
 Each `poll()` or `pollUntil()` call is a caller. Callers that ask the same thing share one poll: one request per interval, with every `Result` handed to each of them. Five components that show the same count send one request every 5 seconds, not five.
 
-Polls are shared in browsers and React Native. On a server (no `window`) each call gets its own poll, because sharing is decided before your middleware runs and a server handles many users. A middleware that adds the current user's token would otherwise hand one user's answers to another.
+Polls are shared in browsers and React Native. On a server (no `window`) each call gets its own poll, because sharing is decided before your middleware runs and a server handles many users. A middleware that adds the current user's token would otherwise hand one user's answers to another. The check is `typeof window`. A server that defines a global `window`, such as Deno 1.x or a global jsdom, shares like a browser. There, pass the user's token in the poll's `headers` option, which is part of what decides sharing.
 
 Callers ask the same thing when they use:
 

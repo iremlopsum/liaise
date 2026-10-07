@@ -263,6 +263,20 @@ describe('poll: sharing needs a window', () => {
     stops.forEach(stop => stop())
   })
 
+  it("with a window, a token passed in the poll's headers keeps each user's poll apart", async () => {
+    shareable()
+    mock = mockFetch({ 'GET /me': ({ request }) => jsonResponse({ owner: request.headers.get('authorization') }) })
+    mock.install()
+    const getMe = defineRequest<{ owner: string }>()({ method: 'GET', path: '/me' })
+    const api = createApi({ baseUrl: 'https://api.test', requests: { getMe } })
+    const seen: Record<string, Array<string | null>> = { alice: [], bob: [] }
+    const stops = ['alice', 'bob'].map(name =>
+      poll(api.getMe, {}, r => seen[name].push(r.error ? null : r.data.owner), { every: 1000, headers: { authorization: `Bearer ${name}` } }))
+    await flush()
+    expect(seen).toEqual({ alice: ['Bearer alice'], bob: ['Bearer bob'] })
+    stops.forEach(stop => stop())
+  })
+
   it('in a browser (a window) the same callers share one request per tick', async () => {
     shareable()
     const { seen, stops } = perUser()
@@ -753,13 +767,16 @@ describe('poll: never throws, whatever it is given', () => {
     stop()
   })
 
-  it('a signal that is not an AbortSignal (the controller itself): reported, and nothing keeps polling', async () => {
+  it('a signal that is not an AbortSignal (the controller itself): reported, and nothing is sent', async () => {
     const api = client()
+    let calls = 0
+    const counted = (params: object, options?: CallOptions) => { calls++; return api.getStats(params, options) }
     let stop: unknown
-    expect(() => { stop = poll(api.getStats, {}, () => {}, { every: 1000, signal: new AbortController() as never }) }).not.toThrow()
+    expect(() => { stop = poll(counted, {}, () => {}, { every: 1000, signal: new AbortController() as never }) }).not.toThrow()
     expect(stop).toBeTypeOf('function')
     await vi.advanceTimersByTimeAsync(5000)
-    expect(mock.calls.length).toBeLessThanOrEqual(1) // the first request, if it was sent, was aborted
+    expect(calls).toBe(0) // the endpoint was never called, so no request was started
+    expect(mock.calls).toHaveLength(0)
     expect(vi.getTimerCount()).toBe(0)
     expect(console.error).toHaveBeenCalledTimes(1)
   })

@@ -118,18 +118,23 @@ class SharedPoll {
     } else {
       this.callers.add(caller)
       const last = this.last
-      // Not to a caller that left meanwhile (Strict Mode's cleanup), nor one that a newer
-      // answer reached first.
-      if (last) queueMicrotask(() => { if (this.callers.has(caller) && this.last === last) deliver(caller, last) })
-      if (this.timer !== undefined) {
-        // A shorter every takes effect now, not after the longer wait already started.
-        // A backoff after failures stays as it is.
-        if (!this.failures && caller.every < this.wait) this.arm(this.answeredAt + (this.wait = caller.every) - Date.now())
-      } else if (!this.controller && !this.paused() && (this.repeats() || !last)) {
-        // A joiner can make an idle poll ask again: an inBackground caller in a hidden
-        // tab, or a repeating caller joining a poll that asked once.
-        this.resume()
+      if (last) {
+        queueMicrotask(() => {
+          // Nothing for a caller that left meanwhile (Strict Mode's cleanup), and not the
+          // last answer if a newer one reached it first.
+          if (!this.callers.has(caller)) return
+          if (this.last === last) deliver(caller, last)
+          // A shorter every takes effect now, not after the longer wait already started,
+          // but only for a caller still there after that answer (a pollUntil it satisfied
+          // has left). A backoff after failures stays as it is.
+          if (this.timer !== undefined && this.callers.has(caller) && !this.failures && caller.every < this.wait) {
+            this.arm(this.answeredAt + (this.wait = caller.every) - Date.now())
+          }
+        })
       }
+      // A joiner can make an idle poll ask again: an inBackground caller in a hidden
+      // tab, or a repeating caller joining a poll that asked once.
+      if (this.timer === undefined && !this.controller && !this.paused() && (this.repeats() || !last)) this.resume()
     }
     return () => this.leave(caller)
   }
@@ -333,6 +338,8 @@ export function poll<P extends object, R>(
       leave()
       signal?.removeEventListener?.('abort', stop)
     }
+    // Before joining: a signal that isn't one throws here, before anything is sent.
+    signal?.addEventListener('abort', stop, { once: true })
     // A caller that asks once leaves after its answer, even beside callers that repeat,
     // so nothing it started is left running.
     const once = Number.isNaN(positive(options.every))
@@ -340,7 +347,6 @@ export function poll<P extends object, R>(
       if (once) stop()
       callback(r as Result<R>)
     }))
-    signal?.addEventListener('abort', stop, { once: true })
     return stop
   } catch (error) {
     // Untyped misuse, such as no options or a signal that isn't one: report it, stop
@@ -366,7 +372,7 @@ function endsPolling(kind: string, status: number): boolean {
  * Polls until `until` returns true for a successful Result, and resolves with it.
  * Also resolves — never rejects — with an error that waiting can't fix, a
  * `kind: 'timeout'` error after `giveUpAfter`, or `kind: 'abort'` when `signal`
- * aborts. Joins the same shared poll as `poll`.
+ * aborts. Shares like `poll`.
  */
 export function pollUntil<P extends object, R>(
   endpoint: Pollable<P, R>,
@@ -400,7 +406,9 @@ export function pollUntil<P extends object, R>(
         if (giveUp !== undefined) clearTimeout(giveUp)
         leave()
         resolve(result)
-        signal?.removeEventListener('abort', onAbort)
+        // A signal-like object may have no removeEventListener; run from the giveUpAfter
+        // timer, a throw here would be uncaught.
+        signal?.removeEventListener?.('abort', onAbort)
       }
       const onAbort = (): void => finish(own('abort', signal!.reason))
 
