@@ -8,7 +8,7 @@
       "axios": "1.20.0",
       "ky": "2.1.0",
       "ofetch": "1.5.1",
-      "liaise": "5.2.0"
+      "liaise": "5.3.0"
     },
     "overheadNote": "localhost, keep-alive as each library defaults; a real network adds milliseconds per request, this measures microseconds"
   },
@@ -31,11 +31,11 @@
           },
           "default": {
             "outcome": "wrong data",
-            "ms": 23
+            "ms": 21
           },
           "configured": {
             "outcome": "throws Error",
-            "ms": 24
+            "ms": 21
           }
         },
         "axios": {
@@ -51,11 +51,11 @@
           },
           "default": {
             "outcome": "throws AxiosError",
-            "ms": 19
+            "ms": 17
           },
           "configured": {
             "outcome": "throws AxiosError",
-            "ms": 20
+            "ms": 17
           }
         },
         "ky": {
@@ -71,11 +71,11 @@
           },
           "default": {
             "outcome": "throws HTTPError",
-            "ms": 935
+            "ms": 938
           },
           "configured": {
             "outcome": "throws HTTPError",
-            "ms": 936
+            "ms": 940
           }
         },
         "ofetch": {
@@ -91,11 +91,11 @@
           },
           "default": {
             "outcome": "throws FetchError",
-            "ms": 30
+            "ms": 27
           },
           "configured": {
             "outcome": "throws FetchError",
-            "ms": 30
+            "ms": 27
           }
         },
         "liaise": {
@@ -111,11 +111,11 @@
           },
           "default": {
             "outcome": "error result (http)",
-            "ms": 25
+            "ms": 22
           },
           "configured": {
             "outcome": "error result (http)",
-            "ms": 25
+            "ms": 22
           }
         }
       }
@@ -138,11 +138,11 @@
           },
           "default": {
             "outcome": "throws TypeError",
-            "ms": 6
+            "ms": 11
           },
           "configured": {
             "outcome": "throws TypeError",
-            "ms": 6
+            "ms": 11
           }
         },
         "axios": {
@@ -158,11 +158,11 @@
           },
           "default": {
             "outcome": "throws AxiosError (name: Error)",
-            "ms": 6
+            "ms": 12
           },
           "configured": {
             "outcome": "throws AxiosError (name: Error)",
-            "ms": 6
+            "ms": 11
           }
         },
         "ky": {
@@ -178,11 +178,11 @@
           },
           "default": {
             "outcome": "throws NetworkError",
-            "ms": 912
+            "ms": 923
           },
           "configured": {
             "outcome": "throws NetworkError",
-            "ms": 912
+            "ms": 923
           }
         },
         "ofetch": {
@@ -198,11 +198,11 @@
           },
           "default": {
             "outcome": "throws FetchError",
-            "ms": 8
+            "ms": 15
           },
           "configured": {
             "outcome": "throws FetchError",
-            "ms": 8
+            "ms": 15
           }
         },
         "liaise": {
@@ -218,11 +218,11 @@
           },
           "default": {
             "outcome": "error result (network)",
-            "ms": 7
+            "ms": 13
           },
           "configured": {
             "outcome": "error result (network)",
-            "ms": 7
+            "ms": 13
           }
         }
       }
@@ -245,11 +245,11 @@
           },
           "configured": {
             "outcome": "throws TimeoutError",
-            "ms": 3001
+            "ms": 3006
           },
           "default": {
             "outcome": "still waiting after 15s",
-            "ms": 15000
+            "ms": 15001
           }
         },
         "axios": {
@@ -265,7 +265,7 @@
           },
           "configured": {
             "outcome": "throws AxiosError",
-            "ms": 3005
+            "ms": 3011
           },
           "default": {
             "outcome": "still waiting after 15s",
@@ -285,11 +285,11 @@
           },
           "configured": {
             "outcome": "throws TimeoutError",
-            "ms": 3004
+            "ms": 3010
           },
           "default": {
             "outcome": "throws TimeoutError",
-            "ms": 10003
+            "ms": 10008
           }
         },
         "ofetch": {
@@ -305,11 +305,11 @@
           },
           "configured": {
             "outcome": "throws FetchError",
-            "ms": 3003
+            "ms": 3007
           },
           "default": {
             "outcome": "still waiting after 15s",
-            "ms": 15001
+            "ms": 15000
           }
         },
         "liaise": {
@@ -325,11 +325,11 @@
           },
           "configured": {
             "outcome": "error result (timeout)",
-            "ms": 3003
+            "ms": 3008
           },
           "default": {
             "outcome": "still waiting after 15s",
-            "ms": 15003
+            "ms": 15000
           }
         }
       }
@@ -352,11 +352,11 @@
           },
           "default": {
             "outcome": "throws SyntaxError",
-            "ms": 16
+            "ms": 15
           },
           "configured": {
             "outcome": "throws SyntaxError",
-            "ms": 17
+            "ms": 15
           }
         },
         "axios": {
@@ -372,11 +372,11 @@
           },
           "default": {
             "outcome": "wrong data",
-            "ms": 17
+            "ms": 16
           },
           "configured": {
             "outcome": "throws AxiosError (name: SyntaxError)",
-            "ms": 18
+            "ms": 16
           }
         },
         "ky": {
@@ -392,11 +392,11 @@
           },
           "default": {
             "outcome": "throws SyntaxError",
-            "ms": 19
+            "ms": 17
           },
           "configured": {
             "outcome": "throws SyntaxError",
-            "ms": 20
+            "ms": 18
           }
         },
         "ofetch": {
@@ -412,11 +412,11 @@
           },
           "default": {
             "outcome": "wrong data",
-            "ms": 20
+            "ms": 19
           },
           "configured": {
             "outcome": "throws SyntaxError",
-            "ms": 20
+            "ms": 19
           }
         },
         "liaise": {
@@ -432,11 +432,11 @@
           },
           "default": {
             "outcome": "error result (parse)",
-            "ms": 20
+            "ms": 19
           },
           "configured": {
             "outcome": "error result (parse)",
-            "ms": 21
+            "ms": 20
           }
         }
       }
@@ -459,11 +459,11 @@
           },
           "default": {
             "outcome": "throws SyntaxError",
-            "ms": 10
+            "ms": 9
           },
           "configured": {
             "outcome": "resolves with undefined",
-            "ms": 10
+            "ms": 9
           }
         },
         "axios": {
@@ -479,11 +479,11 @@
           },
           "default": {
             "outcome": "resolves with \"\"",
-            "ms": 11
+            "ms": 9
           },
           "configured": {
             "outcome": "resolves with \"\"",
-            "ms": 11
+            "ms": 9
           }
         },
         "ky": {
@@ -499,11 +499,11 @@
           },
           "default": {
             "outcome": "throws SyntaxError",
-            "ms": 11
+            "ms": 10
           },
           "configured": {
             "outcome": "resolves with undefined",
-            "ms": 11
+            "ms": 10
           }
         },
         "ofetch": {
@@ -519,11 +519,11 @@
           },
           "default": {
             "outcome": "resolves with undefined",
-            "ms": 11
+            "ms": 9
           },
           "configured": {
             "outcome": "resolves with undefined",
-            "ms": 12
+            "ms": 9
           }
         },
         "liaise": {
@@ -539,11 +539,11 @@
           },
           "default": {
             "outcome": "error result (parse)",
-            "ms": 12
+            "ms": 9
           },
           "configured": {
             "outcome": "resolves with undefined",
-            "ms": 12
+            "ms": 9
           }
         }
       }
@@ -566,11 +566,11 @@
           },
           "configured": {
             "outcome": "shows \"rea\"",
-            "ms": 30
+            "ms": 25
           },
           "default": {
             "outcome": "shows \"r\"",
-            "ms": 313
+            "ms": 312
           }
         },
         "axios": {
@@ -586,11 +586,11 @@
           },
           "configured": {
             "outcome": "shows \"rea\"",
-            "ms": 29
+            "ms": 26
           },
           "default": {
             "outcome": "shows \"r\"",
-            "ms": 314
+            "ms": 313
           }
         },
         "ky": {
@@ -606,7 +606,7 @@
           },
           "configured": {
             "outcome": "shows \"rea\"",
-            "ms": 30
+            "ms": 25
           },
           "default": {
             "outcome": "shows \"r\"",
@@ -626,7 +626,7 @@
           },
           "configured": {
             "outcome": "shows \"rea\"",
-            "ms": 30
+            "ms": 25
           },
           "default": {
             "outcome": "shows \"r\"",
@@ -646,11 +646,11 @@
           },
           "configured": {
             "outcome": "shows \"rea\"",
-            "ms": 30
+            "ms": 26
           },
           "default": {
             "outcome": "shows \"r\"",
-            "ms": 315
+            "ms": 316
           }
         }
       }
@@ -673,11 +673,11 @@
           },
           "default": {
             "outcome": "5 refresh calls, 1/5 succeed",
-            "ms": 74
+            "ms": 88
           },
           "configured": {
             "outcome": "1 refresh call, 5/5 succeed",
-            "ms": 88
+            "ms": 100
           }
         },
         "axios": {
@@ -693,11 +693,11 @@
           },
           "default": {
             "outcome": "5 refresh calls, 1/5 succeed",
-            "ms": 63
+            "ms": 75
           },
           "configured": {
             "outcome": "1 refresh call, 5/5 succeed",
-            "ms": 61
+            "ms": 71
           }
         },
         "ky": {
@@ -713,11 +713,11 @@
           },
           "default": {
             "outcome": "5 refresh calls, 1/5 succeed",
-            "ms": 68
+            "ms": 78
           },
           "configured": {
             "outcome": "1 refresh call, 5/5 succeed",
-            "ms": 363
+            "ms": 380
           }
         },
         "ofetch": {
@@ -733,11 +733,11 @@
           },
           "default": {
             "outcome": "5 refresh calls, 1/5 succeed",
-            "ms": 67
+            "ms": 75
           },
           "configured": {
             "outcome": "1 refresh call, 5/5 succeed",
-            "ms": 81
+            "ms": 88
           }
         },
         "liaise": {
@@ -753,11 +753,11 @@
           },
           "default": {
             "outcome": "5 refresh calls, 1/5 succeed",
-            "ms": 66
+            "ms": 73
           },
           "configured": {
             "outcome": "1 refresh call, 5/5 succeed",
-            "ms": 80
+            "ms": 86
           }
         }
       }
@@ -780,11 +780,11 @@
           },
           "default": {
             "outcome": "after 1.0s: wrong data, 1 attempt",
-            "ms": 1008
+            "ms": 1010
           },
           "configured": {
             "outcome": "after 3.0s: throws TimeoutError, 3 attempts",
-            "ms": 3002
+            "ms": 3003
           }
         },
         "axios": {
@@ -800,7 +800,7 @@
           },
           "default": {
             "outcome": "after 1.0s: throws AxiosError, 1 attempt",
-            "ms": 1009
+            "ms": 1013
           },
           "configured": {
             "outcome": "after 3.0s: throws CanceledError, 3 attempts",
@@ -824,7 +824,7 @@
           },
           "default": {
             "outcome": "after 3.9s: throws HTTPError, 3 attempts",
-            "ms": 3928
+            "ms": 3932
           }
         },
         "ofetch": {
@@ -840,11 +840,11 @@
           },
           "default": {
             "outcome": "after 2.0s: throws FetchError, 2 attempts",
-            "ms": 2026
+            "ms": 2027
           },
           "configured": {
             "outcome": "after 3.0s: throws FetchError, 3 attempts",
-            "ms": 3005
+            "ms": 3004
           }
         },
         "liaise": {
@@ -860,11 +860,11 @@
           },
           "default": {
             "outcome": "after 1.0s: error result (http), 1 attempt",
-            "ms": 1011
+            "ms": 1017
           },
           "configured": {
             "outcome": "after 3.0s: error result (timeout), 3 attempts",
-            "ms": 3006
+            "ms": 3005
           }
         }
       }
@@ -887,11 +887,11 @@
           },
           "default": {
             "outcome": "requests /s/users/undefined",
-            "ms": 10
+            "ms": 9
           },
           "configured": {
             "outcome": "requests /s/users/undefined",
-            "ms": 11
+            "ms": 9
           }
         },
         "axios": {
@@ -907,11 +907,11 @@
           },
           "default": {
             "outcome": "requests /s/users/undefined",
-            "ms": 12
+            "ms": 9
           },
           "configured": {
             "outcome": "requests /s/users/undefined",
-            "ms": 12
+            "ms": 9
           }
         },
         "ky": {
@@ -927,11 +927,11 @@
           },
           "default": {
             "outcome": "requests /s/users/undefined",
-            "ms": 12
+            "ms": 9
           },
           "configured": {
             "outcome": "requests /s/users/undefined",
-            "ms": 13
+            "ms": 9
           }
         },
         "ofetch": {
@@ -947,11 +947,11 @@
           },
           "default": {
             "outcome": "requests /s/users/undefined",
-            "ms": 13
+            "ms": 10
           },
           "configured": {
             "outcome": "requests /s/users/undefined",
-            "ms": 13
+            "ms": 10
           }
         },
         "liaise": {
@@ -967,11 +967,11 @@
           },
           "default": {
             "outcome": "refused before sending: error result (network)",
-            "ms": 3
+            "ms": 5
           },
           "configured": {
             "outcome": "refused before sending: error result (network)",
-            "ms": 3
+            "ms": 5
           }
         }
       }
@@ -998,7 +998,7 @@
           },
           "default": {
             "outcome": "wrong data",
-            "ms": 5
+            "ms": 3
           }
         },
         "axios": {
@@ -1018,7 +1018,7 @@
           },
           "default": {
             "outcome": "wrong data",
-            "ms": 6
+            "ms": 3
           }
         },
         "ky": {
@@ -1034,11 +1034,11 @@
           },
           "default": {
             "outcome": "wrong data",
-            "ms": 6
+            "ms": 4
           },
           "configured": {
             "outcome": "throws SchemaValidationError",
-            "ms": 7
+            "ms": 5
           }
         },
         "ofetch": {
@@ -1058,7 +1058,7 @@
           },
           "default": {
             "outcome": "wrong data",
-            "ms": 9
+            "ms": 4
           }
         },
         "liaise": {
@@ -1074,11 +1074,11 @@
           },
           "default": {
             "outcome": "wrong data",
-            "ms": 9
+            "ms": 4
           },
           "configured": {
             "outcome": "error result (parse)",
-            "ms": 10
+            "ms": 4
           }
         }
       }
@@ -1102,73 +1102,73 @@
       "brotli": 3694
     },
     "liaise": {
-      "gzip": 6721,
-      "brotli": 6128
+      "gzip": 7181,
+      "brotli": 6530
     },
     "liaise + retryMiddleware": {
-      "gzip": 7292,
-      "brotli": 6629
+      "gzip": 7746,
+      "brotli": 7034
     }
   },
   "overhead": {
     "fetch": {
       "sequential": {
-        "median": 15523,
-        "min": 14616,
-        "max": 16537
+        "median": 16550,
+        "min": 14668,
+        "max": 17117
       },
       "concurrent": {
-        "median": 18813,
-        "min": 16744,
-        "max": 19127
+        "median": 19496,
+        "min": 17587,
+        "max": 20150
       }
     },
     "axios": {
       "sequential": {
-        "median": 11631,
-        "min": 9529,
-        "max": 12627
+        "median": 13540,
+        "min": 11196,
+        "max": 13872
       },
       "concurrent": {
-        "median": 14454,
-        "min": 13343,
-        "max": 14989
+        "median": 15556,
+        "min": 14322,
+        "max": 16090
       }
     },
     "ky": {
       "sequential": {
-        "median": 12919,
-        "min": 11884,
-        "max": 13289
+        "median": 13721,
+        "min": 12672,
+        "max": 14694
       },
       "concurrent": {
-        "median": 14628,
-        "min": 13970,
-        "max": 15649
+        "median": 15895,
+        "min": 15217,
+        "max": 16246
       }
     },
     "ofetch": {
       "sequential": {
-        "median": 14635,
-        "min": 13209,
-        "max": 15594
+        "median": 16157,
+        "min": 15632,
+        "max": 16639
       },
       "concurrent": {
-        "median": 17891,
-        "min": 17099,
-        "max": 18368
+        "median": 18840,
+        "min": 18412,
+        "max": 19610
       }
     },
     "liaise": {
       "sequential": {
-        "median": 14904,
-        "min": 11306,
-        "max": 15649
+        "median": 16131,
+        "min": 15574,
+        "max": 16791
       },
       "concurrent": {
-        "median": 17943,
-        "min": 10043,
-        "max": 18538
+        "median": 18797,
+        "min": 17854,
+        "max": 19341
       }
     }
   }
