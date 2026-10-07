@@ -78,6 +78,7 @@ jobs:
       - run: npm run test:run
       - run: npm run test:integration
       - run: npm run docs:check
+      - run: npm run docs:types
       - run: npm run build
       - run: npm run size
 
@@ -213,22 +214,16 @@ jobs:
 
   # Docs go live with the version they describe. Must live here: a Release created with
   # GITHUB_TOKEN does not trigger other workflows. Only after `release` succeeded, so a
-  # dry run (release skipped) or a failed publish never deploys.
-  docs:
+  # dry run (release skipped) or a failed publish never deploys; and only for the newest
+  # version (`latest`), so repairing an older release never puts its docs back up.
+  # Two jobs: the build installs and runs the site's third-party packages, so it holds no
+  # token that can deploy; the deploy job runs nothing but actions/deploy-pages.
+  docs-build:
     needs: [check, release]
-    if: ${{ !cancelled() && needs.check.outputs.dry_run != 'true' && needs.release.result == 'success' }}
-    # Shares the group with docs.yml: the two never deploy at once.
-    concurrency:
-      group: pages
-      cancel-in-progress: false
+    if: ${{ !cancelled() && needs.check.outputs.dry_run != 'true' && needs.check.outputs.latest == 'true' && needs.release.result == 'success' }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      pages: write
-      id-token: write
-    environment:
-      name: github-pages
-      url: ${{ steps.deploy.outputs.page_url }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -238,10 +233,27 @@ jobs:
         with:
           node-version: 22
       - run: npm ci && npm run build
-      - run: npm ci --prefix site && npm --prefix site run build
-      - uses: actions/configure-pages@45bfe0192ca1faeb007ade9deae92b16b8254a0d # v6.0.0
+      - run: npm ci --prefix site && npm --prefix site run build && npm --prefix site test
       - uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
         with:
           path: site/dist
+
+  docs-deploy:
+    needs: docs-build
+    # Explicit: on the repair path `publish` was skipped, and the default success() would
+    # skip this job for it too.
+    if: ${{ !cancelled() && needs.docs-build.result == 'success' }}
+    # Shares the group with docs.yml's deploy: the two never deploy at once.
+    concurrency:
+      group: pages
+      cancel-in-progress: false
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
       - id: deploy
         uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346 # v5.0.1
