@@ -16,7 +16,8 @@
 
 import type { Middleware, MiddlewareContext, MiddlewareNext, LogOptions, Result, RetryOptions, RetryInfo } from './types.js'
 import { createLogger, loggerFor } from './utils/log.js'
-import { CacheStore } from './utils/cache.js'
+import { CacheStore, cacheOptionsKey } from './utils/cache.js'
+import { sendableFetchOptions } from './utils/fetch-options.js'
 import { stableKey } from './utils/stable-key.js'
 import { parseRetryAfter } from './utils/retry-after.js'
 
@@ -377,7 +378,9 @@ export type CacheMiddleware = Middleware & { clear(): void }
  * content-based key (see `src/utils/stable-key.ts`): object keys sorted,
  * `undefined` members dropped, `Date` by its ISO string, `Map`, `Set` and
  * typed arrays by their entries. It is derived from the original params
- * object, not the processed URL.
+ * object, not the processed URL. The key also holds the method, the URL, the
+ * headers and the `fetchOptions` as they are sent: plain values by content,
+ * any other object (an HTTP agent in `dispatcher`) by identity.
  *
  * A call whose params cannot be keyed soundly — a BigInt, an `ArrayBuffer`,
  * `Blob`, `FormData` or `URLSearchParams`, a circular structure, or an object
@@ -482,11 +485,13 @@ export function cacheMiddleware(options?: {
     if (paramsStr === null) return next()
     // The fetch options are part of who asked (5.2.0): a credentials:
     // 'include' call sends cookies an 'omit' call doesn't, so the two never
-    // share an entry. Keyed like params, which also makes key order not
-    // matter; options it can't key are declined, never guessed. Anything that
-    // isn't an object keys as no options, as core sends none.
-    const requestOptions = ctx.request.fetchOptions
-    const optionsStr = stableKey(typeof requestOptions === 'object' && requestOptions !== null ? requestOptions : {})
+    // share an entry. Keyed as they are sent (sendableFetchOptions: without
+    // the fields liaise controls, and no options when they aren't an object),
+    // with their own keyer rather than stableKey: options reach fetch by
+    // reference, so an object that isn't plain, such as an undici Agent, is
+    // keyed by identity (see cacheOptionsKey in ./utils/cache.js). Options it
+    // can't key are declined, never guessed.
+    const optionsStr = cacheOptionsKey(sendableFetchOptions(ctx.request.fetchOptions))
     if (optionsStr === null) return next()
     // Who asked and where, not only what: before 5.0.1 the key was name +
     // params, so user B could be served user A's /me (different

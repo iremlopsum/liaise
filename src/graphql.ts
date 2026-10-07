@@ -290,12 +290,14 @@ export function createGraphQL(config: any): any {
               // — the same step as create-api.ts's, on what is about to go on
               // the wire: always POST, the final endpoint URL, the final
               // headers (an auth middleware's header is part of the
-              // comparison) and the body, query and variables exactly as
+              // comparison), the body, query and variables exactly as
               // serialised, so variables in a different key order do not
-              // share. Everything before this point ran for this caller alone,
-              // and so does everything after it: each caller parses its own
-              // copy of the one read. A body a middleware replaced with one
-              // that can't be compared has no key and is sent as usual.
+              // share, and the fetch options. Everything before this point ran
+              // for this caller alone, and so does everything after it: each
+              // caller parses its own copy of the one read. A body a
+              // middleware replaced with one that can't be compared, or fetch
+              // options holding a value that isn't a primitive, has no key and
+              // is sent as usual.
               const shareKey = operation.config.share === true
                 ? requestKey(lane, 'POST', sendUrl, sendHeaders, fetchInit.body ?? null, sendOptions)
                 : null

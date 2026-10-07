@@ -49,6 +49,6 @@ How the shared request's own deadline, its timeouts and retries work is under [S
 
 One client can serve every user. The user's token or cookie is part of what is sent, so one user's call never joins another's. [One /me per page view on the server](/recipes/one-me-per-page-view-on-the-server/) shows the setup.
 
-The comparison sees only the headers in `ctx.request.headers`. If something outside liaise adds the user's identity, such as a patched global `fetch` or instrumentation that reads request context, liaise can't see it, and `share` is unsafe in that setup.
+The comparison sees only what liaise sends: the method, URL, headers, body and `fetchOptions`. If something outside liaise adds the user's identity, such as a patched global `fetch`, a `fetch` you gave the client that adds it from request context, or instrumentation that reads request context, liaise can't see it, and `share` is unsafe in that setup.
 
 **Next:** [Retries, caching and logging](/guide/retries-caching-and-logging/) covers what liaise has built in: retrying failed calls, caching repeated reads and logging every call.

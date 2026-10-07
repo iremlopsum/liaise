@@ -9,7 +9,7 @@ This page collects the edge cases the guide links to: exactly what the cache and
 
 `cacheMiddleware` keys each entry on the endpoint name, the method, the full URL, the params, every request header except `Content-Type`, and the `fetchOptions`. A different `Authorization`, base URL, query value or `credentials` gets its own entry.
 
-Cookies the browser adds aren't in the key, because they are added below `fetch`, where no middleware can see them. A call with `credentials: 'include'` and one with `'omit'` never share an entry, but two `'include'` calls made before and after a login do. Clear the cache when the user changes (`getUserCache.clear()` in [Cache repeated reads](/guide/retries-caching-and-logging/#cache-repeated-reads)).
+Cookies the browser adds aren't in the key, because they are added below `fetch`, where no middleware can see them. A call with `credentials: 'include'` and one with `'omit'` never share an entry, but two `'include'` calls made before and after a login do. Clear the cache when the user changes (`getUserCache.clear()` in [Cache repeated reads](/guide/retries-caching-and-logging/#cache-repeated-reads)). Neither is a `fetch` you gave the client: two clients whose `fetch` sends different users' identities must not share one `cacheMiddleware`.
 
 The query string is sorted by name before it goes in the key, so `?a=1&b=2` and `?b=2&a=1` are one entry. It is sorted by the raw, undecoded name, and repeated names keep their order. A query param that a middleware adds before the cache, such as `?lang=de`, is part of the key.
 
@@ -24,7 +24,7 @@ A call is never cached, and never served from the cache, when its params hold an
 - a circular structure
 - an object with no enumerable keys that isn't a plain object, such as an `Error`, a `Promise`, or a class instance that keeps its state in private fields
 
-The same goes for `fetchOptions` holding one of these, such as an HTTP agent that keeps its state in private fields.
+`fetchOptions` are keyed as they are sent, without `method`, `headers`, `body` and `signal`. Plain values are compared by content. Any other object, such as an HTTP agent in `dispatcher`, is compared by identity: the same agent object shares entries, and two different agents never do, even when they look alike. A circular structure, a BigInt or a symbol in `fetchOptions` means the call isn't cached.
 
 Each `cacheMiddleware()` call makes its own store, so two stores never share entries. Where to put the cache in your middleware is under [Cache repeated reads](/guide/retries-caching-and-logging/#cache-repeated-reads).
 

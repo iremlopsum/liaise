@@ -89,9 +89,10 @@ export type ResponseType = 'json' | 'text' | 'blob' | 'arrayBuffer' | 'formData'
 
 /**
  * A `fetch` liaise can send with: the global one, `mockFetch().fetch`,
- * undici's, a Cloudflare service binding's, or a wrapper of your own. liaise
- * always passes a string URL and an init, and calls it unbound, so
- * `window.fetch` works as is.
+ * undici's, or a wrapper of your own. liaise always passes a string URL and
+ * an init, and calls it unbound, so `window.fetch` works as is. A method that
+ * needs its object, such as a Cloudflare service binding's, goes in a
+ * wrapper: `(url, init) => env.SERVICE.fetch(url, init)`.
  */
 export type FetchFunction = (url: string, init: RequestInit) => Promise<Response>
 

@@ -48,10 +48,12 @@ export const TRACING_HEADERS: ReadonlySet<string> = new Set([
 ])
 
 /**
- * The share key: what this request would put on the wire (the fetch options included). Two requests with
- * the same key are byte-for-byte the same to the server, so sharing them is
- * safe; anything that differs never shares. `null` means the body can't be
- * compared cheaply and safely (an upload), so the call is never shared.
+ * The share key: what this request would put on the wire, the fetch options
+ * included. Two requests with the same key are byte-for-byte the same to the
+ * server, so sharing them is safe; anything that differs never shares. `null`
+ * means the body can't be compared cheaply and safely (an upload), or the
+ * fetch options hold a value that isn't a primitive, so the call is never
+ * shared.
  */
 export function requestKey(
   name: string,

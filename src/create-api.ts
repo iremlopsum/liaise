@@ -763,13 +763,15 @@ export function createApi<TRequests extends Record<string, Request<any, any>>>(
               //
               // Under `share`, join an identical request already in flight —
               // identical meaning what is about to go on the wire (spec §3.2):
-              // the final method, URL, headers and body, built after every
-              // middleware, so a header an auth middleware added (the current
-              // user) is part of the comparison. Everything before this point
-              // ran for this caller alone, and so does everything after it:
-              // only the round trip is shared, and each caller decodes its own
-              // copy of the one read. A body that can't be compared cheaply
-              // and safely (an upload) has no key and is sent as usual.
+              // the final method, URL, headers and body, and the fetch
+              // options, built after every middleware, so a header an auth
+              // middleware added (the current user) is part of the
+              // comparison. Everything before this point ran for this caller
+              // alone, and so does everything after it: only the round trip
+              // is shared, and each caller decodes its own copy of the one
+              // read. A body that can't be compared cheaply and safely (an
+              // upload), or fetch options holding a value that isn't a
+              // primitive, has no key and is sent as usual.
               const responseType = request.config.responseType ?? 'json'
               const shareKey = request.config.share === true
                 ? requestKey(name, sendMethod, sendUrl, sendHeaders, fetchInit.body ?? null, sendOptions)

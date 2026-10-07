@@ -80,7 +80,9 @@ async function readBody(response: Response, read: ReadAs): Promise<unknown> {
 }
 
 /**
- * `fetch`, then read the body once. `fetch` is looked up at call time (tests stub it).
+ * `fetch`, then read the body once. It sends with `send`, the client's own
+ * `fetch`, when one is given, else with the global `fetch`, looked up at call
+ * time (tests stub it).
  *
  * A failed `fetch` rejects as it always did; only the body read is caught.
  * The read is the one step that can fail for two unrelated reasons — the

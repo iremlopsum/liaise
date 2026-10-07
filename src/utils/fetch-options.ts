@@ -16,7 +16,9 @@ const OWNED: ReadonlySet<string> = new Set(['method', 'headers', 'body', 'signal
  * Client, then endpoint, then call: a later level's field replaces an earlier
  * one's, and a field whose value is `undefined` replaces nothing. Always a
  * fresh object, so a middleware changing it can't reach the configuration or
- * the next call. A level that isn't an object is skipped.
+ * the next call. The copy is shallow: a nested object, such as Next.js's
+ * `next`, is shared with the configuration. A level that isn't an object is
+ * skipped.
  */
 export function mergeFetchOptions(...levels: unknown[]): FetchOptions {
   const merged: Record<string, unknown> = {}

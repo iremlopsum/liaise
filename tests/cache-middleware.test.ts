@@ -902,11 +902,63 @@ describe('the cache key includes the fetch options (5.2.0)', () => {
     expect(fetchMock).toHaveBeenCalledTimes(1)
   })
 
+  // The final review's probe: two undici Agents with different client
+  // certificates keyed alike by content, so tenant B got tenant A's response.
+  class Agent {
+    _events = {}
+    #cert: string
+    constructor(cert: string) { this.#cert = cert }
+    cert() { return this.#cert }
+  }
+
+  it('two agents that look alike are two entries: an object that is not plain compares by identity', async () => {
+    const fetchMock = vi.fn(async () => json())
+    vi.stubGlobal('fetch', fetchMock)
+    const api = createApi({ baseUrl: 'https://x.test', requests: { order: get() } })
+    await api.order({ id: '1' }, { fetchOptions: { dispatcher: new Agent('tenant-a') } as unknown as FetchOptions })
+    await api.order({ id: '1' }, { fetchOptions: { dispatcher: new Agent('tenant-b') } as unknown as FetchOptions })
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+  })
+
+  it('the same agent object reused across calls is one entry', async () => {
+    const fetchMock = vi.fn(async () => json())
+    vi.stubGlobal('fetch', fetchMock)
+    const agent = new Agent('tenant-a')
+    const api = createApi({ baseUrl: 'https://x.test', requests: { order: get() } })
+    await api.order({ id: '1' }, { fetchOptions: { dispatcher: agent } as unknown as FetchOptions })
+    await api.order({ id: '1' }, { fetchOptions: { dispatcher: agent } as unknown as FetchOptions })
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+  })
+
+  it('a plain nested object compares by content: key order does not matter, a value does', async () => {
+    const fetchMock = vi.fn(async () => json())
+    vi.stubGlobal('fetch', fetchMock)
+    const api = createApi({ baseUrl: 'https://x.test', requests: { order: get() } })
+    const next = (value: unknown) => ({ next: value }) as unknown as FetchOptions
+    await api.order({ id: '1' }, { fetchOptions: next({ revalidate: 60, tags: ['orders'] }) })
+    await api.order({ id: '1' }, { fetchOptions: next({ tags: ['orders'], revalidate: 60 }) })
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    await api.order({ id: '1' }, { fetchOptions: next({ revalidate: 30, tags: ['orders'] }) })
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+  })
+
+  it('a stray signal and method (plain JS) are not keyed: the options are keyed as they are sent', async () => {
+    const fetchMock = vi.fn(async () => json())
+    vi.stubGlobal('fetch', fetchMock)
+    const api = createApi({ baseUrl: 'https://x.test', requests: { order: get() } })
+    const stray = (method: string) =>
+      ({ credentials: 'include', method, signal: new AbortController().signal }) as unknown as FetchOptions
+    await api.order({ id: '1' }, { fetchOptions: stray('POST') })
+    await api.order({ id: '1' }, { fetchOptions: stray('DELETE') })
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+  })
+
   it('options it cannot key are declined: neither served nor stored', async () => {
     const fetchMock = vi.fn(async () => json())
     vi.stubGlobal('fetch', fetchMock)
-    class Agent { #connections = 1; size() { return this.#connections } }
-    const opaque = { dispatcher: new Agent() } as unknown as FetchOptions
+    const circular: Record<string, unknown> = {}
+    circular.self = circular
+    const opaque = { next: circular } as unknown as FetchOptions
     const api = createApi({ baseUrl: 'https://x.test', requests: { order: get() } })
     await api.order({ id: '1' }, { fetchOptions: opaque })
     await api.order({ id: '1' }, { fetchOptions: opaque })
