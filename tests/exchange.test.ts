@@ -8,6 +8,17 @@ const stub = (r: Response | (() => Promise<Response>)) =>
   vi.stubGlobal('fetch', vi.fn(async () => (typeof r === 'function' ? r() : r)))
 
 describe('sendExchange', () => {
+  it('uses the fetch it is given, unbound, instead of the global', async () => {
+    const global = vi.fn(async () => new Response('global'))
+    vi.stubGlobal('fetch', global)
+    let self: unknown = 'not called'
+    const own = function (this: unknown) { self = this; return Promise.resolve(new Response('own')) }
+    const ex = await sendExchange('https://x.test', {}, 'text', own)
+    expect(ex.body).toBe('own')
+    expect(self).toBeUndefined()
+    expect(global).not.toHaveBeenCalled()
+  })
+
   it('reads a json/text body once, as text', async () => {
     stub(new Response('{"a":1}', { status: 200 }))
     const ex = await sendExchange('https://x.test/a', {}, 'json')

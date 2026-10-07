@@ -9,12 +9,12 @@ Each entry point is a separate import, and your bundler leaves out what you don'
 
 | What you import | Gzipped |
 | --- | --- |
-| `createApi` and `defineRequest` (REST only) | about 6.2 kB |
-| REST plus `poll` and `pollUntil` | 8.6 kB |
-| the whole core entry, GraphQL included | 10.0 kB |
-| the core entry plus all of `liaise/middleware` | 11.0 kB |
+| `createApi` and `defineRequest` (REST only) | about 6.5 kB |
+| REST plus `poll` and `pollUntil` | 8.9 kB |
+| the whole core entry, GraphQL included | 10.4 kB |
+| the core entry plus all of `liaise/middleware` | 11.7 kB |
 
-The README badge, the front page and [How it compares](/compare/) quote the REST-only figure. The comparison measures one JSON GET, call site included, so it can differ from the first row by a tenth of a kB.
+The front page and [How it compares](/compare/) take the REST-only figure from the comparison, which bundles one JSON GET, call site included, with the liaise version named on that page. It can differ from the first row above, which is measured on this version's entry points.
 
 ## liaise
 
@@ -33,6 +33,7 @@ The README badge, the front page and [How it compares](/compare/) quote the REST
 | `Result`, `SuccessResult`, `ErrorResult` | type | What every call returns, and its two branches. |
 | `ApiErrorKind` | type | The union of `error.kind` values. |
 | `CallOptions` | type | The second argument of a call ([CallOptions](/reference/calloptions/)). |
+| `FetchOptions` | type | The options `fetchOptions` takes: `RequestInit` without `method`, `headers`, `body` and `signal` ([Cookies and other fetch options](/guide/defining-endpoints/#cookies-and-other-fetch-options)). |
 | `PaginateOptions` | type | `next`, `maxPages`, and any `CallOptions`. |
 | `Pollable` | type | What `poll` and `pollUntil` take as an endpoint: `(params, options?) => Promise<Result>`, which every endpoint and operation is. |
 | `PollOptions`, `PollUntilOptions` | type | The options of `poll` and `pollUntil` ([poll() and pollUntil() options](/reference/polling-options/)). |

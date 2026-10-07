@@ -40,6 +40,8 @@ export interface RecordedCall {
   url: string
   headers: Headers
   body: unknown
+  /** The init `fetch` received, copied, so a test can check `credentials`, `keepalive` and the rest. `{}` when there was none. */
+  init: RequestInit
 }
 
 interface ParsedRoute {
@@ -159,6 +161,7 @@ export function mockFetch(routes: Record<string, RouteValue>) {
       url,
       headers: new Headers(init.headers),
       body: init.body ?? null,
+      init: { ...init },
     })
 
     const signal = init.signal

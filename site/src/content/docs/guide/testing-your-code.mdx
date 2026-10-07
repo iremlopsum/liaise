@@ -23,7 +23,13 @@ This page shows how to test code that calls liaise. Read it when you write unit 
   })
   ```
 
-- **`mock.calls` records every request** as `{ method, url, headers, body }`. `mock.callCount('GET /api/users/:id')` and `mock.lastCall(...)` take the same `"METHOD /path"` keys as the routes.
+- **`mock.calls` records every request** as `{ method, url, headers, body, init }`. `mock.callCount('GET /api/users/:id')` and `mock.lastCall(...)` take the same `"METHOD /path"` keys as the routes.
+
+## Without replacing the global fetch
+
+`mock.fetch` is the stub itself. Pass it to the client as `fetch`, and the global `fetch` is never touched, so there is nothing to restore:
+
+<Example name="testing-own-fetch" />
 
 ## Unmatched routes
 

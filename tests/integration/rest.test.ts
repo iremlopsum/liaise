@@ -671,3 +671,27 @@ describe('REST — path params with no usable value (5.0.2)', () => {
     expect([...server.callCounts.keys()].some(k => k.startsWith('GET /users/'))).toBe(false)
   })
 })
+
+describe('a custom fetch', () => {
+  it('wraps the real fetch: the request reaches the server, and the wrapper sees it', async () => {
+    const seen: string[] = []
+    const logging = (url: string, init: RequestInit) => { seen.push(`${init.method} ${url}`); return fetch(url, init) }
+    const hello = new Request<Record<string, never>, { message: string }>({ method: 'GET', path: '/hello' })
+    const api = createApi({ baseUrl: server.baseUrl, requests: { hello }, fetch: logging })
+    const { data } = await api.hello()
+    expect(data).toEqual({ message: 'hello' })
+    expect(seen).toEqual([`GET ${server.baseUrl}/hello`])
+  })
+})
+
+describe('fetchOptions', () => {
+  it("redirect: 'manual' reaches the real fetch: the 302 comes back instead of being followed", async () => {
+    const hop = new Request<Record<string, never>, unknown>({ method: 'GET', path: '/redirect', fetchOptions: { redirect: 'manual' } })
+    const api = createApi({ baseUrl: server.baseUrl, requests: { hop } })
+    const before = server.callCounts.get('GET /hello') ?? 0
+    const { error } = await api.hop()
+    expect(error?.kind).toBe('http')
+    expect(error?.status).toBe(302)
+    expect(server.callCounts.get('GET /hello') ?? 0).toBe(before)
+  })
+})

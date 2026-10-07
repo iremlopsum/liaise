@@ -15,7 +15,7 @@ Both loaders for one page send the same cookie, so their requests are identical,
 
 - **Sharing compares the request as it is sent**, after all your middleware, headers included. The cookie is a header, so one user's call never joins another's.
 - **Only calls in flight at the same moment share.** A loader that starts after the request has settled sends a new one.
-- **The comparison sees only the headers in `ctx.request.headers`.** If something outside liaise adds the user's identity, such as a patched global `fetch` or instrumentation that reads request context, liaise can't see it, and `share` is unsafe in that setup ([On a server](/guide/sharing-identical-requests/#on-a-server)).
+- **The comparison sees only what liaise sends: the method, URL, headers, body and `fetchOptions`.** If something outside liaise adds the user's identity, such as a patched global `fetch`, a `fetch` you gave the client that adds it from request context, or instrumentation that reads request context, liaise can't see it, and `share` is unsafe in that setup ([On a server](/guide/sharing-identical-requests/#on-a-server)).
 
 Inside React Server Components, React's [`cache()`](https://react.dev/reference/react/cache) gives one /me per page view too. React clears it for each server request.
 

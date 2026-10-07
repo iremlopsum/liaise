@@ -7,7 +7,11 @@ This page collects the edge cases the guide links to: exactly what the cache and
 
 ## Cache key
 
-`cacheMiddleware` keys each entry on the endpoint name, the method, the full URL, the params and every request header except `Content-Type`. A different `Authorization`, base URL or query value gets its own entry.
+`cacheMiddleware` keys each entry on the endpoint name, the method, the full URL, the params, every request header except `Content-Type`, the `fetchOptions`, and which `fetch` sends it. A different `Authorization`, base URL, query value or `credentials` gets its own entry.
+
+Cookies the browser adds aren't in the key, because they are added below `fetch`, where no middleware can see them. A call with `credentials: 'include'` and one with `'omit'` never share an entry, but two `'include'` calls made before and after a login do. Clear the cache when the user changes (`getUserCache.clear()` in [Cache repeated reads](/guide/retries-caching-and-logging/#cache-repeated-reads)).
+
+A client's own `fetch` is part of the key, by identity. Two clients whose `fetch` functions differ never share an entry, even through one module-level endpoint, while clients on the global `fetch` share as they always did. Clients given the same function share entries. A wrapper created for each request gets entries of its own, so a cache shared across requests never hits for it: create the wrapper once, outside the request, if those requests may share answers. A `fetch` that adds a user's identity from request context (for example `AsyncLocalStorage` on a server) is still one function for every user, so the cache can't tell them apart. Send that identity as a header instead, which the key includes.
 
 The query string is sorted by name before it goes in the key, so `?a=1&b=2` and `?b=2&a=1` are one entry. It is sorted by the raw, undecoded name, and repeated names keep their order. A query param that a middleware adds before the cache, such as `?lang=de`, is part of the key.
 
@@ -21,6 +25,8 @@ A call is never cached, and never served from the cache, when its params hold an
 - a boxed primitive, such as `new String('a')`
 - a circular structure
 - an object with no enumerable keys that isn't a plain object, such as an `Error`, a `Promise`, or a class instance that keeps its state in private fields
+
+`fetchOptions` are keyed as they are sent, without `method`, `headers`, `body` and `signal`. Plain values are compared by content. Any other object, such as an HTTP agent in `dispatcher`, is compared by identity: the same agent object shares entries, and two different agents never do, even when they look alike. A circular structure, a BigInt or a symbol in `fetchOptions` means the call isn't cached.
 
 Each `cacheMiddleware()` call makes its own store, so two stores never share entries. Where to put the cache in your middleware is under [Cache repeated reads](/guide/retries-caching-and-logging/#cache-repeated-reads).
 
@@ -36,6 +42,8 @@ This section is the exact rule behind [Sharing identical requests](/guide/sharin
 The URL is read as written. A `baseUrl` without a leading slash is resolved by the browser when the request is sent, so give a `share` endpoint an absolute or root-relative `baseUrl`.
 
 The tracing headers are `traceparent`, `tracestate`, `baggage`, `sentry-trace`, `x-request-id` and `x-correlation-id`. They identify a request for tracing and don't change the answer. `baggage` can carry tenant or user IDs, and two calls that differ only there still share. Auth headers and cookies always stay in the key.
+
+The `fetchOptions` are part of the key, compared by field name, so their order doesn't matter. Only string, number, boolean and `null` values can be compared; a call whose options hold any other value, such as an object, isn't shared, the same as an upload.
 
 The response is read once, and each caller decodes its own copy, so each has its own `data` for JSON and text. A `Blob`, `ArrayBuffer` or `FormData` result is handed to every caller as the same object, because copying it would cost the bytes `share` saves.
 

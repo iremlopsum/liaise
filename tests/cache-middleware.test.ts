@@ -3,7 +3,9 @@ import { CacheStore } from '../src/utils/cache.js'
 import { createApi } from '../src/create-api.js'
 import { Request } from '../src/request.js'
 import { cacheMiddleware } from '../src/built-in-middleware.js'
+import type { FetchOptions, Middleware } from '../src/types.js'
 import { createGraphQL, Operation } from '../src/graphql.js'
+import { clientFetchOf } from '../src/utils/client-fetch.js'
 
 afterEach(() => vi.restoreAllMocks())
 
@@ -322,7 +324,7 @@ describe('cacheMiddleware', () => {
     const fetchMock = vi.fn(async () => mockJsonResponse({ who: bodies[n++] }))
     vi.stubGlobal('fetch', fetchMock)
 
-    const cache = cacheMiddleware({ ttl: 60_000 })
+    const cache = cacheMiddleware({ ttl: 60_000, methods: ['POST'] })
     const api = createApi({
       baseUrl: '',
       requests: {
@@ -357,7 +359,7 @@ describe('cacheMiddleware', () => {
     const fetchMock = vi.fn(async () => mockJsonResponse({ who: bodies[n++] }))
     vi.stubGlobal('fetch', fetchMock)
 
-    const cache = cacheMiddleware({ ttl: 60_000 })
+    const cache = cacheMiddleware({ ttl: 60_000, methods: ['POST'] })
     const api = createApi({
       baseUrl: '',
       requests: {
@@ -388,7 +390,7 @@ describe('cacheMiddleware', () => {
     const fetchMock = vi.fn(async () => mockJsonResponse({ who: bodies[n++] }))
     vi.stubGlobal('fetch', fetchMock)
 
-    const cache = cacheMiddleware({ ttl: 60_000 })
+    const cache = cacheMiddleware({ ttl: 60_000, methods: ['POST'] })
     const api = createApi({
       baseUrl: '',
       requests: {
@@ -408,7 +410,7 @@ describe('cacheMiddleware', () => {
     const fetchMock = vi.fn(async () => mockJsonResponse({ ok: true }))
     vi.stubGlobal('fetch', fetchMock)
 
-    const cache = cacheMiddleware({ ttl: 60_000 })
+    const cache = cacheMiddleware({ ttl: 60_000, methods: ['POST'] })
     const api = createApi({
       baseUrl: '',
       requests: {
@@ -437,7 +439,7 @@ describe('cacheMiddleware', () => {
     const fetchMock = vi.fn(async () => mockJsonResponse({ ok: true }))
     vi.stubGlobal('fetch', fetchMock)
 
-    const cache = cacheMiddleware({ ttl: 60_000 })
+    const cache = cacheMiddleware({ ttl: 60_000, methods: ['POST'] })
     const api = createApi({
       baseUrl: '',
       requests: {
@@ -496,7 +498,7 @@ describe('cacheMiddleware', () => {
     const fetchMock = vi.fn(async () => mockJsonResponse({ ok: true }))
     vi.stubGlobal('fetch', fetchMock)
 
-    const cache = cacheMiddleware({ ttl: 60_000 })
+    const cache = cacheMiddleware({ ttl: 60_000, methods: ['POST'] })
     const api = createApi({
       baseUrl: '',
       requests: {
@@ -514,7 +516,7 @@ describe('cacheMiddleware', () => {
     const fetchMock = vi.fn(async () => mockJsonResponse({ ok: true }))
     vi.stubGlobal('fetch', fetchMock)
 
-    const cache = cacheMiddleware({ ttl: 60_000 })
+    const cache = cacheMiddleware({ ttl: 60_000, methods: ['POST'] })
     const api = createApi({
       baseUrl: '',
       requests: {
@@ -532,7 +534,7 @@ describe('cacheMiddleware', () => {
     const fetchMock = vi.fn(async () => mockJsonResponse({ data: { ok: true } }))
     vi.stubGlobal('fetch', fetchMock)
 
-    const cache = cacheMiddleware({ ttl: 60_000 })
+    const cache = cacheMiddleware({ ttl: 60_000, methods: ['POST'] })
     const client = createGraphQL({
       endpoint: 'https://api.example.com/graphql',
       operations: {
@@ -552,7 +554,7 @@ describe('cacheMiddleware', () => {
     const fetchMock = vi.fn(async () => mockJsonResponse({ ok: true }))
     vi.stubGlobal('fetch', fetchMock)
 
-    const cache = cacheMiddleware({ ttl: 60_000 })
+    const cache = cacheMiddleware({ ttl: 60_000, methods: ['POST'] })
     const api = createApi({
       baseUrl: '',
       requests: {
@@ -581,7 +583,7 @@ describe('cacheMiddleware', () => {
     const fetchMock = vi.fn(async () => mockJsonResponse({ ok: true }))
     vi.stubGlobal('fetch', fetchMock)
 
-    const cache = cacheMiddleware({ ttl: 60_000 })
+    const cache = cacheMiddleware({ ttl: 60_000, methods: ['POST'] })
     // `Request<TParams extends object, ...>` is satisfied by the boxed
     // `String` type (it structurally extends `object`, unlike the lowercase
     // primitive `string`), and a `string` literal is assignable to a
@@ -647,7 +649,7 @@ describe('cacheMiddleware key: who asked, and where', () => {
     vi.stubGlobal('fetch', fetchMock)
     const a = new Operation<Record<string, never>, unknown>({ operation: 'query A { a }' })
     const b = new Operation<Record<string, never>, unknown>({ operation: 'query B { b }' })
-    const client = createGraphQL({ endpoint: 'https://x.test/graphql', operations: { a, b }, middleware: [cacheMiddleware()] })
+    const client = createGraphQL({ endpoint: 'https://x.test/graphql', operations: { a, b }, middleware: [cacheMiddleware({ methods: ['POST'] })] })
     await client.a({})
     await client.b({})
     expect(fetchMock).toHaveBeenCalledTimes(2)
@@ -768,5 +770,277 @@ describe('cacheMiddleware defaults (the README option table)', () => {
     expect(calls()).toBe(51)
     await api.getUser({ id: '0' }) // oldest, dropped
     expect(calls()).toBe(52)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// 5.2.0: reads only, unless `methods` says otherwise
+// ---------------------------------------------------------------------------
+
+describe('cacheMiddleware caches reads only', () => {
+  const json = () => mockJsonResponse({ ok: true })
+  const setMethod = (method: string): Middleware => async (ctx, next) => { ctx.request.method = method; return next() }
+
+  it('does not cache a POST by default: two calls, two fetches', async () => {
+    const fetchMock = vi.fn(async () => json())
+    vi.stubGlobal('fetch', fetchMock)
+    const create = new Request<{ name: string }, { ok: boolean }>({ method: 'POST', path: '/orders', middleware: [cacheMiddleware()] })
+    const api = createApi({ baseUrl: 'https://x.test', requests: { create } })
+    await api.create({ name: 'a' })
+    await api.create({ name: 'a' })
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+  })
+
+  it('still caches a GET by default', async () => {
+    const fetchMock = vi.fn(async () => json())
+    vi.stubGlobal('fetch', fetchMock)
+    const get = new Request<{ id: string }, { ok: boolean }>({ method: 'GET', path: '/orders/:id', middleware: [cacheMiddleware()] })
+    const api = createApi({ baseUrl: 'https://x.test', requests: { get } })
+    await api.get({ id: '1' })
+    await api.get({ id: '1' })
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+  })
+
+  it('caches a HEAD by default', async () => {
+    const fetchMock = vi.fn(async () => json())
+    vi.stubGlobal('fetch', fetchMock)
+    const head = new Request<{ id: string }, { ok: boolean }>({ method: 'GET', path: '/orders/:id', middleware: [setMethod('HEAD'), cacheMiddleware()] })
+    const api = createApi({ baseUrl: 'https://x.test', requests: { head } })
+    await api.head({ id: '1' })
+    await api.head({ id: '1' })
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+  })
+
+  it("caches a POST when methods lists it, compared without regard to case", async () => {
+    const fetchMock = vi.fn(async () => json())
+    vi.stubGlobal('fetch', fetchMock)
+    const search = new Request<{ q: string }, { ok: boolean }>({ method: 'POST', path: '/search', middleware: [cacheMiddleware({ methods: ['post'] })] })
+    const api = createApi({ baseUrl: 'https://x.test', requests: { search } })
+    await api.search({ q: 'lamp' })
+    await api.search({ q: 'lamp' })
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+  })
+
+  it('methods: [] caches nothing', async () => {
+    const fetchMock = vi.fn(async () => json())
+    vi.stubGlobal('fetch', fetchMock)
+    const get = new Request<{ id: string }, { ok: boolean }>({ method: 'GET', path: '/orders/:id', middleware: [cacheMiddleware({ methods: [] })] })
+    const api = createApi({ baseUrl: 'https://x.test', requests: { get } })
+    await api.get({ id: '1' })
+    await api.get({ id: '1' })
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+  })
+
+  it('compares the method as a middleware outside the cache left it', async () => {
+    const fetchMock = vi.fn(async () => json())
+    vi.stubGlobal('fetch', fetchMock)
+    const get = new Request<{ id: string }, { ok: boolean }>({ method: 'GET', path: '/orders/:id', middleware: [setMethod('POST'), cacheMiddleware()] })
+    const api = createApi({ baseUrl: 'https://x.test', requests: { get } })
+    await api.get({ id: '1' })
+    await api.get({ id: '1' })
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+  })
+
+  it('a method it skips never touches the store: no debug line', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => json()))
+    const log = vi.spyOn(console, 'log').mockImplementation(() => {})
+    const create = new Request<{ name: string }, { ok: boolean }>({ method: 'POST', path: '/orders', middleware: [cacheMiddleware({ debug: true })] })
+    const api = createApi({ baseUrl: 'https://x.test', requests: { create } })
+    await api.create({ name: 'a' })
+    expect(log).not.toHaveBeenCalled()
+  })
+
+  it('a methods value that is not an array (plain JS) falls back to the default instead of throwing', async () => {
+    const fetchMock = vi.fn(async () => json())
+    vi.stubGlobal('fetch', fetchMock)
+    const get = new Request<{ id: string }, { ok: boolean }>({ method: 'GET', path: '/orders/:id', middleware: [cacheMiddleware({ methods: 'POST' as never })] })
+    const api = createApi({ baseUrl: 'https://x.test', requests: { get } })
+    await api.get({ id: '1' })
+    await api.get({ id: '1' })
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+  })
+
+  it('GraphQL: an operation under the default cache never hits, since every operation is a POST', async () => {
+    const fetchMock = vi.fn(async () => mockJsonResponse({ data: { ok: true } }))
+    vi.stubGlobal('fetch', fetchMock)
+    const ok = new Operation<Record<string, never>, { ok: boolean }>({ operation: 'query { ok }', middleware: [cacheMiddleware()] })
+    const client = createGraphQL({ endpoint: 'https://x.test/graphql', operations: { ok } })
+    await client.ok()
+    await client.ok()
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+  })
+
+  it("GraphQL: methods: ['POST'] on a query operation caches it", async () => {
+    const fetchMock = vi.fn(async () => mockJsonResponse({ data: { ok: true } }))
+    vi.stubGlobal('fetch', fetchMock)
+    const ok = new Operation<Record<string, never>, { ok: boolean }>({ operation: 'query { ok }', middleware: [cacheMiddleware({ methods: ['POST'] })] })
+    const client = createGraphQL({ endpoint: 'https://x.test/graphql', operations: { ok } })
+    await client.ok()
+    await client.ok()
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe('the cache key includes the fetch options (5.2.0)', () => {
+  const json = () => mockJsonResponse({ ok: true })
+  const get = () => new Request<{ id: string }, { ok: boolean }>({ method: 'GET', path: '/orders/:id', middleware: [cacheMiddleware()] })
+
+  it('calls that differ only in credentials get separate entries', async () => {
+    const fetchMock = vi.fn(async () => json())
+    vi.stubGlobal('fetch', fetchMock)
+    const api = createApi({ baseUrl: 'https://x.test', requests: { order: get() } })
+    await api.order({ id: '1' }, { fetchOptions: { credentials: 'include' } })
+    await api.order({ id: '1' }, { fetchOptions: { credentials: 'omit' } })
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+  })
+
+  it('the same options in a different key order are one entry', async () => {
+    const fetchMock = vi.fn(async () => json())
+    vi.stubGlobal('fetch', fetchMock)
+    const api = createApi({ baseUrl: 'https://x.test', requests: { order: get() } })
+    await api.order({ id: '1' }, { fetchOptions: { credentials: 'include', mode: 'cors' } })
+    await api.order({ id: '1' }, { fetchOptions: { mode: 'cors', credentials: 'include' } })
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+  })
+
+  // The final review's probe: two undici Agents with different client
+  // certificates keyed alike by content, so tenant B got tenant A's response.
+  class Agent {
+    _events = {}
+    #cert: string
+    constructor(cert: string) { this.#cert = cert }
+    cert() { return this.#cert }
+  }
+
+  it('two agents that look alike are two entries: an object that is not plain compares by identity', async () => {
+    const fetchMock = vi.fn(async () => json())
+    vi.stubGlobal('fetch', fetchMock)
+    const api = createApi({ baseUrl: 'https://x.test', requests: { order: get() } })
+    await api.order({ id: '1' }, { fetchOptions: { dispatcher: new Agent('tenant-a') } as unknown as FetchOptions })
+    await api.order({ id: '1' }, { fetchOptions: { dispatcher: new Agent('tenant-b') } as unknown as FetchOptions })
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+  })
+
+  it('the same agent object reused across calls is one entry', async () => {
+    const fetchMock = vi.fn(async () => json())
+    vi.stubGlobal('fetch', fetchMock)
+    const agent = new Agent('tenant-a')
+    const api = createApi({ baseUrl: 'https://x.test', requests: { order: get() } })
+    await api.order({ id: '1' }, { fetchOptions: { dispatcher: agent } as unknown as FetchOptions })
+    await api.order({ id: '1' }, { fetchOptions: { dispatcher: agent } as unknown as FetchOptions })
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+  })
+
+  it('a plain nested object compares by content: key order does not matter, a value does', async () => {
+    const fetchMock = vi.fn(async () => json())
+    vi.stubGlobal('fetch', fetchMock)
+    const api = createApi({ baseUrl: 'https://x.test', requests: { order: get() } })
+    const next = (value: unknown) => ({ next: value }) as unknown as FetchOptions
+    await api.order({ id: '1' }, { fetchOptions: next({ revalidate: 60, tags: ['orders'] }) })
+    await api.order({ id: '1' }, { fetchOptions: next({ tags: ['orders'], revalidate: 60 }) })
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    await api.order({ id: '1' }, { fetchOptions: next({ revalidate: 30, tags: ['orders'] }) })
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+  })
+
+  it('a stray signal and method (plain JS) are not keyed: the options are keyed as they are sent', async () => {
+    const fetchMock = vi.fn(async () => json())
+    vi.stubGlobal('fetch', fetchMock)
+    const api = createApi({ baseUrl: 'https://x.test', requests: { order: get() } })
+    const stray = (method: string) =>
+      ({ credentials: 'include', method, signal: new AbortController().signal }) as unknown as FetchOptions
+    await api.order({ id: '1' }, { fetchOptions: stray('POST') })
+    await api.order({ id: '1' }, { fetchOptions: stray('DELETE') })
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+  })
+
+  it('options it cannot key are declined: neither served nor stored', async () => {
+    const fetchMock = vi.fn(async () => json())
+    vi.stubGlobal('fetch', fetchMock)
+    const circular: Record<string, unknown> = {}
+    circular.self = circular
+    const opaque = { next: circular } as unknown as FetchOptions
+    const api = createApi({ baseUrl: 'https://x.test', requests: { order: get() } })
+    await api.order({ id: '1' }, { fetchOptions: opaque })
+    await api.order({ id: '1' }, { fetchOptions: opaque })
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+  })
+})
+
+describe("the cache key includes a client's own fetch", () => {
+  const fetchAs = (name: string) => vi.fn(async () => mockJsonResponse({ user: name }))
+  const me = () => new Request<Record<string, never>, { user: string }>({ method: 'GET', path: '/me', middleware: [cacheMiddleware()] })
+
+  it('two clients with different fetch functions never share an entry through one endpoint', async () => {
+    const getMe = me()
+    const fa = fetchAs('alice')
+    const fb = fetchAs('bob')
+    const alice = createApi({ baseUrl: 'https://x.test', requests: { getMe }, fetch: fa as unknown as typeof fetch })
+    const bob = createApi({ baseUrl: 'https://x.test', requests: { getMe }, fetch: fb as unknown as typeof fetch })
+    const users: unknown[] = []
+    for (const c of [alice, bob, alice, bob]) {
+      const r = await c.getMe()
+      users.push(r.data?.user)
+    }
+    expect(users).toEqual(['alice', 'bob', 'alice', 'bob'])
+    expect(fa).toHaveBeenCalledTimes(1)
+    expect(fb).toHaveBeenCalledTimes(1)
+  })
+
+  it('two clients on the global fetch share an endpoint cache, as before', async () => {
+    const getMe = me()
+    const fetchMock = fetchAs('x')
+    vi.stubGlobal('fetch', fetchMock)
+    const one = createApi({ baseUrl: 'https://x.test', requests: { getMe } })
+    const two = createApi({ baseUrl: 'https://x.test', requests: { getMe } })
+    await one.getMe()
+    await two.getMe()
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+  })
+
+  it('two clients given the same fetch function share entries', async () => {
+    const getMe = me()
+    const f = fetchAs('x')
+    const one = createApi({ baseUrl: 'https://x.test', requests: { getMe }, fetch: f as unknown as typeof fetch })
+    const two = createApi({ baseUrl: 'https://x.test', requests: { getMe }, fetch: f as unknown as typeof fetch })
+    await one.getMe()
+    await two.getMe()
+    expect(f).toHaveBeenCalledTimes(1)
+  })
+
+  it('GraphQL: clients with different fetch functions never share an entry', async () => {
+    const who = new Operation<Record<string, never>, { user: string }>({ operation: 'query { user }', middleware: [cacheMiddleware({ methods: ['POST'] })] })
+    const gql = (name: string) => vi.fn(async () => mockJsonResponse({ data: { user: name } }))
+    const fa = gql('alice')
+    const fb = gql('bob')
+    const alice = createGraphQL({ endpoint: 'https://x.test/graphql', operations: { who }, fetch: fa as unknown as typeof fetch })
+    const bob = createGraphQL({ endpoint: 'https://x.test/graphql', operations: { who }, fetch: fb as unknown as typeof fetch })
+    const users: unknown[] = []
+    for (const c of [alice, bob, alice, bob]) {
+      const r = await c.who()
+      users.push(r.data?.user)
+    }
+    expect(users).toEqual(['alice', 'bob', 'alice', 'bob'])
+    expect(fa).toHaveBeenCalledTimes(1)
+    expect(fb).toHaveBeenCalledTimes(1)
+  })
+
+  it('the stamp is invisible to a middleware that spreads or logs ctx, but readable', async () => {
+    const f = fetchAs('x') as unknown as typeof fetch
+    let seen: Parameters<Middleware>[0] | undefined
+    const capture: Middleware = (ctx, next) => {
+      seen = ctx
+      return next()
+    }
+    const getMe = new Request<Record<string, never>, { user: string }>({ method: 'GET', path: '/me', middleware: [capture] })
+    const api = createApi({ baseUrl: 'https://x.test', requests: { getMe }, fetch: f })
+    await api.getMe()
+    expect(seen).toBeDefined()
+    expect(Object.keys(seen!)).toEqual(['request', 'requestName'])
+    expect(JSON.stringify(seen)).not.toContain('clientFetch')
+    expect(Object.keys({ ...seen })).toEqual(['request', 'requestName'])
+    expect(Reflect.ownKeys({ ...seen! })).toEqual(['request', 'requestName'])
+    expect(Object.getOwnPropertyDescriptor(seen!, Symbol.for('liaise.clientFetch'))?.enumerable).toBe(false)
+    expect(clientFetchOf(seen!)).toBe(f)
   })
 })

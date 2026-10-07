@@ -7,7 +7,7 @@ This page explains `share`, which merges identical calls made at the same time i
 
 Several parts of an app often ask for the same thing at the same moment. Five components load the current user, or five calls get a 401 and each one refreshes the token.
 
-`share: true` merges calls that would send the identical request, with the same URL, method, headers and body, into one network request. Each call still runs its own middleware and gets its own `Result`.
+`share: true` merges calls that would send the identical request, with the same URL, method, headers, body and fetch options, into one network request. Each call still runs its own middleware and gets its own `Result`.
 
 <Example name="share" />
 
@@ -20,6 +20,7 @@ If two requests are the same byte for byte, the server can't tell them apart eit
 - **The request is compared after all your middleware has run.** A header your auth middleware adds is part of it, so calls made as different users don't share. [On a server](#on-a-server) says what this relies on.
 - **The URL and the body are compared as sent.** `?a=1&b=2` and `?b=2&a=1` don't share, and neither do two JSON bodies with the same keys in a different order. Params written in the same order always match.
 - **Per-call `headers` and `middleware` are judged by what they change.** Calls with identical per-call headers share, and a per-call middleware that changes nothing doesn't stop sharing.
+- **The `fetchOptions` are compared too**, in any key order. A call with `credentials: 'include'` never joins one with `'omit'`. Only string, number, boolean and `null` values can be compared, so options holding an object, such as Next.js's `next`, are never shared ([Share key and refcount](/reference/behaviour-in-detail/#share-key-and-refcount)).
 - **Tracing headers aren't compared**, so a middleware that stamps a request ID on every call doesn't stop sharing. The shared request goes out with the first caller's tracing headers. [Share key and refcount](/reference/behaviour-in-detail/#share-key-and-refcount) lists them.
 - **An upload never shares.** A call whose body is `FormData`, a `Blob`, an `ArrayBuffer`, a typed array, a `DataView` or a `ReadableStream` sends its own request.
 
@@ -48,6 +49,6 @@ How the shared request's own deadline, its timeouts and retries work is under [S
 
 One client can serve every user. The user's token or cookie is part of what is sent, so one user's call never joins another's. [One /me per page view on the server](/recipes/one-me-per-page-view-on-the-server/) shows the setup.
 
-The comparison sees only the headers in `ctx.request.headers`. If something outside liaise adds the user's identity, such as a patched global `fetch` or instrumentation that reads request context, liaise can't see it, and `share` is unsafe in that setup.
+The comparison sees only what liaise sends: the method, URL, headers, body and `fetchOptions`. If something outside liaise adds the user's identity, such as a patched global `fetch`, a `fetch` you gave the client that adds it from request context, or instrumentation that reads request context, liaise can't see it, and `share` is unsafe in that setup.
 
 **Next:** [Retries, caching and logging](/guide/retries-caching-and-logging/) covers what liaise has built in: retrying failed calls, caching repeated reads and logging every call.

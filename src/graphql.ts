@@ -5,6 +5,7 @@ import { callLoggerFor } from './utils/log.js'
 import { ShareTracker, requestKey, narrowTag, stampShared, stampPreempted } from './utils/share.js'
 import type { SharedRound } from './utils/share.js'
 import { mergeHeaders, headersRecord } from './utils/headers.js'
+import { mergeFetchOptions, sendableFetchOptions } from './utils/fetch-options.js'
 import { abortKind, propagatesReason } from './utils/abort-kind.js'
 import { callBudget } from './utils/budget.js'
 import { anySignal, releaseSignal } from './utils/any-signal.js'
@@ -14,6 +15,7 @@ import { runSchema } from './utils/validate.js'
 import type { SchemaOutcome } from './utils/validate.js'
 import { sendExchange, sendSharedExchange, AbortedRead } from './utils/exchange.js'
 import type { Exchange } from './utils/exchange.js'
+import { stampClientFetch } from './utils/client-fetch.js'
 import type { CallOptions, EndpointExtras, ErrorResult, Middleware, MiddlewareContext, Result, GraphQLBaseConfig, OperationConfig, GraphQLError } from './types.js'
 
 // ---------------------------------------------------------------------------
@@ -87,6 +89,8 @@ export function createGraphQL(config: any): any {
     headers: globalHeaders,
     onError,
     timeout: clientTimeout,
+    fetch: clientFetch,
+    fetchOptions: clientFetchOptions,
   } = config
   // Not a middleware: it wraps each whole call, ending in the post-execution
   // hook — see the same line in create-api.ts. Null when off.
@@ -265,7 +269,12 @@ export function createGraphQL(config: any): any {
               // so it is what fetch receives by construction.
               const sendUrl = ctx.request.url
               const sendHeaders = ctx.request.headers
+              // The fetch options as the middleware left them, without the
+              // fields liaise controls, under liaise's own (create-api.ts does
+              // the same). The share key below takes the same copy.
+              const sendOptions = sendableFetchOptions(ctx.request.fetchOptions)
               const fetchInit: RequestInit = {
+                ...sendOptions,
                 method: 'POST',
                 headers: sendHeaders,
                 body: ctx.request.body as string,
@@ -282,18 +291,20 @@ export function createGraphQL(config: any): any {
               // — the same step as create-api.ts's, on what is about to go on
               // the wire: always POST, the final endpoint URL, the final
               // headers (an auth middleware's header is part of the
-              // comparison) and the body, query and variables exactly as
+              // comparison), the body, query and variables exactly as
               // serialised, so variables in a different key order do not
-              // share. Everything before this point ran for this caller alone,
-              // and so does everything after it: each caller parses its own
-              // copy of the one read. A body a middleware replaced with one
-              // that can't be compared has no key and is sent as usual.
+              // share, and the fetch options. Everything before this point ran
+              // for this caller alone, and so does everything after it: each
+              // caller parses its own copy of the one read. A body a
+              // middleware replaced with one that can't be compared, or fetch
+              // options holding a value that isn't a primitive, has no key and
+              // is sent as usual.
               const shareKey = operation.config.share === true
-                ? requestKey(lane, 'POST', sendUrl, sendHeaders, fetchInit.body ?? null)
+                ? requestKey(lane, 'POST', sendUrl, sendHeaders, fetchInit.body ?? null, sendOptions)
                 : null
               let exchange: Exchange
               if (shareKey === null) {
-                exchange = await sendExchange(sendUrl, fetchInit, 'text')
+                exchange = await sendExchange(sendUrl, fetchInit, 'text', clientFetch)
               } else {
                 // This caller's patience: its own budget, plus the signal its
                 // pipeline left in ctx.request.signal when a middleware
@@ -318,7 +329,7 @@ export function createGraphQL(config: any): any {
                   // Sent with the first caller's init and the shared signal,
                   // never any one caller's; that signal's abort is that abort,
                   // whatever fetch rejected with (sendSharedExchange).
-                  signal => sendSharedExchange(sendUrl, { ...fetchInit, signal }, 'text'),
+                  signal => sendSharedExchange(sendUrl, { ...fetchInit, signal }, 'text', clientFetch),
                   // Learnt on entry, before this caller can give up, so even
                   // an early give-up knows which round trip it left.
                   entered => {
@@ -562,6 +573,9 @@ export function createGraphQL(config: any): any {
             headers.set('Content-Type', 'application/json')
           }
 
+          // Merged like REST's (create-api.ts Step 5), into a fresh object.
+          const fetchOptions = mergeFetchOptions(clientFetchOptions, operation.config.fetchOptions, options.fetchOptions)
+
           const body = JSON.stringify({ query: operation.config.operation, variables })
 
           const context: MiddlewareContext = {
@@ -572,10 +586,12 @@ export function createGraphQL(config: any): any {
               params: variables,
               headers,
               body,
+              fetchOptions,
               signal: callerSignal,
             },
             requestName: name,
           }
+          stampClientFetch(context, clientFetch)
 
           // The backstop bounds the whole chain by the operation's own signal,
           // not only the part that reaches fetch — the same one create-api.ts

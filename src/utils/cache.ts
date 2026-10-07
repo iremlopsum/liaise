@@ -1,6 +1,111 @@
 // =============================================================================
-// cache.ts — In-memory cache store for cacheMiddleware
+// cache.ts — In-memory cache store for cacheMiddleware, and its fetch-options key
 // =============================================================================
+
+/** The id each identity-keyed object got, for as long as the object lives. */
+const identities = new WeakMap<object, number>()
+let lastIdentity = 0
+
+/**
+ * The fetch-options part of `cacheMiddleware`'s key. Pass it the copy that
+ * goes to fetch (`sendableFetchOptions`), so the fields liaise controls are
+ * not in it.
+ *
+ * Separate from `stableKey`, which keys params, because options reach fetch
+ * **by reference**: an undici `Agent` in `dispatcher` is the agent, client
+ * certificate and all, not its enumerable fields. Keyed by content, two Agents
+ * with different certificates keyed alike and one tenant was served another's
+ * response (the 5.2.0 final review). So:
+ *
+ * - string, boolean, `null` and a finite number → by value; an `undefined`
+ *   member is dropped (fetch reads it as absent). In an array it keys as the
+ *   token `undefined`.
+ * - an array, and an object whose prototype is `Object.prototype` or `null`
+ *   → by content, recursively, object keys sorted.
+ * - any other object, and a function (a class instance such as an `Agent`, a
+ *   `Map`, a `Date`) → by identity: the token `#n`, where `n` is the object's
+ *   id in a `WeakMap`. The same object keeps its id, so reusing one agent
+ *   keeps hitting the cache, and two agents never share an entry however
+ *   alike they look. The token is unquoted, so it cannot equal a string,
+ *   which is always JSON-quoted.
+ *
+ * Returns `null` — don't cache, don't serve — for a circular structure, a
+ * BigInt, a symbol or a non-finite number. Never throws: a throwing getter
+ * declines too.
+ */
+export function cacheOptionsKey(options: unknown): string | null {
+  try {
+    const key = optionKey(options, new Set())
+    return key === undefined ? 'undefined' : key
+  } catch {
+    return null
+  }
+}
+
+/** `string` is a key, `null` is decline, `undefined` is "omit this member". */
+function optionKey(value: unknown, seen: Set<object>): string | null | undefined {
+  switch (typeof value) {
+    case 'undefined':
+      return undefined
+    case 'string':
+    case 'boolean':
+      return JSON.stringify(value)
+    case 'number':
+      return Number.isFinite(value) ? JSON.stringify(value) : null
+    case 'function':
+      return identity(value as object)
+    case 'object':
+      break
+    default:
+      return null // bigint, symbol
+  }
+  if (value === null) return 'null'
+  const obj = value as object
+  const proto = Object.getPrototypeOf(obj) as unknown
+  const isArray = Array.isArray(obj) && proto === Array.prototype
+  if (!isArray && proto !== Object.prototype && proto !== null) return identity(obj)
+  if (seen.has(obj)) return null // an ancestor on the current path: circular
+  seen.add(obj)
+  try {
+    if (isArray) {
+      const parts: string[] = []
+      for (const item of obj as unknown[]) {
+        const s = optionKey(item, seen)
+        if (s === null) return null
+        parts.push(s === undefined ? 'undefined' : s)
+      }
+      return `[${parts.join(',')}]`
+    }
+    const pairs: string[] = []
+    for (const k of Object.keys(obj).sort()) {
+      const s = optionKey((obj as Record<string, unknown>)[k], seen)
+      if (s === null) return null
+      if (s !== undefined) pairs.push(`${JSON.stringify(k)}:${s}`)
+    }
+    return `{${pairs.join(',')}}`
+  } finally {
+    seen.delete(obj)
+  }
+}
+
+/**
+ * The sender part of `cacheMiddleware`'s key: which `fetch` sends the call.
+ * `''` when the client uses the global fetch (nothing stamped), the identity
+ * token for a function, the value for anything else; `null` declines.
+ */
+export function cacheSenderKey(clientFetch: unknown): string | null {
+  if (clientFetch === undefined) return ''
+  return cacheOptionsKey(clientFetch)
+}
+
+function identity(obj: object): string {
+  let id = identities.get(obj)
+  if (id === undefined) {
+    id = ++lastIdentity
+    identities.set(obj, id)
+  }
+  return `#${id}`
+}
 
 interface CacheEntry {
   value: unknown

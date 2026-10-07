@@ -14,7 +14,7 @@ This page lists what `liaise/testing` exports, what `mockFetch` returns, and how
 | `RouteContext` | type | `{ params: Record<string, string>; request: Request }`, passed to a route function. `params` holds each `:token`, decoded. |
 | `RouteHandler` | type | `(ctx: RouteContext) => Response \| Promise<Response>`, a route value that builds its response. |
 | `RouteValue` | type | `Response \| RouteHandler \| Array<Response \| RouteHandler>`, anything a route key can map to. |
-| `RecordedCall` | type | `{ method: string; url: string; headers: Headers; body: unknown }`, one entry in `mock.calls`. |
+| `RecordedCall` | type | `{ method: string; url: string; headers: Headers; body: unknown; init: RequestInit }`, one entry in `mock.calls`. `init` is a copy of what `fetch` received, so a test can check `credentials` or `keepalive`. |
 
 The `retry()` of a `Result` from `successResult` or `errorResult` resolves to that same `Result`.
 

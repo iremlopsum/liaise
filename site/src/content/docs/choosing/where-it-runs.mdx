@@ -15,6 +15,8 @@ Read this page to check that liaise runs where your code runs. liaise has no dep
 
 "Should work" means each of these has the standard `fetch` liaise uses, but CI doesn't run the tests there. If something breaks on one of them, a [bug report](https://github.com/iremlopsum/liaise/issues/new?template=bug_report.yml) that names the runtime and its version helps.
 
+liaise sends with the global `fetch` unless you give the client one. If your runtime's `fetch` isn't the global one, such as a Cloudflare service binding's or undici's with its own dispatcher, pass it as `fetch` ([createApi options](/reference/createapi-options/)). Pass a service binding's `fetch` in a wrapper, `(url, init) => env.SERVICE.fetch(url, init)`, because liaise calls `fetch` unbound.
+
 ## React Native
 
 On React Native, where `AbortSignal.timeout` is missing, [`timeout`](/guide/cancelling-deadlines-and-stale-requests/#set-a-deadline-with-timeout) falls back to a timer, so a deadline still ends the call with kind `'timeout'`. If the runtime drops abort reasons, a call that runs out of time may come back as `'abort'` instead of `'timeout'` ([the six kinds](/guide/handling-errors/#the-six-kinds)).

@@ -11,7 +11,7 @@
 // shared, because the read has no client-specific behaviour.
 // =============================================================================
 
-import type { ResponseType } from '../types.js'
+import type { FetchFunction, ResponseType } from '../types.js'
 
 /** How to read the body. Same values as `ResponseType`. */
 export type ReadAs = ResponseType
@@ -80,7 +80,9 @@ async function readBody(response: Response, read: ReadAs): Promise<unknown> {
 }
 
 /**
- * `fetch`, then read the body once. `fetch` is looked up at call time (tests stub it).
+ * `fetch`, then read the body once. It sends with `send`, the client's own
+ * `fetch`, when one is given, else with the global `fetch`, looked up at call
+ * time (tests stub it).
  *
  * A failed `fetch` rejects as it always did; only the body read is caught.
  * The read is the one step that can fail for two unrelated reasons — the
@@ -90,8 +92,15 @@ async function readBody(response: Response, read: ReadAs): Promise<unknown> {
  * the read failed, before any decoding has run. A parse failure later on
  * therefore can never be mistaken for the abort.
  */
-export async function sendExchange(url: string, init: RequestInit, read: ReadAs): Promise<Exchange> {
-  const response = await fetch(url, init)
+export async function sendExchange(url: string, init: RequestInit, read: ReadAs, send?: FetchFunction): Promise<Exchange> {
+  // The client's own fetch, else the global one, looked up now, so a stub or
+  // polyfill installed after the client was built is the one used (5.2.0).
+  // Called through a local, unbound: `window.fetch` called as a method of
+  // anything else throws "Illegal invocation". A `send` that isn't a function
+  // throws a TypeError here, inside this async function, so it rejects like
+  // any failed fetch.
+  const fetchNow = send ?? fetch
+  const response = await fetchNow(url, init)
   try {
     return { response, body: await readBody(response, read), readFailed: false, readError: undefined }
   } catch (readError) {
@@ -111,9 +120,9 @@ export async function sendExchange(url: string, init: RequestInit, read: ReadAs)
  * (whatwg-fetch, React Native) must still read as 'timeout' to every waiting
  * caller.
  */
-export function sendSharedExchange(url: string, init: RequestInit & { signal: AbortSignal }, read: ReadAs): Promise<Exchange> {
+export function sendSharedExchange(url: string, init: RequestInit & { signal: AbortSignal }, read: ReadAs, send?: FetchFunction): Promise<Exchange> {
   const signal = init.signal
-  return sendExchange(url, init, read).catch((err: unknown) => {
+  return sendExchange(url, init, read, send).catch((err: unknown) => {
     if (signal.aborted && !(err instanceof AbortedRead)) throw new AbortedRead(err, signal.reason)
     throw err
   })

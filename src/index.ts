@@ -47,6 +47,7 @@ export type {
   ApiConfig,
   LogOptions,
   CallOptions,
+  FetchOptions,
   Result,
   SuccessResult,
   ErrorResult,

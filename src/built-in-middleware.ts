@@ -16,7 +16,9 @@
 
 import type { Middleware, MiddlewareContext, MiddlewareNext, LogOptions, Result, RetryOptions, RetryInfo } from './types.js'
 import { createLogger, loggerFor } from './utils/log.js'
-import { CacheStore } from './utils/cache.js'
+import { CacheStore, cacheOptionsKey, cacheSenderKey } from './utils/cache.js'
+import { clientFetchOf } from './utils/client-fetch.js'
+import { sendableFetchOptions } from './utils/fetch-options.js'
 import { stableKey } from './utils/stable-key.js'
 import { parseRetryAfter } from './utils/retry-after.js'
 
@@ -377,7 +379,9 @@ export type CacheMiddleware = Middleware & { clear(): void }
  * content-based key (see `src/utils/stable-key.ts`): object keys sorted,
  * `undefined` members dropped, `Date` by its ISO string, `Map`, `Set` and
  * typed arrays by their entries. It is derived from the original params
- * object, not the processed URL.
+ * object, not the processed URL. The key also holds the method, the URL, the
+ * headers and the `fetchOptions` as they are sent: plain values by content,
+ * any other object (an HTTP agent in `dispatcher`) by identity.
  *
  * A call whose params cannot be keyed soundly — a BigInt, an `ArrayBuffer`,
  * `Blob`, `FormData` or `URLSearchParams`, a circular structure, or an object
@@ -420,6 +424,10 @@ export type CacheMiddleware = Middleware & { clear(): void }
  * @param options.ttl - Time-to-live in milliseconds. Defaults to 5 minutes.
  * @param options.maxSize - Maximum number of entries. Defaults to 50.
  * @param options.debug - Log hits and misses to console. Defaults to false.
+ * @param options.methods - The methods it caches, compared without regard to
+ *   case. Defaults to `['GET', 'HEAD']`: a call with any other method goes
+ *   straight to the network and is never stored. GraphQL sends every
+ *   operation as a POST, so a cache on a query operation needs `['POST']`.
  * @returns A middleware function with an attached `clear()` method.
  *
  * @example
@@ -452,19 +460,47 @@ export function cacheMiddleware(options?: {
   ttl?: number
   maxSize?: number
   debug?: boolean
+  methods?: readonly string[]
 }): CacheMiddleware {
   const store = new CacheStore({
     ttl: options?.ttl ?? 5 * 60_000,
     maxSize: options?.maxSize ?? 50,
   })
   const debug = options?.debug ?? false
+  // Reads only unless told otherwise (5.2.0): before, a cached POST answered
+  // the next identical create with the first one's response. Compared
+  // upper-cased, so `['post']` or a middleware that lower-cases the method
+  // still match. A non-array (plain JS) falls back to the default: a factory
+  // must not throw.
+  const listed = options?.methods
+  const methods = (Array.isArray(listed) ? listed : ['GET', 'HEAD']).map(m => String(m).toUpperCase())
 
   const mw: Middleware = async (ctx, next) => {
+    // A method it doesn't cache never touches the store: no lookup, no write,
+    // no debug line.
+    if (!methods.includes(String(ctx.request.method).toUpperCase())) return next()
     // A null key means the params cannot be keyed soundly (see stable-key.ts):
     // neither cache nor serve. Declining is always safe; serving one caller
     // the response to a different payload never is.
     const paramsStr = stableKey(ctx.request.params)
     if (paramsStr === null) return next()
+    // The fetch options are part of who asked (5.2.0): a credentials:
+    // 'include' call sends cookies an 'omit' call doesn't, so the two never
+    // share an entry. Keyed as they are sent (sendableFetchOptions: without
+    // the fields liaise controls, and no options when they aren't an object),
+    // with their own keyer rather than stableKey: options reach fetch by
+    // reference, so an object that isn't plain, such as an undici Agent, is
+    // keyed by identity (see cacheOptionsKey in ./utils/cache.js). Options it
+    // can't key are declined, never guessed.
+    const optionsStr = cacheOptionsKey(sendableFetchOptions(ctx.request.fetchOptions))
+    if (optionsStr === null) return next()
+    // And which fetch sends it: two clients with their own fetch functions (a
+    // cookie jar, a client certificate) sharing one module-level endpoint must
+    // not share entries. The client stamps its own fetch on the context
+    // (utils/client-fetch.ts); it is keyed by identity, and a client on the
+    // global fetch adds nothing.
+    const senderStr = cacheSenderKey(clientFetchOf(ctx))
+    if (senderStr === null) return next()
     // Who asked and where, not only what: before 5.0.1 the key was name +
     // params, so user B could be served user A's /me (different
     // Authorization), and one Request in two createApi instances shared
@@ -502,7 +538,7 @@ export function cacheMiddleware(options?: {
       })
       urlKey = `${fullUrl.slice(0, qIndex)}?${segments.join('&')}`
     }
-    const key = `${ctx.requestName}|${ctx.request.method}|${urlKey}|${paramsStr}|${headerKey}`
+    const key = `${ctx.requestName}|${ctx.request.method}|${urlKey}|${paramsStr}|${headerKey}|${optionsStr}|${senderStr}`
 
     const cached = store.get<Result<unknown>>(key)
     if (cached !== null) {

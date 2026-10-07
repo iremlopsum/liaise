@@ -196,3 +196,25 @@ describe('mockFetch and init.signal', () => {
     expect((await mock.fetch('/ok')).ok).toBe(true)
   })
 })
+
+describe('RecordedCall.init', () => {
+  it('records the init fetch received, so a test can check fetch options', async () => {
+    const mock = mockFetch({ 'GET /me': jsonResponse({ ok: true }) })
+    await mock.fetch('https://x.test/me', { method: 'GET', credentials: 'include', keepalive: true })
+    expect(mock.lastCall('GET /me')?.init).toMatchObject({ method: 'GET', credentials: 'include', keepalive: true })
+  })
+
+  it('is a copy: changing the init afterwards changes nothing recorded', async () => {
+    const mock = mockFetch({ 'GET /me': jsonResponse({ ok: true }) })
+    const init: RequestInit = { credentials: 'include' }
+    await mock.fetch('https://x.test/me', init)
+    init.credentials = 'omit'
+    expect(mock.lastCall('GET /me')?.init.credentials).toBe('include')
+  })
+
+  it('is an empty object when fetch got no init', async () => {
+    const mock = mockFetch({ 'GET /me': jsonResponse({ ok: true }) })
+    await mock.fetch('https://x.test/me')
+    expect(mock.lastCall('GET /me')?.init).toEqual({})
+  })
+})

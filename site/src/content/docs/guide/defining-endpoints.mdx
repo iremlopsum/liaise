@@ -57,6 +57,17 @@ The path `/orgs/:org/repos` names `org`, so every call must pass it, and its val
 
 - **With a schema, you write no response type at all.** The schema supplies it ([Validating responses](/guide/validating-responses/)).
 
+## Cookies and other fetch options
+
+`fetchOptions` passes options through to `fetch`: `credentials`, `mode`, `cache`, `redirect`, `keepalive`, `priority` and anything else `RequestInit` has, except `method`, `headers`, `body` and `signal`, which liaise sets itself. Set it on the client, on an endpoint or on one call:
+
+<Example name="fetch-options" />
+
+- **The most specific level wins, field by field**, as with headers. `getUser` sends `credentials: 'include'` from the client and its own `cache: 'no-store'`. A field set to `undefined` doesn't replace the level below, so to undo the client's `credentials` for one call, pass the value you want, such as `'same-origin'`.
+- **`credentials: 'include'` is what cookie auth to another origin needs.** By default `fetch` sends cookies only to the page's own origin.
+- **Middleware sees the merged options** as `ctx.request.fetchOptions`, and can change them ([MiddlewareContext](/reference/middlewarecontext/)).
+- **Calls whose options differ never [share](/guide/sharing-identical-requests/) a request.**
+
 ## Why two calls
 
 `defineRequest<Repo[]>()({ ... })` is two calls because TypeScript can't infer some type arguments while you write others. The first call takes the response type you write, and the second infers the params from the path. In a single call, writing the response type would quietly turn the path checking off.

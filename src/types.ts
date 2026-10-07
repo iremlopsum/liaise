@@ -87,6 +87,28 @@ export type HttpMethod = 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE'
  */
 export type ResponseType = 'json' | 'text' | 'blob' | 'arrayBuffer' | 'formData' | 'none'
 
+/**
+ * A `fetch` liaise can send with: the global one, `mockFetch().fetch`,
+ * undici's, or a wrapper of your own. liaise always passes a string URL and
+ * an init, and calls it unbound, so `window.fetch` works as is. A method that
+ * needs its object, such as a Cloudflare service binding's, goes in a
+ * wrapper: `(url, init) => env.SERVICE.fetch(url, init)`.
+ */
+export type FetchFunction = (url: string, init: RequestInit) => Promise<Response>
+
+/**
+ * Options passed through to `fetch`: everything `RequestInit` has except what
+ * liaise controls (`method`, `headers`, `body`, `signal`). That covers
+ * `credentials`, `mode`, `cache`, `redirect`, `keepalive`, `priority`,
+ * `referrerPolicy` and the rest. It follows the TypeScript DOM lib, so a field
+ * the lib adds works without a liaise release.
+ *
+ * Set on the client, the endpoint or one call; the most specific level wins,
+ * field by field, and a field set to `undefined` doesn't override the level
+ * below. Under `share`, calls whose options differ never share a request.
+ */
+export type FetchOptions = Omit<RequestInit, 'method' | 'headers' | 'body' | 'signal' | 'window'>
+
 // ---------------------------------------------------------------------------
 // Request Config
 // ---------------------------------------------------------------------------
@@ -193,6 +215,13 @@ export interface RequestConfig {
    * 3. Per-call headers (from `CallOptions`) — highest priority
    */
   headers?: HeadersInit
+
+  /**
+   * Options passed through to `fetch` for every call to this endpoint, such
+   * as `cache: 'no-store'`. Each field replaces the client's, and a call's
+   * replaces this. @see {@link FetchOptions}
+   */
+  fetchOptions?: FetchOptions
 
   /**
    * How to parse the response body. Defaults to `'json'`.
@@ -480,6 +509,12 @@ export interface CallOptions {
   headers?: HeadersInit
 
   /**
+   * Options passed through to `fetch` for this call. Each field replaces the
+   * client's and the endpoint's. @see {@link FetchOptions}
+   */
+  fetchOptions?: FetchOptions
+
+  /**
    * An `AbortSignal` to cancel this request. When the signal fires,
    * the fetch is aborted and the result contains an error with `status: 0`
    * and `kind: 'abort'`.
@@ -543,6 +578,16 @@ export interface MiddlewareContext {
     headers: Headers
     /** Serialized request body, or null when there is none. */
     body: unknown | null
+    /**
+     * The options passed through to `fetch`: the client's, the endpoint's and
+     * the call's, merged field by field. liaise always sets it, as a fresh
+     * object for each call. A middleware may change a field or assign a new
+     * object, and the change reaches `fetch`. `method`, `headers`, `body` and
+     * `signal` in it are ignored: liaise's own values always win. Optional in
+     * the type only, so a context built by hand (a test of your own
+     * middleware) still compiles.
+     */
+    fetchOptions?: FetchOptions
     /**
      * The AbortSignal that governs this call's request: the one handed to
      * `fetch`, except when a `share: true` call takes part in a shared
@@ -722,6 +767,20 @@ export interface ApiConfig<TRequests extends Record<string, unknown>> {
    * Lowest merge priority — overridden by per-request and per-call headers.
    */
   headers?: HeadersInit
+  /**
+   * Options passed through to `fetch` for every call, such as
+   * `credentials: 'include'`. Lowest priority: an endpoint or a call replaces
+   * a field. @see {@link FetchOptions}
+   */
+  fetchOptions?: FetchOptions
+  /**
+   * The `fetch` this client sends with. Without it, liaise looks up the
+   * global `fetch` on every call, so a stub or polyfill installed after the
+   * client is built is the one used. It is called unbound. Anything it throws
+   * or rejects with is a `'network'` error, or `'timeout'`/`'abort'` when the
+   * call's own signal caused it.
+   */
+  fetch?: FetchFunction
 
   /**
    * Global error callback. Fires after the full middleware chain completes,
@@ -828,6 +887,13 @@ export interface OperationConfig {
    * 3. Per-call headers (from `CallOptions`) — highest priority
    */
   headers?: HeadersInit
+
+  /**
+   * Options passed through to `fetch` for every call to this operation. Each
+   * field replaces the client's, and a call's replaces this.
+   * @see {@link FetchOptions}
+   */
+  fetchOptions?: FetchOptions
 
   /**
    * When `true`, enables auto-cancellation of duplicate in-flight requests.
@@ -966,6 +1032,20 @@ export interface GraphQLBaseConfig {
    * Lowest merge priority — overridden by per-operation and per-call headers.
    */
   headers?: HeadersInit
+  /**
+   * Options passed through to `fetch` for every operation, such as
+   * `credentials: 'include'`. Lowest priority: an operation or a call replaces
+   * a field. @see {@link FetchOptions}
+   */
+  fetchOptions?: FetchOptions
+  /**
+   * The `fetch` this client sends with. Without it, liaise looks up the
+   * global `fetch` on every call, so a stub or polyfill installed after the
+   * client is built is the one used. It is called unbound. Anything it throws
+   * or rejects with is a `'network'` error, or `'timeout'`/`'abort'` when the
+   * call's own signal caused it.
+   */
+  fetch?: FetchFunction
 
   /**
    * Global error callback. Fires after the full middleware chain completes.
