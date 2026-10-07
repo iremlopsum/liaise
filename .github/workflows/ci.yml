@@ -111,3 +111,21 @@ jobs:
       - run: npm ci --prefix site
       - run: npm --prefix site run build
       - run: npm --prefix site test
+
+  # The Quick start says liaise's types compile on TypeScript back to 4.7. This checks it:
+  # scripts/types-compat.mjs packs the build and compiles a usage file against it on every
+  # TypeScript minor it lists. It installs third-party packages (each TypeScript version),
+  # so like the site job it keeps no git credentials.
+  types:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+      - run: npm run types:compat

@@ -30,6 +30,7 @@
   "scripts": {
     "clean": "node -e \"require('node:fs').rmSync('dist',{recursive:true,force:true})\"",
     "size": "node scripts/size.mjs",
+    "types:compat": "node scripts/types-compat.mjs",
     "build": "npm run clean && tsc -p tsconfig.build.json && tsc -p tsconfig.types.json",
     "test": "vitest",
     "test:run": "vitest run",
