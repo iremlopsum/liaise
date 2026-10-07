@@ -75,7 +75,10 @@ export function createFakeServer({ onRequest = () => {}, onSettle = () => {} }: 
     }
     if (method === 'GET' && url.pathname === '/search') {
       const q = url.searchParams.get('q') ?? ''
-      return { kind: 'answer', status: 200, body: [`${q}`, `${q} docs`, `${q} examples`], delay: Math.max(70, 560 - q.length * 90) }
+      // 120 ms for the full word, 220 ms more per missing letter. Keys come every 60 ms, so each
+      // query is still in flight when the next key cancels it (dedupe on, 60 ms to spare), and
+      // without dedupe the answers land in reverse: "l" last, 160 ms after "li".
+      return { kind: 'answer', status: 200, body: [`${q}`, `${q} docs`, `${q} examples`], delay: 120 + 220 * Math.max(0, 6 - q.length) }
     }
     if (method === 'POST' && url.pathname === '/graphql') return executeGraphQL(body, people)
     return { kind: 'answer', status: 404, body: { message: 'Not found' }, delay: 50 }

@@ -49,7 +49,7 @@ const runnable = Object.fromEntries(await Promise.all(SCENARIOS.map(async (s) =>
         <span data-net-count class="font-mono text-[11px] text-gray-500"></span>
       </div>
       <ul data-net class="max-h-[45%] space-y-px overflow-y-auto px-2 font-mono text-[12px]"></ul>
-      <p data-cors hidden class="px-4 pt-1.5 text-[11px] leading-4 text-amber-300/80">Requests to other sites need that site to allow cross-origin requests (CORS).</p>
+      <p data-cors hidden class="px-4 pt-1.5 text-[11px] leading-4 text-amber-300/80">Requests to other sites fail like this when you’re offline, the URL is wrong, or the site doesn’t allow cross-origin requests (CORS).</p>
       <div class="mt-2 flex items-center justify-between border-t border-white/[0.07] px-4 pt-3.5 pb-2">
         <h3 class="text-[11px] font-medium tracking-wider text-gray-500 uppercase">Console</h3>
       </div>
@@ -61,11 +61,12 @@ const runnable = Object.fromEntries(await Promise.all(SCENARIOS.map(async (s) =>
   <div class="flex flex-col gap-3 border-t border-white/[0.07] px-4 py-3 sm:flex-row sm:items-center">
     <p data-hint class="flex-1 text-[13px] leading-5 text-gray-400">{SCENARIOS[0].hint}</p>
     <div class="flex shrink-0 items-center gap-3">
-      <span class="hidden font-mono text-[11px] text-gray-500 md:inline">Ctrl+Space or ⌘I for suggestions · ⌘↵ to run</span>
+      <span class="hidden font-mono text-[11px] text-gray-500 md:inline">Ctrl+Space or ⌘I for suggestions · ⌘↵ to run or stop</span>
       <span class="text-[12px] text-gray-500 md:hidden">Editing works on a larger screen.</span>
-      <button type="button" data-run class="inline-flex items-center gap-2 rounded-full bg-white px-4 py-1.5 text-[13px] font-semibold text-gray-950 transition hover:bg-gray-200 disabled:opacity-60">
-        <svg viewBox="0 0 12 12" class="size-3 fill-current" aria-hidden="true"><path d="M3 1.8v8.4a.6.6 0 0 0 .9.52l7-4.2a.6.6 0 0 0 0-1.04l-7-4.2A.6.6 0 0 0 3 1.8Z"/></svg>
-        Run
+      <button type="button" data-run data-state="run" class="group inline-flex w-[5.5rem] items-center justify-center gap-2 rounded-full bg-white py-1.5 text-[13px] font-semibold text-gray-950 transition hover:bg-gray-200">
+        <svg viewBox="0 0 12 12" class="size-3 fill-current group-data-[state=stop]:hidden" aria-hidden="true"><path d="M3 1.8v8.4a.6.6 0 0 0 .9.52l7-4.2a.6.6 0 0 0 0-1.04l-7-4.2A.6.6 0 0 0 3 1.8Z"/></svg>
+        <svg viewBox="0 0 12 12" class="hidden size-3 fill-current group-data-[state=stop]:block" aria-hidden="true"><rect x="2" y="2" width="8" height="8" rx="1.2"/></svg>
+        <span class="group-data-[state=stop]:hidden">Run</span><span class="hidden group-data-[state=stop]:inline">Stop</span>
       </button>
     </div>
   </div>
@@ -77,6 +78,7 @@ const runnable = Object.fromEntries(await Promise.all(SCENARIOS.map(async (s) =>
   import { createFakeServer, type Outcome } from '../playground/fake-server'
   import { pickFetch } from '../playground/route-fetch'
   import { SCENARIOS, type Scenario } from '../playground/scenarios'
+  import { createRunner, instrument, liaiseShim } from '../playground/runner'
   import type { MountedEditor } from '../playground/editor'
 
   type Id = Scenario['id']
@@ -146,6 +148,7 @@ const runnable = Object.fromEntries(await Promise.all(SCENARIOS.map(async (s) =>
     // index) load as usual, unlogged.
     const pageFetch = window.fetch, realFetch = pageFetch.bind(window)
     async function sendReal(input: RequestInfo | URL, init?: RequestInit) {
+      if (init?.signal?.aborted) return realFetch(input, init) // rejects at once, sends nothing
       const request = input instanceof Request ? input : undefined
       const method = (init?.method ?? request?.method ?? 'GET').toUpperCase()
       const href = request ? request.url : String(input)
@@ -163,54 +166,58 @@ const runnable = Object.fromEntries(await Promise.all(SCENARIOS.map(async (s) =>
         throw e
       }
     }
-    const routedFetch: typeof fetch = (input, init) => {
-      const to = pickFetch(input, { pageOrigin: location.origin })
-      return to === 'fake' ? server.fetch(input, init) : to === 'real' ? sendReal(input, init) : realFetch(input, init)
-    }
-    const SUBPATH: Record<string, string> = { '': 'index.js', '/middleware': 'built-in-middleware.js', '/testing': 'testing.js' }
-    const withLiaise = (js: string) => js.replace(/from\s+(['"])liaise(\/[a-z]+)?\1/g, (_, _q, sub = '') =>
-      `from '${location.origin}${BASE}liaise/${SUBPATH[sub] ?? 'index.js'}'`)
+    const page = (input: RequestInfo | URL) => pickFetch(input, { pageOrigin: location.origin }) === 'page'
+    const routedFetch: typeof fetch = (input, init) =>
+      pickFetch(input, { pageOrigin: location.origin }) === 'fake' ? server.fetch(input, init) : sendReal(input, init)
+    // runner.ts swaps window.fetch and the console for a run and restores them when it ends;
+    // Stop ends it at once, even when the example never settles.
+    const runner = createRunner({
+      scope: window, send: routedFetch, passThrough: page,
+      print: (args, tone) => print(args, tone === 'error' ? 'text-rose-300' : undefined),
+    })
+    const LIB = `${location.origin}${BASE}liaise/`
     const runButton = $<HTMLButtonElement>('[data-run]')
-    let running = false
+    const showRunning = (on: boolean) => { runButton.dataset.state = on ? 'stop' : 'run' }
     async function run() {
-      if (running) return
-      running = true; runButton.disabled = true
+      runner.stop() // the requests it leaves are marked cancelled before the panels clear
       net.innerHTML = ''; out.innerHTML = ''; rows.clear(); count.textContent = ''; cors.hidden = true; server.reset()
-      const realLog = console.log, realError = console.error
-      let url = ''
       t0 = Date.now()
-      try {
+      showRunning(true)
+      const end = await runner.run(async (r) => {
         // An example as shipped runs as compiled at build time; an edited one goes through the
         // editor's TypeScript worker, which also counts its type errors.
         const { js, errors } = editor?.edited() ? await editor.compile() : { js: runnable[current.id], errors: 0 }
+        if (r.signal.aborted) return // stopped while it compiled
         t0 = Date.now()
         if (errors) print([`${errors} type error${errors > 1 ? 's' : ''} (hover the red underline). Running anyway.`], 'text-amber-300')
-        url = URL.createObjectURL(new Blob([withLiaise(js)], { type: 'text/javascript' }))
-        window.fetch = routedFetch
-        console.log = (...a: unknown[]) => print(a)
-        console.error = (...a: unknown[]) => print(a, 'text-rose-300')
-        await import(/* @vite-ignore */ url)
-      } catch (e) {
-        const err = e as { name?: string; message?: string } | undefined
-        print([`Uncaught ${err?.name ?? 'Error'}: ${err?.message ?? String(e)}`], 'text-rose-300')
-      } finally {
-        if (url) URL.revokeObjectURL(url)
-        window.fetch = pageFetch; console.log = realLog; console.error = realError
-        running = false; runButton.disabled = false
+        const shim = URL.createObjectURL(new Blob([liaiseShim(r.id, LIB)], { type: 'text/javascript' }))
+        const url = URL.createObjectURL(new Blob([instrument(js, r.id, shim, LIB)], { type: 'text/javascript' }))
+        try {
+          await import(/* @vite-ignore */ url)
+        } finally {
+          URL.revokeObjectURL(url); URL.revokeObjectURL(shim)
+        }
+      })
+      if (end.ended === 'threw') {
+        const err = end.error as { name?: string; message?: string } | undefined
+        print([`Uncaught ${err?.name ?? 'Error'}: ${err?.message ?? String(end.error)}`], 'text-rose-300')
       }
+      if (!runner.running) showRunning(false) // unless a newer run has started
     }
-    runButton.addEventListener('click', run)
+    // Run, Stop and ⌘↵ are one control.
+    const runOrStop = () => { if (runner.running) runner.stop(); else void run() }
+    runButton.addEventListener('click', runOrStop)
     root.querySelector('[role=tablist]')!.addEventListener('click', (e) => {
       const id = (e.target as Element).closest<HTMLElement>('[role=tab]')?.dataset.id as Id | undefined
-      if (!id || id === current.id || running) return
-      select(id); run()
+      if (!id || id === current.id) return
+      select(id); void run() // stops the run in flight, if any
     })
 
     // ---- Editor: larger screens only, after first paint ------------------------
     if (!matchMedia('(max-width: 767px)').matches) {
       const load = () =>
         import('../playground/editor')
-          .then(({ mountEditor }) => mountEditor($('[data-editor]'), { sources: SOURCES, current: current.id, base: BASE, onRun: run }))
+          .then(({ mountEditor }) => mountEditor($('[data-editor]'), { sources: SOURCES, current: current.id, base: BASE, onRun: runOrStop }))
           .then((mounted) => {
             editor = mounted
             editor.show(current.id) // the tab may have changed while it loaded
@@ -221,6 +228,6 @@ const runnable = Object.fromEntries(await Promise.all(SCENARIOS.map(async (s) =>
       requestAnimationFrame(() => later(load))
     }
 
-    run()
+    void run()
   }
 </script>

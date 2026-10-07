@@ -12,8 +12,8 @@ async function run(id: string, edits: Array<[string, string]> = []) {
   mkdirSync(TMP, { recursive: true })
   const file = new URL(`${id}-${n++}.ts`, TMP)
   writeFileSync(file, src)
-  const net: Array<{ id: number; method: string; path: string; operation?: string; outcome?: string | number }> = []
-  const server = createFakeServer({ onRequest: r => net.push(r), onSettle: s => Object.assign(net.find(r => r.id === s.id)!, s) })
+  const net: Array<{ id: number; method: string; path: string; operation?: string; outcome?: string | number; sentAt: number; ms?: number }> = []
+  const server = createFakeServer({ onRequest: r => net.push({ ...r, sentAt: Date.now() }), onSettle: s => Object.assign(net.find(r => r.id === s.id)!, s) })
   vi.stubGlobal('fetch', server.fetch)
   const log: string[] = []
   vi.spyOn(console, 'log').mockImplementation((...a) => { log.push(a.map(x => (typeof x === 'string' ? x : JSON.stringify(x))).join(' ')) })
@@ -25,9 +25,11 @@ beforeEach(() => { vi.restoreAllMocks() })
 afterEach(() => { vi.unstubAllGlobals(); rmSync(TMP, { recursive: true, force: true }) })
 
 describe('playground examples do what their hints say', () => {
-  it('quick start: 42 → Hello, Ada Lovelace; 500 → http 500', async () => {
+  it('quick start: 42 → Hello, Ada Lovelace; 500, 404 and offline as the hint says', async () => {
     expect((await run('quick-start')).log).toEqual(['Hello, Ada Lovelace'])
     expect((await run('quick-start', [["id: '42'", "id: '500'"]])).log).toEqual(['http 500'])
+    expect((await run('quick-start', [["id: '42'", "id: '404'"]])).log).toEqual(['http 404'])
+    expect((await run('quick-start', [["id: '42'", "id: 'offline'"]])).log).toEqual(['network 0'])
   })
   it('every failure: five ids, five outcomes, none throws', async () => {
     expect((await run('errors')).log).toEqual(['42 → Ada Lovelace', '404 → http 404', '500 → http 500', 'offline → network 0', 'slow → timeout 0'])
@@ -38,6 +40,10 @@ describe('playground examples do what their hints say', () => {
     expect(on.log.filter(l => l.endsWith('cancelled'))).toHaveLength(5)
     const off = await run('search', [['dedupe: true', 'dedupe: false']])
     expect(off.log.at(-1)).toBe('"l" shows ["l","l docs","l examples"]')
+    // By design, not by luck: the stale answer lands at least 150 ms after the one before it.
+    const landed = off.net.map(r => ({ path: r.path, at: r.sentAt + r.ms! })).sort((a, b) => a.at - b.at)
+    expect(landed.at(-1)!.path).toBe('/search?q=l')
+    expect(landed.at(-1)!.at - landed.at(-2)!.at).toBeGreaterThanOrEqual(150)
   })
   it('share: one request for five callers; off: five', async () => {
     const on = await run('share')
