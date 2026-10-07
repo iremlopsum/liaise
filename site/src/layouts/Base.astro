@@ -32,9 +32,10 @@ const ogImage = new URL(`${import.meta.env.BASE_URL.replace(/\/?$/, '/')}og.png`
     <meta name="twitter:description" content={desc} />
     <meta name="twitter:image" content={ogImage} />
     <script is:inline>
-      // Apply the theme before first paint, so nothing flashes.
+      // Apply the theme before first paint, so nothing flashes. Keys start with liaise: because
+      // iremlopsum.github.io, and so its storage, is shared with the owner's other sites.
       try {
-        const t = localStorage.getItem('theme')
+        const t = localStorage.getItem('liaise:theme')
         if (t === 'dark' || (!t && matchMedia('(prefers-color-scheme: dark)').matches)) document.documentElement.classList.add('dark')
       } catch {}
     </script>
@@ -58,13 +59,12 @@ const ogImage = new URL(`${import.meta.env.BASE_URL.replace(/\/?$/, '/')}og.png`
 
     <script is:inline type="module">
       const root = document.documentElement
-      const save = (k, v) => { try { localStorage.setItem(k, v) } catch {} }
 
       // Theme
       for (const b of document.querySelectorAll('[data-theme-toggle]'))
         b.addEventListener('click', () => {
           const dark = root.classList.toggle('dark')
-          save('theme', dark ? 'dark' : 'light')
+          try { localStorage.setItem('liaise:theme', dark ? 'dark' : 'light') } catch {}
           window.dispatchEvent(new CustomEvent('themechange', { detail: { dark } }))
         })
 

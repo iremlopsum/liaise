@@ -29,7 +29,7 @@ For two or three calls, plain `fetch` is fine. You can write the few checks they
 
 liaise never throws. Every failure comes back as a value, and you check `error` after each call ([Never throws](/about/design-principles/#never-throws)). If you'd rather a failed call threw, so that one `try` covers a block of calls, use a client that throws. ky, for one, throws an `HTTPError` when a response's status is outside 2xx ([ky's docs](https://github.com/sindresorhus/ky#readme)).
 
-With liaise, you convert at the one place that needs a throw, as the [TanStack Query recipe](/recipes/use-with-tanstack-query/) does, and every other call checks `error`. [How it compares](/choosing/how-it-compares/) shows what ky and the others give back for each kind of failure.
+With liaise, you convert at the one place that needs a throw, as the [TanStack Query recipe](/recipes/use-with-tanstack-query/) does, and every other call checks `error`. [The comparison](/compare/) shows what ky and the others give back for each kind of failure.
 
 ## When liaise fits
 

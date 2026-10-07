@@ -24,4 +24,21 @@ describe('internal links', () => {
     }
     expect(dead).toEqual([])
   })
+
+  it('a sentence that says what each library gives back links to /compare/, where the results are', () => {
+    // /choosing/how-it-compares/ explains the method; the outcomes themselves are on /compare/.
+    const found: string[] = []
+    for (const f of pages.filter(f => !f.startsWith('pagefind/'))) {
+      for (const [, p] of readFileSync(join(dist, f), 'utf8').matchAll(/<p\b[^>]*>([\s\S]*?)<\/p>/g)) {
+        const text = p.replace(/<a href="([^"]*)"[^>]*>/g, ' [link:$1] ').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ')
+        for (const sentence of text.split(/(?<=[.!?]) (?=[A-Z[])/)) {
+          if (!/\bgives? back\b/.test(sentence) || !/\[link:\/liaise\/(compare|choosing\/how-it-compares)\//.test(sentence)) continue
+          found.push(`${f}: ${sentence}`)
+          expect(sentence, f).toContain('[link:/liaise/compare/]')
+          expect(sentence, f).not.toContain('[link:/liaise/choosing/how-it-compares/]')
+        }
+      }
+    }
+    expect(found.length, found.join('\n')).toBeGreaterThanOrEqual(2)
+  })
 })

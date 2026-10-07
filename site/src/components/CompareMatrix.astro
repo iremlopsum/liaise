@@ -18,8 +18,9 @@ const titleLink = 'font-medium text-gray-950 underline decoration-gray-950/20 un
     <strong class="font-semibold text-gray-950 dark:text-white">{v.label}.</strong> {v.blurb}
   </p>
 
-  <!-- md and up: one table, the scenario column stays put while the rest scrolls. -->
-  <div class="mt-4 hidden overflow-x-auto rounded-xl ring-1 ring-gray-950/[0.08] md:block dark:ring-white/10">
+  <!-- md and up: one table, the scenario column stays put while the rest scrolls. Like the cards,
+       not indexed (spec §9): search finds the prose about the results, not 200 cells. -->
+  <div class="mt-4 hidden overflow-x-auto rounded-xl ring-1 ring-gray-950/[0.08] md:block dark:ring-white/10" data-pagefind-ignore>
     <table class="w-full min-w-[60rem] border-collapse text-left">
       <thead>
         <tr class="border-b border-gray-950/[0.08] dark:border-white/10">

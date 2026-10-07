@@ -67,7 +67,7 @@ const q = (s: string) => `“${s}”`
             </button>
           ))}
         </div>
-        <ul class="flex flex-wrap gap-x-5 gap-y-2 text-[12.5px] text-gray-600 dark:text-gray-400" aria-label="Markers">
+        <ul class="flex flex-wrap gap-x-5 gap-y-2 text-[12.5px] text-gray-600 dark:text-gray-400" aria-label="Markers" data-pagefind-ignore>
           {(Object.keys(KINDS) as Kind[]).map((k) => (
             <li class="flex items-center gap-2"><span class="cmp-mark" data-mark={k}>{KINDS[k].label}</span>{KINDS[k].help}</li>
           ))}
@@ -86,7 +86,6 @@ const q = (s: string) => `“${s}”`
       <script is:inline>
         // The switch shows one setup. The choice is remembered when storage works; the page is the same without it.
         ;(() => {
-          const KEY = 'compare-variant'
           const sections = document.querySelectorAll('section[data-variant]')
           const buttons = document.querySelectorAll('[data-show-variant]')
           const show = (v) => {
@@ -94,11 +93,11 @@ const q = (s: string) => `“${s}”`
             for (const b of buttons) b.setAttribute('aria-pressed', String(b.dataset.showVariant === v))
           }
           let saved = null
-          try { saved = localStorage.getItem(KEY) } catch {}
+          try { saved = localStorage.getItem('liaise:compare-variant') } catch {}
           if (saved === 'configured' || saved === 'default') show(saved)
           for (const b of buttons) b.addEventListener('click', () => {
             show(b.dataset.showVariant)
-            try { localStorage.setItem(KEY, b.dataset.showVariant) } catch {}
+            try { localStorage.setItem('liaise:compare-variant', b.dataset.showVariant) } catch {}
           })
         })()
       </script>

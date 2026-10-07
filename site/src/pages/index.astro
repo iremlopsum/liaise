@@ -6,6 +6,7 @@ import { whatsNew } from '../data/whats-new'
 import pkg from '../../../package.json'
 import results from '../../../compare/results.json'
 
+// null when the CHANGELOG has no section for the released version: then there is no pill.
 const news = whatsNew()
 // Gzipped size of the REST-only import, from the comparison harness, never typed by hand.
 const gzipKb = Math.round(results.sizes.liaise.gzip / 1024)
@@ -24,11 +25,13 @@ const code = (s: string) => s.replace(/`([^`]+)`/g, '<code class="rounded-md bg-
   <main>
     <section class="mx-auto max-w-[90rem] px-4 pt-16 sm:px-6 sm:pt-20 lg:px-8">
       <div class="max-w-3xl">
-        <a href={news.href} class="inline-flex items-center gap-2 rounded-full py-1 pr-3 pl-1 text-[13px] text-gray-600 ring-1 ring-gray-950/10 ring-inset transition hover:ring-gray-950/20 dark:text-gray-400 dark:ring-white/10 dark:hover:ring-white/20">
-          <span class="rounded-full bg-accent-soft px-2 py-0.5 text-[12px] font-semibold text-accent">{news.version}</span>
-          {news.text}
-          <span aria-hidden="true">→</span>
-        </a>
+        {news && (
+          <a href={news.href} class="inline-flex items-center gap-2 rounded-full py-1 pr-3 pl-1 text-[13px] text-gray-600 ring-1 ring-gray-950/10 ring-inset transition hover:ring-gray-950/20 dark:text-gray-400 dark:ring-white/10 dark:hover:ring-white/20">
+            <span class="rounded-full bg-accent-soft px-2 py-0.5 text-[12px] font-semibold text-accent">{news.version}</span>
+            {news.text}
+            <span aria-hidden="true">→</span>
+          </a>
+        )}
         <h1 class="mt-6 text-[2.75rem] leading-[1.05] font-semibold tracking-[-0.035em] text-balance text-gray-950 sm:text-6xl lg:text-[4.25rem] dark:text-white">
           Your API calls, minus the surprises.
         </h1>

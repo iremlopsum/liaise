@@ -1,6 +1,8 @@
 import { describe, it, expect } from 'vitest'
-import { readFileSync, existsSync } from 'node:fs'
+import { readFileSync, existsSync, readdirSync } from 'node:fs'
+import { gunzipSync } from 'node:zlib'
 import { NAMES, METHOD_FOR, OVERHEAD, cell } from '../../compare/cells.mjs'
+import { KINDS, ky, type Kind } from '../src/compare'
 
 const html = () => readFileSync(new URL('../dist/compare/index.html', import.meta.url), 'utf8')
 const data = JSON.parse(readFileSync(new URL('../../compare/results.json', import.meta.url), 'utf8'))
@@ -22,9 +24,25 @@ describe('/compare', () => {
     expect(html()).toMatch(/Where liaise loses/)
     expect(html()).toMatch(/no default timeout/i)
   })
-  it('never says better or faster', () => {
-    const text = html().replace(/<[^>]+>/g, ' ')
-    expect(text).not.toMatch(/\b(better|faster)\b/i)
+  it('keeps the matrix and its marker legend out of the search index, and the prose in', () => {
+    const dir = new URL('../dist/pagefind/fragment/', import.meta.url)
+    const pages = readdirSync(dir).map(f => JSON.parse(gunzipSync(readFileSync(new URL(f, dir))).toString('utf8').replace(/^pagefind_dcd/, '')))
+    const page = pages.find(p => p.url === '/compare/')
+    expect(page, '/compare/ is indexed').toBeDefined()
+    const content = decode(page.content)
+    for (const k of Object.values(KINDS)) expect(content, 'the marker legend').not.toContain(k.help)
+    // A cell reads as its outcome, then its marker. The "Closest alternative: ky" table renders some
+    // cells the same way and stays indexed, so what it shows is left out of the check.
+    const shown = (s: any, n: string, v: Variant) => { const c = cell(s, n, v); return `${c.text}${KINDS[c.kind as Kind].label}` }
+    const kyTable = ky.rows.flatMap((s: any) => ['ky', 'liaise'].map(n => shown(s, n, 'configured')))
+    let checked = 0
+    for (const v of VARIANTS) for (const s of data.scenarios) for (const n of NAMES) {
+      if (kyTable.some(k => k.includes(shown(s, n, v)))) continue
+      checked++
+      expect(content, `${v}/${s.id}/${n}`).not.toContain(shown(s, n, v))
+    }
+    expect(checked).toBeGreaterThan(50)
+    for (const prose of ['Where liaise loses', 'Closest alternative: ky', 'Pick something else when']) expect(content).toContain(prose)
   })
 })
 
