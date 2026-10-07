@@ -412,7 +412,7 @@ export function createApi<TRequests extends Record<string, Request<any, any>>>(
 ): Api<TRequests> {
   // Destructure the config for convenience. Default globalMiddleware to an
   // empty array so we don't need null checks throughout the function.
-  const { baseUrl, requests, middleware: globalMiddleware = [], headers: globalHeaders, onError, timeout: clientTimeout } = config
+  const { baseUrl, requests, middleware: globalMiddleware = [], headers: globalHeaders, onError, timeout: clientTimeout, fetch: clientFetch } = config
   // Not a middleware: each call prints its start line before its chain runs
   // and its end line from the post-execution hook, with the Result the caller
   // receives — the backstop's too — so it logs once, with its final outcome
@@ -769,7 +769,7 @@ export function createApi<TRequests extends Record<string, Request<any, any>>>(
                 : null
               let exchange: Exchange
               if (shareKey === null) {
-                exchange = await sendExchange(sendUrl, fetchInit, responseType)
+                exchange = await sendExchange(sendUrl, fetchInit, responseType, clientFetch)
               } else {
                 // This caller's patience: its own budget, plus the signal its
                 // pipeline left in ctx.request.signal when a middleware
@@ -799,7 +799,7 @@ export function createApi<TRequests extends Record<string, Request<any, any>>>(
                   // the deadline above, never any one caller's. If that signal
                   // aborted, the failure is that abort, whatever fetch
                   // rejected with (sendSharedExchange, utils/exchange.ts).
-                  signal => sendSharedExchange(sendUrl, { ...fetchInit, signal }, responseType),
+                  signal => sendSharedExchange(sendUrl, { ...fetchInit, signal }, responseType, clientFetch),
                   // Learnt on entry, before this caller can give up, so even
                   // an early give-up knows which round trip it left.
                   entered => {

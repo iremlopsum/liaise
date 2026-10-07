@@ -87,6 +87,14 @@ export type HttpMethod = 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE'
  */
 export type ResponseType = 'json' | 'text' | 'blob' | 'arrayBuffer' | 'formData' | 'none'
 
+/**
+ * A `fetch` liaise can send with: the global one, `mockFetch().fetch`,
+ * undici's, a Cloudflare service binding's, or a wrapper of your own. liaise
+ * always passes a string URL and an init, and calls it unbound, so
+ * `window.fetch` works as is.
+ */
+export type FetchFunction = (url: string, init: RequestInit) => Promise<Response>
+
 // ---------------------------------------------------------------------------
 // Request Config
 // ---------------------------------------------------------------------------
@@ -722,6 +730,14 @@ export interface ApiConfig<TRequests extends Record<string, unknown>> {
    * Lowest merge priority — overridden by per-request and per-call headers.
    */
   headers?: HeadersInit
+  /**
+   * The `fetch` this client sends with. Without it, liaise looks up the
+   * global `fetch` on every call, so a stub or polyfill installed after the
+   * client is built is the one used. It is called unbound. Anything it throws
+   * or rejects with is a `'network'` error, or `'timeout'`/`'abort'` when the
+   * call's own signal caused it.
+   */
+  fetch?: FetchFunction
 
   /**
    * Global error callback. Fires after the full middleware chain completes,
@@ -966,6 +982,14 @@ export interface GraphQLBaseConfig {
    * Lowest merge priority — overridden by per-operation and per-call headers.
    */
   headers?: HeadersInit
+  /**
+   * The `fetch` this client sends with. Without it, liaise looks up the
+   * global `fetch` on every call, so a stub or polyfill installed after the
+   * client is built is the one used. It is called unbound. Anything it throws
+   * or rejects with is a `'network'` error, or `'timeout'`/`'abort'` when the
+   * call's own signal caused it.
+   */
+  fetch?: FetchFunction
 
   /**
    * Global error callback. Fires after the full middleware chain completes.

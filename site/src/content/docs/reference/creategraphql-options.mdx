@@ -15,6 +15,7 @@ The config is a `GraphQLBaseConfig`, plus the operations: either `operations`, o
 | `mutations` | an object of `Operation`s | — | Each key becomes a method under `graphql.mutation`, such as `graphql.mutation.updateCategory`. |
 | `middleware` | `Middleware[]` | — | Runs on every operation, before operation and call middleware. |
 | `headers` | `HeadersInit` | — | Sent with every operation. An operation or a call can replace a header. `Content-Type` is `application/json` unless you set your own. |
+| `fetch` | `(url: string, init: RequestInit) => Promise<Response>` | the global `fetch` | The `fetch` this client sends with, such as a Cloudflare service binding's, undici's or `mockFetch().fetch`. Without it, liaise looks up the global `fetch` on every call, so a stub or polyfill installed later is used. It is called unbound, so `window.fetch` works as is. |
 | `timeout` | `number` (ms) | no deadline | One deadline for every operation, retries included. An operation or a call can set its own, and `0` there turns it off. |
 | `log` | `boolean \| LogOptions` | off | Logs every call to the console. Each line names the operation ([Log every call](/guide/retries-caching-and-logging/#log-every-call), [Log options](/reference/built-in-middleware-options/#log-options)). |
 | `onError` | `(error: ApiError) => void` | — | Called once per failed call, GraphQL errors included. Calls that share one failed request count as one. Never for `'abort'`. If it throws, the caller still gets its `Result`. |

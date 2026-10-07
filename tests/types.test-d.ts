@@ -3,7 +3,7 @@ import { createApi } from '../src/create-api.js'
 import { Request } from '../src/request.js'
 import type { MiddlewareContext, CallOptions, RequestConfig, ApiConfig, GraphQLBaseConfig } from '../src/types.js'
 import type { ApiErrorKind } from '../src/types.js'
-import { successResult, errorResult } from '../src/testing.js'
+import { successResult, errorResult, mockFetch } from '../src/testing.js'
 import type { ApiError } from '../src/types.js'
 import type { StandardSchemaV1 } from '../src/types.js'
 import type { PathParams } from '../src/define-request.js'
@@ -509,5 +509,18 @@ describe('getHeaders (5.1.0)', () => {
     const split = createGraphQL({ endpoint: '/graphql', queries: { getX }, mutations: { setX: getX } })
     expectTypeOf(split.query.getX.getHeaders()).toEqualTypeOf<Record<string, string>>()
     expectTypeOf(split.mutation.setX.getHeaders()).toEqualTypeOf<Record<string, string>>()
+  })
+})
+
+describe('the fetch option', () => {
+  it('accepts the global fetch, mockFetch().fetch and a narrow function', () => {
+    createApi({ baseUrl: '/api', requests: {}, fetch })
+    createApi({ baseUrl: '/api', requests: {}, fetch: mockFetch({}).fetch })
+    createApi({ baseUrl: '/api', requests: {}, fetch: (url: string, init: RequestInit) => globalThis.fetch(url, init) })
+    createGraphQL({ endpoint: '/graphql', operations: {}, fetch })
+  })
+  it('refuses something that is not a fetch', () => {
+    // @ts-expect-error a string is not a fetch
+    createApi({ baseUrl: '/api', requests: {}, fetch: 'fetch' })
   })
 })

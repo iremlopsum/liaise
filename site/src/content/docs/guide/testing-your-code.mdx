@@ -25,6 +25,15 @@ This page shows how to test code that calls liaise. Read it when you write unit 
 
 - **`mock.calls` records every request** as `{ method, url, headers, body }`. `mock.callCount('GET /api/users/:id')` and `mock.lastCall(...)` take the same `"METHOD /path"` keys as the routes.
 
+## Without replacing the global fetch
+
+`mock.fetch` is the stub itself. Pass it to the client as `fetch`, and the global `fetch` is never touched, so there is nothing to restore:
+
+```ts
+const mock = mockFetch({ 'GET /users/:id': jsonResponse({ id: '42', name: 'Ada' }) })
+const api = createApi({ baseUrl: '/api', requests: { getUser }, fetch: mock.fetch })
+```
+
 ## Unmatched routes
 
 A request that matches no route makes the stub throw, so a typo in a path can't pass quietly. liaise catches every `fetch` rejection, so your code sees an ordinary `Result` with `kind: 'network'` and the `Error` in `error.body`. Its message names the method, the URL and every route you defined. Assert on the result, because the call itself never rejects.

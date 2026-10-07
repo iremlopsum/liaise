@@ -87,6 +87,7 @@ export function createGraphQL(config: any): any {
     headers: globalHeaders,
     onError,
     timeout: clientTimeout,
+    fetch: clientFetch,
   } = config
   // Not a middleware: it wraps each whole call, ending in the post-execution
   // hook — see the same line in create-api.ts. Null when off.
@@ -293,7 +294,7 @@ export function createGraphQL(config: any): any {
                 : null
               let exchange: Exchange
               if (shareKey === null) {
-                exchange = await sendExchange(sendUrl, fetchInit, 'text')
+                exchange = await sendExchange(sendUrl, fetchInit, 'text', clientFetch)
               } else {
                 // This caller's patience: its own budget, plus the signal its
                 // pipeline left in ctx.request.signal when a middleware
@@ -318,7 +319,7 @@ export function createGraphQL(config: any): any {
                   // Sent with the first caller's init and the shared signal,
                   // never any one caller's; that signal's abort is that abort,
                   // whatever fetch rejected with (sendSharedExchange).
-                  signal => sendSharedExchange(sendUrl, { ...fetchInit, signal }, 'text'),
+                  signal => sendSharedExchange(sendUrl, { ...fetchInit, signal }, 'text', clientFetch),
                   // Learnt on entry, before this caller can give up, so even
                   // an early give-up knows which round trip it left.
                   entered => {
