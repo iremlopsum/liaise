@@ -420,6 +420,10 @@ export type CacheMiddleware = Middleware & { clear(): void }
  * @param options.ttl - Time-to-live in milliseconds. Defaults to 5 minutes.
  * @param options.maxSize - Maximum number of entries. Defaults to 50.
  * @param options.debug - Log hits and misses to console. Defaults to false.
+ * @param options.methods - The methods it caches, compared without regard to
+ *   case. Defaults to `['GET', 'HEAD']`: a call with any other method goes
+ *   straight to the network and is never stored. GraphQL sends every
+ *   operation as a POST, so a cache on a query operation needs `['POST']`.
  * @returns A middleware function with an attached `clear()` method.
  *
  * @example
@@ -452,14 +456,25 @@ export function cacheMiddleware(options?: {
   ttl?: number
   maxSize?: number
   debug?: boolean
+  methods?: readonly string[]
 }): CacheMiddleware {
   const store = new CacheStore({
     ttl: options?.ttl ?? 5 * 60_000,
     maxSize: options?.maxSize ?? 50,
   })
   const debug = options?.debug ?? false
+  // Reads only unless told otherwise (5.2.0): before, a cached POST answered
+  // the next identical create with the first one's response. Compared
+  // upper-cased, so `['post']` or a middleware that lower-cases the method
+  // still match. A non-array (plain JS) falls back to the default: a factory
+  // must not throw.
+  const listed = options?.methods
+  const methods = (Array.isArray(listed) ? listed : ['GET', 'HEAD']).map(m => String(m).toUpperCase())
 
   const mw: Middleware = async (ctx, next) => {
+    // A method it doesn't cache never touches the store: no lookup, no write,
+    // no debug line.
+    if (!methods.includes(String(ctx.request.method).toUpperCase())) return next()
     // A null key means the params cannot be keyed soundly (see stable-key.ts):
     // neither cache nor serve. Declining is always safe; serving one caller
     // the response to a different payload never is.

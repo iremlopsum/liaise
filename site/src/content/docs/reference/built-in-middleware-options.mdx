@@ -40,6 +40,7 @@ The default `retryOn` retries only a 5xx. A 4xx, a 429 and a network error come 
 | `ttl` | `number` (ms) | `300000` (5 minutes) | How long an entry is served. An expired entry is removed when it is next read. |
 | `maxSize` | `number` | `50` | How many entries the store keeps. When it is full, the oldest entry is dropped. |
 | `debug` | `boolean` | `false` | Logs `[liaise cache] HIT` or `MISS`, with the endpoint and its params, to the console. |
+| `methods` | `readonly string[]` | `['GET', 'HEAD']` | The methods it caches, compared without regard to case. A call with any other method goes straight to the network and is never stored. GraphQL sends every operation as a `POST`, so a cache on a query operation needs `['POST']` ([Caching queries](/guide/graphql/#caching-queries)). |
 
 Only successes are stored. `clear()` empties the store, and passing the middleware in `skipMiddleware` skips it for one call ([Cache repeated reads](/guide/retries-caching-and-logging/#cache-repeated-reads)). What goes into the key is under [Cache key](/reference/behaviour-in-detail/#cache-key).
 
