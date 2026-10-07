@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { AsyncLocalStorage } from 'node:async_hooks'
 import { createApi, createGraphQL, defineRequest, Operation, gql, poll, withHeaders } from '../src/index.js'
 import { mockFetch, jsonResponse, successResult } from '../src/testing.js'
+import { pollIdOf } from '../src/utils/copy.js'
 import type { CallOptions, Middleware, Result } from '../src/index.js'
 
 type Stats = { n: number }
@@ -1041,6 +1042,56 @@ describe('poll: copies from withHeaders', () => {
     expect(answers).toEqual({ bob: ['s=bob'], reused: ['s=alice'], alice: ['s=alice'] })
     expect(mock.calls).toHaveLength(2)
     stopBob(); stopReused(); stopAlice()
+  })
+
+  it('a stopped poll through a copy is forgotten: a rebuilt copy with the same headers starts afresh', async () => {
+    shareable()
+    const api = client()
+    const first: Result<Stats>[] = []
+    const stop = poll(withHeaders(api, { cookie: 's=a' }).getStats, {}, r => first.push(r), { every: 1000 })
+    await flush()
+    stop()
+    const again: Result<Stats>[] = []
+    const stopAgain = poll(withHeaders(api, { cookie: 's=a' }).getStats, {}, r => again.push(r), { every: 1000 })
+    await flush()
+    expect(ns(first)).toEqual([1])
+    expect(ns(again)).toEqual([2])
+    expect(mock.calls).toHaveLength(2)
+    stopAgain()
+  })
+
+  it("a hand-written wrapper around a copy's endpoint keys on itself: its callers share, the copy's don't join", async () => {
+    shareable()
+    const api = client()
+    const copy = withHeaders(api, { cookie: 's=a' })
+    const wrapper = (params: { a?: number }, options?: CallOptions) => copy.getStats(params, options)
+    const stops = [
+      poll(wrapper, {}, () => {}, { every: 1000 }),
+      poll(wrapper, {}, () => {}, { every: 1000 }),
+      poll(copy.getStats, {}, () => {}, { every: 1000 }),
+    ]
+    await flush()
+    expect(mock.calls).toHaveLength(2)
+    expect(mock.calls.map(c => c.headers.get('cookie'))).toEqual(['s=a', 's=a'])
+    stops.forEach(stop => stop())
+  })
+
+  it('a chained side copy has the poll identity of a side copy adding the same headers at once', async () => {
+    shareable()
+    mock = mockFetch({ 'POST /graphql': () => jsonResponse({ data: { stats: { n: 1 } } }) })
+    mock.install()
+    const getStats = new Operation<Record<string, never>, { stats: Stats }>({ operation: gql`query GetStats { stats { n } }` })
+    const graph = createGraphQL({ endpoint: 'https://api.test/graphql', queries: { getStats } })
+    const chained = withHeaders(withHeaders(graph, { cookie: 's=a' }).query, { 'x-tab': '1' }).getStats
+    const direct = withHeaders(graph.query, { cookie: 's=a', 'x-tab': '1' }).getStats
+    expect(pollIdOf(chained)).toEqual(pollIdOf(direct))
+    expect(pollIdOf(chained)?.origin).toBe(graph.query.getStats)
+    const stopA = poll(chained, {}, () => {}, { every: 1000 })
+    const stopB = poll(direct, {}, () => {}, { every: 1000 })
+    await flush()
+    expect(mock.calls).toHaveLength(1)
+    expect([mock.calls[0].headers.get('cookie'), mock.calls[0].headers.get('x-tab')]).toEqual(['s=a', '1'])
+    stopA(); stopB()
   })
 
   it('without a window, copies never share', async () => {
