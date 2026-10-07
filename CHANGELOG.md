@@ -5,6 +5,24 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [5.1.2] — 2026-10-07
+
+Fixes `responseType: 'none'` calls that never settled on a cloned response, and moves the documentation to its own site.
+
+### Fixed
+
+- **A `responseType: 'none'` call could hang for good.** liaise cancels a body it doesn't read, and it waited for that cancel to finish. On a cloned `Response` the body is one branch of a tee, and its cancel doesn't settle while the other branch is unread, so the call never returned. `mockFetch` serves a static route as a clone, so a `'none'` endpoint against a static route hung in tests, and a fetch wrapper that clones responses would hang the same way. The cancel is now started without waiting; the body is still cancelled.
+
+### Documentation
+
+- **The docs moved to https://iremlopsum.github.io/liaise/.** It has guides, recipes and a reference with search, a playground that runs liaise in the browser (REST and GraphQL), and a comparison page built from the measured results. The README is now a short front page.
+- **Fixed on the way** (these were wrong in the 5.1.1 README):
+  - The GraphQL examples typed `data` as the selected object (`Category`). It is keyed by the root field (`{ category: Category }`), and an `Operation`'s `schema` validates that whole `data` object, so the schema example now wraps the inner schema.
+  - When the URL couldn't be built, `error.request.url` is `baseUrl` plus the path template, not the bare template.
+  - Request overhead: liaise ties plain fetch one request at a time; with 50 requests in flight, plain fetch handles about 6% more requests per second.
+
+No action needed to upgrade.
+
 ## [5.1.1] — 2026-10-07
 
 Fixes a GraphQL client split into `queries` and `mutations` when a query and a mutation share a name.
@@ -1158,6 +1176,7 @@ Initial release of the rewritten client. Reconstructed from the release commit
   `ArrayBuffer` and strings
 - Response parsing as `json`, `text`, `blob`, `arrayBuffer` or `formData`
 
+[5.1.2]: https://github.com/iremlopsum/liaise/compare/v5.1.1...v5.1.2
 [5.1.1]: https://github.com/iremlopsum/liaise/compare/v5.1.0...v5.1.1
 [5.1.0]: https://github.com/iremlopsum/liaise/compare/v5.0.3...v5.1.0
 [5.0.3]: https://github.com/iremlopsum/liaise/compare/v5.0.2...v5.0.3

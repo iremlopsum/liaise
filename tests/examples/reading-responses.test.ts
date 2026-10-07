@@ -64,10 +64,9 @@ describe('each responseType', () => {
   })
 
   it("'none' discards a body the server sends anyway", async () => {
-    // A route function, so the call gets a fresh Response as from a real server. A static
-    // route value is served as a clone, and a clone's cancelled body never settles while the
-    // original stays unread, so 'none' would hang here (reported; src/ is out of scope).
-    serve({ 'DELETE /users/:id': () => jsonResponse({ deleted: true }) })
+    // A static route, served as a clone. Before 5.1.2 'none' hung on a clone
+    // (tests/none-cloned-response.test.ts).
+    serve({ 'DELETE /users/:id': jsonResponse({ deleted: true }) })
     const result = await api.deleteUser({ id: '42' })
     expect(result.error).toBeNull()
     expect(result.data).toBeUndefined()
