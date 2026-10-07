@@ -11,6 +11,8 @@ import { defineRequest } from '../src/define-request.js'
 import { logMiddleware } from '../src/built-in-middleware.js'
 import { paginate } from '../src/paginate.js'
 import { createGraphQL, Operation, gql } from '../src/graphql.js'
+import { withHeaders } from '../src/with-headers.js'
+import type { WithHeadersOptions } from '../src/index.js'
 
 interface User { id: string; name: string }
 
@@ -593,5 +595,41 @@ describe('fetchOptions types', () => {
     // @ts-expect-error signal is liaise's
     const d: FetchOptions = { signal: AbortSignal.abort() }
     void [a, b, c, d]
+  })
+})
+
+describe('withHeaders types', () => {
+  it('a copy has the type of the client it copies', () => {
+    expectTypeOf(withHeaders(api, { cookie: 'x' })).toEqualTypeOf<typeof api>()
+  })
+
+  it('accepts only a client', () => {
+    // @ts-expect-error an object holding something other than endpoints is not a client
+    withHeaders({ name: 'x' }, {})
+    // @ts-expect-error a single endpoint is not a client
+    withHeaders(api.getUser, {})
+    // @ts-expect-error a number is not a client
+    withHeaders(42, {})
+  })
+
+  it("doesn't change a client's keys: keyof typeof api is still just the endpoints", () => {
+    expectTypeOf<keyof typeof api>().toEqualTypeOf<'getUser' | 'health'>()
+    type Results = { [K in keyof typeof api]: Awaited<ReturnType<(typeof api)[K]>> }
+    expectTypeOf<Results['health']['data']>().toEqualTypeOf<{ ok: boolean } | null>()
+  })
+
+  it('accepts GraphQL clients and either side of a split one', () => {
+    const op = new Operation<Record<string, never>, { x: number }>({ operation: gql`query { x }` })
+    const flat = createGraphQL({ endpoint: '/graphql', operations: { x: op } })
+    const split = createGraphQL({ endpoint: '/graphql', queries: { x: op }, mutations: { y: op } })
+    expectTypeOf(withHeaders(flat, {})).toEqualTypeOf<typeof flat>()
+    expectTypeOf(withHeaders(split, {})).toEqualTypeOf<typeof split>()
+    expectTypeOf(withHeaders(split.query, {})).toEqualTypeOf<typeof split.query>()
+    // @ts-expect-error one operation is not a client
+    withHeaders(flat.x, {})
+  })
+
+  it('exports WithHeadersOptions', () => {
+    expectTypeOf<WithHeadersOptions>().toEqualTypeOf<{ dedupe?: boolean }>()
   })
 })

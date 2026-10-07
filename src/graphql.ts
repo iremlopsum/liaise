@@ -16,6 +16,7 @@ import type { SchemaOutcome } from './utils/validate.js'
 import { sendExchange, sendSharedExchange, AbortedRead } from './utils/exchange.js'
 import type { Exchange } from './utils/exchange.js'
 import { stampClientFetch } from './utils/client-fetch.js'
+import { originalState, stampCopier, stampPollId, type CopyState } from './utils/copy.js'
 import type { CallOptions, EndpointExtras, ErrorResult, Middleware, MiddlewareContext, Result, GraphQLBaseConfig, OperationConfig, GraphQLError } from './types.js'
 
 // ---------------------------------------------------------------------------
@@ -132,7 +133,10 @@ export function createGraphQL(config: any): any {
   // `lane` keys the dedupe and share trackers. It is the name, except in a split
   // client, where a query and a mutation may share a name and must not cancel or
   // join each other's calls. `name` stays what middleware and the logger see.
-  function buildMethod(name: string, operation: Operation<any, any>, lane: string = name) {
+  // `copy` is the client's state (src/utils/copy.ts): its header sources, and the
+  // dedupe lane a withHeaders copy adds after `lane`. The share key keeps `lane`
+  // alone — sharing compares what is sent, and a copy's headers are in it.
+  function buildMethod(name: string, operation: Operation<any, any>, copy: CopyState, lane: string = name) {
     const method = (variables: object = {}, options: CallOptions = {}): Promise<Result<unknown>> => {
       const execute = (): Promise<Result<unknown>> => {
         /**
@@ -252,9 +256,9 @@ export function createGraphQL(config: any): any {
               // it. Because registration happens only once, that field still
               // holds a live signal here — never a previous attempt's already
               // aborted dedupe signal.
-              if (operation.config.dedupe && !dedupeController) {
+              if (operation.config.dedupe && copy.dedupe && !dedupeController) {
                 const external = ctx.request.signal ?? callerSignal
-                const tracked = dedupeTracker.track(lane, external)
+                const tracked = dedupeTracker.track(lane + copy.lane, external)
                 dedupeController = tracked.controller
                 ctx.request.signal = tracked.signal
                 own(tracked.signal, external)
@@ -568,7 +572,7 @@ export function createGraphQL(config: any): any {
             }
             : ctx => attempt(ctx, { joined: false })
 
-          const headers = mergeHeaders(globalHeaders, operation.config.headers, options.headers)
+          const headers = mergeHeaders(...copy.headers, operation.config.headers, options.headers)
           if (!headers.has('Content-Type')) {
             headers.set('Content-Type', 'application/json')
           }
@@ -644,7 +648,7 @@ export function createGraphQL(config: any): any {
             // entry, or nothing can cancel it — see create-api.ts.
             if (operation.config.dedupe && dedupeController) {
               if (preempted) dedupeController.abort()
-              dedupeTracker.clear(lane, dedupeController)
+              dedupeTracker.clear(lane + copy.lane, dedupeController)
             }
             releaseAll()
             // One failed shared operation reports once, whichever of its
@@ -688,7 +692,7 @@ export function createGraphQL(config: any): any {
       // entry point never throws, so that gives {}.
       getHeaders: (): Record<string, string> => {
         try {
-          return headersRecord(mergeHeaders(globalHeaders, operation.config.headers, undefined))
+          return headersRecord(mergeHeaders(...copy.headers, operation.config.headers))
         } catch {
           return {}
         }
@@ -713,30 +717,45 @@ export function createGraphQL(config: any): any {
     }
   }
 
-  if (config.operations) {
-    const flatMethods: Record<string, Function> = {}
-    const all: Record<string, Operation<any, any>> = { ...config.operations, ...(config.queries ?? {}), ...(config.mutations ?? {}) }
-    for (const [name, operation] of Object.entries(all)) {
-      flatMethods[name] = buildMethod(name, operation)
+  type Methods = Record<string, Function>
+
+  /**
+   * One record's methods, for `copy`. `prefix` namespaces a split client's
+   * dedupe and share lanes (`query:`, `mutation:`). `origin` is the original
+   * client's methods for this record, or null while building them: a copy's
+   * methods are stamped with it so polls can share between copies (poll.ts).
+   * The copier on the result copies just this record, so `withHeaders(gql.query, h)`
+   * returns that side.
+   */
+  const buildSide = (record: Record<string, Operation<any, any>>, copy: CopyState, prefix: string, origin: Methods | null): Methods => {
+    const methods: Methods = {}
+    for (const [name, operation] of Object.entries(record)) {
+      methods[name] = buildMethod(name, operation, copy, prefix + name)
+      if (origin) stampPollId(methods[name], origin[name], copy.pollKey)
     }
-    return flatMethods
+    stampCopier(methods, derive => buildSide(record, derive(copy), prefix, origin ?? methods))
+    return methods
+  }
+
+  if (config.operations) {
+    // Flat mode merges any queries/mutations in, as before (the types forbid them).
+    const all: Record<string, Operation<any, any>> = { ...config.operations, ...(config.queries ?? {}), ...(config.mutations ?? {}) }
+    return buildSide(all, originalState(globalHeaders), '', null)
   }
 
   // Each side is built from its own record, so a query and a mutation may share
   // a name (GraphQL allows it). Before 5.1.1 the two were merged by name and the
   // mutation replaced the query under both gql.query.x and gql.mutation.x.
-  const result: Record<string, Record<string, Function>> = {}
-  if (config.queries) {
-    result.query = {}
-    for (const [name, operation] of Object.entries(config.queries as Record<string, Operation<any, any>>)) {
-      result.query[name] = buildMethod(name, operation, `query:${name}`)
-    }
+  // Snapshots, like create-api.ts's `entries`: a record the consumer mutates
+  // after construction must not give a copy operations the original lacks.
+  const queries: Record<string, Operation<any, any>> | undefined = config.queries && { ...config.queries }
+  const mutations: Record<string, Operation<any, any>> | undefined = config.mutations && { ...config.mutations }
+  const buildSplit = (copy: CopyState, origin: Record<string, Methods> | null): Record<string, Methods> => {
+    const result: Record<string, Methods> = {}
+    if (queries) result.query = buildSide(queries, copy, 'query:', origin?.query ?? null)
+    if (mutations) result.mutation = buildSide(mutations, copy, 'mutation:', origin?.mutation ?? null)
+    stampCopier(result, derive => buildSplit(derive(copy), origin ?? result))
+    return result
   }
-  if (config.mutations) {
-    result.mutation = {}
-    for (const [name, operation] of Object.entries(config.mutations as Record<string, Operation<any, any>>)) {
-      result.mutation[name] = buildMethod(name, operation, `mutation:${name}`)
-    }
-  }
-  return result
+  return buildSplit(originalState(globalHeaders), null)
 }

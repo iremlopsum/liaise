@@ -48,7 +48,7 @@ Polls are shared in browsers and React Native. On a server (no `window`) each ca
 
 Callers ask the same thing when they use:
 
-- **The same endpoint, on the same client.** Two clients never share a poll, even with the same `baseUrl`.
+- **The same endpoint, on the same client.** Two clients never share a poll, even with the same `baseUrl`. Copies from [`withHeaders()`](/reference/withheaders/) that add the same headers count as the same client, except that a copy made with `{ dedupe: false }` polls separately from one without it.
 - **The same params, compared by value.** `{ id: '7' }` and another `{ id: '7' }` share.
 - **The same per-request options, compared by value**, such as equal `headers` objects or the same `timeout`. Per-request `middleware`, `skipMiddleware` or a `Headers` instance can't be compared, so a caller that passes one gets a shared poll of its own.
 

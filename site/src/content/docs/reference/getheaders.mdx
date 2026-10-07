@@ -30,4 +30,4 @@ api.getUser.getHeaders() // { 'x-api-version': '2', 'x-client': 'web' }
 - **An invalid configured header gives `{}`.** A value with a character outside Latin-1, or a name with a space, would make a `Headers` object throw, and `getHeaders()` never throws.
 - **GraphQL operations have it too**, including `graphql.query.getCategory.getHeaders()` and `graphql.mutation.updateCategory.getHeaders()` on a client split into queries and mutations.
 
-**Next:** [Result and ApiError](/reference/result-and-apierror/) lists what every call returns.
+**Next:** [withHeaders()](/reference/withheaders/) makes a copy of a client with more headers.

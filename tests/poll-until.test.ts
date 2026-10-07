@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { createApi, createGraphQL, defineRequest, gql, Operation, poll, pollUntil } from '../src/index.js'
+import { createApi, createGraphQL, defineRequest, gql, Operation, poll, pollUntil, withHeaders } from '../src/index.js'
 import { mockFetch, jsonResponse, successResult } from '../src/testing.js'
 import type { Middleware, Result } from '../src/index.js'
 
@@ -214,6 +214,18 @@ describe('pollUntil', () => {
     expect((await a).error).toBeNull()
     expect((await b).error).toBeNull()
     expect(mock.calls).toHaveLength(2)
+  })
+
+  it('two pollUntil calls through copies rebuilt with the same headers share requests', async () => {
+    shareable()
+    const api = jobs(['queued', 'done'])
+    const a = pollUntil(withHeaders(api, { cookie: 's=a' }).getJob, { id: '7' }, { every: 1000, until: isDone })
+    const b = pollUntil(withHeaders(api, { cookie: 's=a' }).getJob, { id: '7' }, { every: 1000, until: isDone })
+    await vi.advanceTimersByTimeAsync(1000)
+    expect((await a).error).toBeNull()
+    expect((await b).error).toBeNull()
+    expect(mock.calls).toHaveLength(2)
+    expect(mock.calls.map(c => c.headers.get('cookie'))).toEqual(['s=a', 's=a'])
   })
 
   it("its own timeout result's retry() runs pollUntil again", async () => {

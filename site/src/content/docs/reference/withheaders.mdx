@@ -1,0 +1,37 @@
+---
+title: "withHeaders()"
+description: "withHeaders() returns a copy of a client that also sends the headers you give it, such as a user's cookie on a server."
+order: 6.5
+---
+`withHeaders(client, headers, options?)` returns a copy of a client whose calls also send `headers`. Use it on a server, where one client serves every user: make a copy for each incoming request with that user's cookie or token, instead of passing the header to every call.
+
+```ts
+import { createApi, defineRequest, withHeaders } from 'liaise'
+
+type Me = { id: string; name: string }
+
+const api = createApi({
+  baseUrl: 'https://api.example.com',
+  requests: {
+    me: defineRequest<Me>()({ method: 'GET', path: '/me' }),
+  },
+})
+
+async function handle(cookie: string) {
+  const user = withHeaders(api, { cookie })
+  const { data, error } = await user.me()
+  return error ? null : data
+}
+```
+
+- **The original doesn't change.** The copy is a new client. The original, and every other copy, never send its headers.
+- **The headers act as client headers.** They replace the client's `headers` of the same name. An endpoint's own `headers` still win over them, and a call's `headers` win over everything. `getHeaders()` on a copy includes them.
+- **Copies chain.** `withHeaders(withHeaders(api, a), b)` sends both, with `b` winning.
+- **Everything else is the client's:** middleware, so one `cacheMiddleware` store, `onError`, `log`, `timeout`, `fetch` and `fetchOptions`. That is safe, because [`share`](/guide/sharing-identical-requests/) and the cache compare the headers a call sends, so copies with different headers don't share a request or a cache entry.
+- **`dedupe` works across copies that add the same headers**, even when you make a new copy for every call, such as inside a React component. Copies that add different headers never cancel each other's calls. `{ dedupe: false }` turns `dedupe` off for every call through the copy. That suits a server, where a copy per request has no stale screen to protect.
+- **Polls are shared the same way.** Where polls are shared, copies that add the same headers share one ([Polling](/guide/polling/#several-callers-one-poll)). A copy with `{ dedupe: false }` polls separately from one without it.
+- **GraphQL clients work too.** On a client split into queries and mutations, `withHeaders(graphql, h)` copies both sides, and `withHeaders(graphql.query, h)` copies just that side.
+- **Values are fixed when you make the copy.** For a token that changes while the copy is in use, use a middleware ([Writing middleware](/guide/writing-middleware/)).
+- **It never throws.** An invalid header value, such as one with a line break, gives every call through the copy a `'network'` error, and `getHeaders()` returns `{}`. Passing a single endpoint or a value like a number is a type error. Something that isn't a client but looks like one, such as a plain object or a spread copy `{ ...api }` (which leaves behind what `withHeaders` needs), gets a stand-in whose every call gives a `'network'` error saying so.
+
+**Next:** [Result and ApiError](/reference/result-and-apierror/) lists what every call returns.

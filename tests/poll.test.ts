@@ -1,7 +1,8 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { AsyncLocalStorage } from 'node:async_hooks'
-import { createApi, createGraphQL, defineRequest, Operation, gql, poll } from '../src/index.js'
+import { createApi, createGraphQL, defineRequest, Operation, gql, poll, withHeaders } from '../src/index.js'
 import { mockFetch, jsonResponse, successResult } from '../src/testing.js'
+import { pollIdOf } from '../src/utils/copy.js'
 import type { CallOptions, Middleware, Result } from '../src/index.js'
 
 type Stats = { n: number }
@@ -767,6 +768,21 @@ describe('poll: never throws, whatever it is given', () => {
     stop()
   })
 
+  it('a revoked Proxy as the endpoint, where polls share: polled like any endpoint that throws, not refused by poll()', async () => {
+    shareable()
+    const { proxy, revoke } = Proxy.revocable(async () => successResult({ n: 1 }), {})
+    revoke()
+    const seen: Result<unknown>[] = []
+    let stop = () => {}
+    expect(() => { stop = poll(proxy as never, {}, r => seen.push(r), { every: 1000 }) }).not.toThrow()
+    await flush()
+    expect(seen.map(r => r.error?.kind)).toEqual(['middleware'])
+    // As for any endpoint that throws: the call failed, not poll() itself.
+    expect(console.error).toHaveBeenCalledTimes(1)
+    expect(console.error).toHaveBeenCalledWith('[liaise] poll: the endpoint failed:', expect.any(TypeError))
+    stop()
+  })
+
   it('a signal that is not an AbortSignal (the controller itself): reported, and nothing is sent', async () => {
     const api = client()
     let calls = 0
@@ -961,5 +977,144 @@ describe('poll: what the docs promise', () => {
     await vi.advanceTimersByTimeAsync(1100)
     expect(kinds).toEqual(['timeout', 'timeout'])
     stop2()
+  })
+})
+
+describe('poll: copies from withHeaders', () => {
+  it('copies rebuilt with the same headers share one loop', async () => {
+    shareable()
+    const api = client()
+    const stopA = poll(withHeaders(api, { cookie: 's=a' }).getStats, {}, () => {}, { every: 1000 })
+    const stopB = poll(withHeaders(api, { cookie: 's=a' }).getStats, {}, () => {}, { every: 1000 })
+    await flush()
+    expect(mock.calls).toHaveLength(1)
+    stopA(); stopB()
+  })
+
+  it('different headers, or dedupe: false, get a loop of their own', async () => {
+    shareable()
+    const api = client()
+    const stops = [
+      poll(withHeaders(api, { cookie: 's=a' }).getStats, {}, () => {}, { every: 1000 }),
+      poll(withHeaders(api, { cookie: 's=b' }).getStats, {}, () => {}, { every: 1000 }),
+      poll(withHeaders(api, { cookie: 's=a' }, { dedupe: false }).getStats, {}, () => {}, { every: 1000 }),
+    ]
+    await flush()
+    expect(mock.calls).toHaveLength(3)
+    expect(mock.calls.map(c => c.headers.get('cookie'))).toEqual(['s=a', 's=b', 's=a'])
+    stops.forEach(stop => stop())
+  })
+
+  it('a chained copy shares with a direct copy that sends the same headers', async () => {
+    shareable()
+    const api = client()
+    const chained = withHeaders(withHeaders(api, { cookie: 's=x' }), { cookie: 's=a' })
+    const direct = withHeaders(api, { cookie: 's=a' })
+    const stopA = poll(chained.getStats, {}, () => {}, { every: 1000 })
+    const stopB = poll(direct.getStats, {}, () => {}, { every: 1000 })
+    await flush()
+    expect(mock.calls).toHaveLength(1)
+    stopA(); stopB()
+  })
+
+  it("a copy that adds nothing shares the original's loop", async () => {
+    shareable()
+    const api = client()
+    const stopA = poll(api.getStats, {}, () => {}, { every: 1000 })
+    const stopB = poll(withHeaders(api, {}).getStats, {}, () => {}, { every: 1000 })
+    await flush()
+    expect(mock.calls).toHaveLength(1)
+    stopA(); stopB()
+  })
+
+  it("a copy whose headers object is mutated afterwards polls as what it sends: alice never gets bob's answers", async () => {
+    shareable()
+    const api = client({ 'GET /stats': ({ request }) => jsonResponse({ cookie: request.headers.get('cookie') }) })
+    const answers: Record<string, (string | null)[]> = { bob: [], reused: [], alice: [] }
+    const into = (who: string) => (r: Result<Stats>) => answers[who].push((r.data as unknown as { cookie: string | null } | null)?.cookie ?? null)
+    const stopBob = poll(withHeaders(api, { cookie: 's=bob' }).getStats, {}, into('bob'), { every: 1000 })
+    const headers = { cookie: 's=alice' }
+    const reused = withHeaders(api, headers)
+    headers.cookie = 's=bob'
+    const stopReused = poll(reused.getStats, {}, into('reused'), { every: 1000 })
+    const stopAlice = poll(withHeaders(api, { cookie: 's=alice' }).getStats, {}, into('alice'), { every: 1000 })
+    await flush()
+    expect(answers).toEqual({ bob: ['s=bob'], reused: ['s=alice'], alice: ['s=alice'] })
+    expect(mock.calls).toHaveLength(2)
+    stopBob(); stopReused(); stopAlice()
+  })
+
+  it('a stopped poll through a copy is forgotten: a rebuilt copy with the same headers starts afresh', async () => {
+    shareable()
+    const api = client()
+    const first: Result<Stats>[] = []
+    const stop = poll(withHeaders(api, { cookie: 's=a' }).getStats, {}, r => first.push(r), { every: 1000 })
+    await flush()
+    stop()
+    const again: Result<Stats>[] = []
+    const stopAgain = poll(withHeaders(api, { cookie: 's=a' }).getStats, {}, r => again.push(r), { every: 1000 })
+    await flush()
+    expect(ns(first)).toEqual([1])
+    expect(ns(again)).toEqual([2])
+    expect(mock.calls).toHaveLength(2)
+    stopAgain()
+  })
+
+  it("a hand-written wrapper around a copy's endpoint keys on itself: its callers share, the copy's don't join", async () => {
+    shareable()
+    const api = client()
+    const copy = withHeaders(api, { cookie: 's=a' })
+    const wrapper = (params: { a?: number }, options?: CallOptions) => copy.getStats(params, options)
+    const stops = [
+      poll(wrapper, {}, () => {}, { every: 1000 }),
+      poll(wrapper, {}, () => {}, { every: 1000 }),
+      poll(copy.getStats, {}, () => {}, { every: 1000 }),
+    ]
+    await flush()
+    expect(mock.calls).toHaveLength(2)
+    expect(mock.calls.map(c => c.headers.get('cookie'))).toEqual(['s=a', 's=a'])
+    stops.forEach(stop => stop())
+  })
+
+  it('a chained side copy has the poll identity of a side copy adding the same headers at once', async () => {
+    shareable()
+    mock = mockFetch({ 'POST /graphql': () => jsonResponse({ data: { stats: { n: 1 } } }) })
+    mock.install()
+    const getStats = new Operation<Record<string, never>, { stats: Stats }>({ operation: gql`query GetStats { stats { n } }` })
+    const graph = createGraphQL({ endpoint: 'https://api.test/graphql', queries: { getStats } })
+    const chained = withHeaders(withHeaders(graph, { cookie: 's=a' }).query, { 'x-tab': '1' }).getStats
+    const direct = withHeaders(graph.query, { cookie: 's=a', 'x-tab': '1' }).getStats
+    expect(pollIdOf(chained)).toEqual(pollIdOf(direct))
+    expect(pollIdOf(chained)?.origin).toBe(graph.query.getStats)
+    const stopA = poll(chained, {}, () => {}, { every: 1000 })
+    const stopB = poll(direct, {}, () => {}, { every: 1000 })
+    await flush()
+    expect(mock.calls).toHaveLength(1)
+    expect([mock.calls[0].headers.get('cookie'), mock.calls[0].headers.get('x-tab')]).toEqual(['s=a', '1'])
+    stopA(); stopB()
+  })
+
+  it('without a window, copies never share', async () => {
+    const api = client()
+    const stopA = poll(withHeaders(api, { cookie: 's=a' }).getStats, {}, () => {}, { every: 1000 })
+    const stopB = poll(withHeaders(api, { cookie: 's=a' }).getStats, {}, () => {}, { every: 1000 })
+    await flush()
+    expect(mock.calls).toHaveLength(2)
+    stopA(); stopB()
+  })
+
+  it('split GraphQL sides share with the original side, however the copy was reached', async () => {
+    shareable()
+    mock = mockFetch({ 'POST /graphql': () => jsonResponse({ data: { stats: { n: 1 } } }) })
+    mock.install()
+    const getStats = new Operation<Record<string, never>, { stats: Stats }>({ operation: gql`query GetStats { stats { n } }` })
+    const graph = createGraphQL({ endpoint: 'https://api.test/graphql', queries: { getStats } })
+    const viaRoot = withHeaders(graph, { cookie: 's=a' }).query.getStats
+    const viaSide = withHeaders(graph.query, { cookie: 's=a' }).getStats
+    const stopA = poll(viaRoot, {}, () => {}, { every: 1000 })
+    const stopB = poll(viaSide, {}, () => {}, { every: 1000 })
+    await flush()
+    expect(mock.calls).toHaveLength(1)
+    stopA(); stopB()
   })
 })

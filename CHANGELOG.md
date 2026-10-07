@@ -5,6 +5,22 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [5.3.0] — 2026-10-07
+
+Adds `withHeaders()`: a copy of a client that also sends some headers, such as a user's cookie on a server.
+
+### Added
+
+- **`withHeaders(client, headers, options?)`** returns a copy of a REST or GraphQL client whose calls also send `headers`. The original is unchanged. The headers act as client headers: an endpoint's own headers still win over them, and a call's headers win over everything. Copies chain, and `getHeaders()` on a copy includes them. A copy's headers are read once, when the copy is made: changing the object you passed afterwards changes nothing. Everything else — middleware, `onError`, `log`, `timeout`, `fetch`, `fetchOptions` — is the client's, which is safe because `share` and the cache compare the headers a call sends ([withHeaders()](https://iremlopsum.github.io/liaise/reference/withheaders/)).
+- **`dedupe` works across copies that add the same headers**, and where polls are shared (browsers, React Native) so do polls, however often a copy is rebuilt (a copy made inside a React component is rebuilt on every render), and copies that add different headers never cancel or share. `{ dedupe: false }` turns `dedupe` off for a copy, which suits a server.
+- **It never throws.** An invalid header value fails each call through the copy as a `'network'` error. A single endpoint or a number is a type error. Something that isn't a client but looks like one, such as a plain object or a spread copy `{ ...api }`, gets a stand-in whose calls fail as `'network'` errors that say so, and so does hostile input such as a revoked Proxy or a throwing getter.
+
+### Documentation
+
+- The recipe "One /me per page view on the server" uses a copy per page view instead of a per-call header.
+
+Sizes, gzipped: a REST-only import is 7.0 kB (was 6.8 kB), and 9.4 kB with `poll` and `pollUntil` (was 9.2 kB). The core entry is 11.3 kB (was 10.6 kB), and 12.6 kB with all the middleware (was 12.0 kB). REST-only grew even for code that doesn't import `withHeaders`, because the state a copy needs is built into every client.
+
 ## [5.2.1] — 2026-10-07
 
 Fixes a `:name` in a path being filled where the types said it couldn't be. Two path shapes that used to build a wrong URL are now refused; see [MIGRATION.md](./MIGRATION.md#upgrading-to-521).
@@ -1228,6 +1244,7 @@ Initial release of the rewritten client. Reconstructed from the release commit
   `ArrayBuffer` and strings
 - Response parsing as `json`, `text`, `blob`, `arrayBuffer` or `formData`
 
+[5.3.0]: https://github.com/iremlopsum/liaise/compare/v5.2.1...v5.3.0
 [5.2.1]: https://github.com/iremlopsum/liaise/compare/v5.2.0...v5.2.1
 [5.2.0]: https://github.com/iremlopsum/liaise/compare/v5.1.2...v5.2.0
 [5.1.2]: https://github.com/iremlopsum/liaise/compare/v5.1.1...v5.1.2
