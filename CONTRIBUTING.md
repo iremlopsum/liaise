@@ -45,3 +45,7 @@ These are the ones a pull request gets checked against.
 ## Code style
 
 Match the code around your change: ESM with `.js` extensions on internal imports (even in `.ts` files), strict TypeScript, and comments that explain why, not what. When in doubt, a smaller change is easier to review.
+
+## Releases
+
+Releases are automated and maintainer-only. A release is a pull request that bumps the version in `package.json` (with `npm version <version> --no-git-tag-version`) and adds the matching `CHANGELOG.md` entry, with its compare link at the bottom, and a `MIGRATION.md` entry when upgrading needs action. CI checks those on the pull request. Once the maintainer merges it and approves the deployment, GitHub Actions publishes to npm with provenance, tags the release, creates the GitHub Release from the CHANGELOG entry and checks the published package. Contributors never need to bump the version; the maintainer does it in a release PR.
