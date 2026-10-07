@@ -12,6 +12,9 @@
 
 /** Factory that wires Request definitions into a typed, callable API object. */
 export { createApi } from './create-api.js'
+// A copy of a client — REST or GraphQL — that also sends some headers (5.3.0)
+export { withHeaders } from './with-headers.js'
+export type { WithHeadersOptions } from './utils/copy.js'
 
 /** Typed request definition — one instance per API endpoint. */
 export { Request } from './request.js'

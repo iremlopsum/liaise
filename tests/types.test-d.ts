@@ -11,6 +11,8 @@ import { defineRequest } from '../src/define-request.js'
 import { logMiddleware } from '../src/built-in-middleware.js'
 import { paginate } from '../src/paginate.js'
 import { createGraphQL, Operation, gql } from '../src/graphql.js'
+import { withHeaders } from '../src/with-headers.js'
+import type { WithHeadersOptions } from '../src/index.js'
 
 interface User { id: string; name: string }
 
@@ -593,5 +595,24 @@ describe('fetchOptions types', () => {
     // @ts-expect-error signal is liaise's
     const d: FetchOptions = { signal: AbortSignal.abort() }
     void [a, b, c, d]
+  })
+})
+
+describe('withHeaders types', () => {
+  it('a copy has the type of the client it copies', () => {
+    expectTypeOf(withHeaders(api, { cookie: 'x' })).toEqualTypeOf<typeof api>()
+  })
+
+  it('accepts only a client', () => {
+    // @ts-expect-error a plain object is not a client
+    withHeaders({ getUser: api.getUser }, {})
+    // @ts-expect-error a single endpoint is not a client
+    withHeaders(api.getUser, {})
+    // @ts-expect-error a number is not a client
+    withHeaders(42, {})
+  })
+
+  it('exports WithHeadersOptions', () => {
+    expectTypeOf<WithHeadersOptions>().toEqualTypeOf<{ dedupe?: boolean }>()
   })
 })
