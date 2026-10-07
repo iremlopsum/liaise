@@ -1,0 +1,79 @@
+---
+title: "The problem it solves"
+description: "What goes wrong in the code around plain fetch, and what liaise does about each problem."
+order: 1
+---
+Read this page when you're deciding whether liaise belongs in your project. It lists what tends to go wrong around plain `fetch`, shows one form submit written both ways, and says where liaise sits among the alternatives.
+
+`fetch` is a good building block. Every project still ends up writing the same few things around it, and they are easy to get subtly wrong.
+
+| With plain fetch | liaise | See |
+| ---------------- | ------ | --- |
+| Typing fast in a search box shows old results. A slow early search lands last. | `dedupe` cancels the older call. | [Stale requests](/guide/cancelling-deadlines-and-stale-requests/#drop-stale-calls-with-dedupe) |
+| Five components load the same data, or five 401s each refresh the token. That's five identical requests. | `share` sends one and hands everyone the answer. | [Sharing identical requests](/guide/sharing-identical-requests/) |
+| A 500 counts as success, offline throws, a hung server waits forever. | Every call returns `{ data, error }`, and `error.kind` names the failure. With `timeout` set, a hung server becomes an error too. | [Handling errors](/guide/handling-errors/) |
+| Retries run straight past your timeout. | `timeout` covers the whole operation, retries included. | [Deadlines](/guide/cancelling-deadlines-and-stale-requests/#set-a-deadline-with-timeout) |
+| An id that hasn't loaded yet sends a request to `/users/undefined`. | The path names the params. An `undefined` one is refused before anything is sent. | [Defining endpoints](/guide/defining-endpoints/) |
+| The backend changes a field and the page crashes three components later. | A schema checks the response. A bad shape is an error you handle. | [Validating responses](/guide/validating-responses/) |
+
+## Before and after
+
+Here is one form submit, written both ways. `show` stands for whatever puts a message on screen, and `order` for the form's data.
+
+**With plain fetch**
+
+```ts
+try {
+  const res = await fetch('/api/orders', { method: 'POST', body: JSON.stringify(order) })
+  show(`Order ${(await res.json()).id} confirmed`) // a 500 lands here too
+} catch {
+  show('Something went wrong') // offline? broken JSON? no way to tell
+}
+```
+
+It reads well, and it has three problems. `fetch` resolves for a 500 just as it does for a 201, so a failed order can reach the success message. Being offline and a body that isn't JSON land in the same `catch`, so the message can't say which one happened. And nothing ends a request the server never answers, so the user waits for a message that never comes.
+
+**With liaise**
+
+You describe the endpoint once, with its method, its path and its types. `timeout: 5000` gives a hung server five seconds:
+
+```ts
+import { createApi, defineRequest } from 'liaise'
+
+type Order = { id: string; items: string[] }
+
+const api = createApi({
+  baseUrl: '/api',
+  requests: {
+    placeOrder: defineRequest<Order, { items: string[] }>()({
+      method: 'POST',
+      path: '/orders',
+      timeout: 5000,
+    }),
+  },
+})
+```
+
+The submit handler then gets every outcome back as a value, and `error.kind` says which one it is:
+
+<Example name="problem-after" />
+
+There is no `try`, because the call never throws. A 500 reaches the `'http'` case instead of the success message, and being offline, a hung server and a broken body each get a message of their own.
+
+The `switch` leaves out `'abort'`, because nothing here cancels a call, and `'middleware'`, which points at a bug in your own code. [Handling errors](/guide/handling-errors/) lists all six kinds.
+
+## Why another API client?
+
+Without one, you have two options.
+
+You can hand-roll a wrapper around `fetch`. That means writing the same code on every project: a typed function per endpoint, status checks, error handling, retries and cancellation.
+
+Or you can adopt a large library like Apollo or urql. They're built for very large apps with complex data needs, such as a normalized cache, optimistic updates and subscriptions. If your product doesn't need those, you take on their setup for features you never use.
+
+liaise sits in between. It's the wrapper you'd otherwise hand-roll, already written and tested. Your whole setup is a base URL and your endpoints.
+
+[When it fits, and when it doesn't](/choosing/when-it-fits-and-when-it-doesnt/) says when to pick one of the others instead. [How it compares](/choosing/how-it-compares/) runs fetch, axios, ky, ofetch and liaise through the same ten failure scenarios and shows what each one gives back.
+
+**The API client you'd build on your third project, with the edge cases already handled.**
+
+**Next:** [Quick start](/start/quick-start/) installs liaise and makes a first call.

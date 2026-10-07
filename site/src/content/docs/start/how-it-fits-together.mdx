@@ -1,0 +1,88 @@
+---
+title: "How it fits together"
+description: "The four pieces of liaise, the path one call takes through them, and which setting wins when you write it in more than one place."
+order: 3
+---
+This page names the four pieces you used in [Quick start](/start/quick-start/), follows one call through them, and shows which setting wins when you write it in more than one place. Read it once before the guide, and come back when a setting doesn't do what you expected.
+
+## Four pieces
+
+liaise has four pieces, and every call takes the same path through them. In Quick start, `getUser` was the endpoint definition, `api` the client, `api.getUser({ id: '42' })` the call, and `{ data, error }` its `Result`.
+
+| Piece | What it is |
+| ----- | ---------- |
+| Endpoint definition (`defineRequest`) | A recipe for one endpoint: its method, its path and the types of its params and response. It does nothing on its own. |
+| Client (`createApi`) | Turns your recipes into typed functions, one per endpoint. |
+| Call | `api.getUser(params, options)`, where `options` can set `signal`, `timeout`, `headers`, `middleware` or `skipMiddleware` for this call only ([CallOptions](/reference/calloptions/)). |
+| `Result` | `{ data, error, response, retry }`, which is what every call returns. `data` and `error` are never both set. `response` is `null` when no response arrived. `retry()` runs the same call again. |
+
+Types flow from the endpoint definition through `createApi` to every call, so you never annotate a call. When you need a type by name, such as `Result` or `CallOptions`, it is listed under [Exports](/reference/exports/).
+
+GraphQL has the same shape. `createGraphQL` and `Operation` take the place of `createApi` and `defineRequest`, and every call returns the same `Result` ([GraphQL](/guide/graphql/)).
+
+## The path of one call
+
+```text
+params → URL + body → your middleware → fetch → parse → validate → Result
+```
+
+First liaise builds the request. It fills the path params into the URL, puts the other params in the query string or the body, and merges the headers. Then your middleware runs. A middleware is a function that wraps a call, so it can add a header, retry or log. It sees the request before `fetch`, and the `Result` on its way back out, after the body has been parsed and validated. [Writing middleware](/guide/writing-middleware/) shows how to write one.
+
+Parsing reads the body as the endpoint's `responseType`, JSON by default. Validating checks it against the endpoint's schema, if it has one.
+
+Any step can fail, and the failure lands in `error` instead of being thrown. `error.kind` tells you which:
+
+| Where | What happened | `error.kind` |
+| ----- | ------------- | ------------ |
+| Building the request | A param can't be sent, such as a path param that is `undefined`. | `'network'` |
+| Your middleware | A middleware threw. | `'middleware'` |
+| `fetch` | No response arrived, because you're offline or DNS or CORS failed. | `'network'` |
+| `fetch` | The server answered with a non-2xx status. | `'http'` |
+| Parse or validate | A 2xx body didn't parse, or failed your schema. | `'parse'` |
+| Anywhere | Your `timeout` passed. | `'timeout'` |
+| Anywhere | Your signal, or a newer `dedupe` call, cancelled it. | `'abort'` |
+
+[Handling errors](/guide/handling-errors/) says what to do about each kind.
+
+## Three levels of settings
+
+You can write a setting in three places: on the client, on the endpoint, or on one call. For headers and `timeout`, the most specific one wins. For middleware, every level runs, the client's first.
+
+| Level | Where you write it | `headers` | `middleware` | `timeout` |
+| ----- | ------------------ | --------- | ------------ | --------- |
+| Client | `createApi({ headers, middleware, timeout })` | Sent with every call | Runs first, around everything else | Applies to every call |
+| Endpoint | `defineRequest<T>()({ headers, middleware, timeout })` | Replaces the client's value for the same header | Runs second | Replaces the client's |
+| Call | `api.getUser(params, { headers, middleware, timeout })` | Replaces the client's and the endpoint's value for the same header | Runs last, closest to `fetch` | Replaces the endpoint's and the client's |
+
+Headers merge by name, so setting one header on a call keeps every other header from the client and the endpoint. A `Content-Type` you set at any level replaces the one liaise picks from the body.
+
+```ts
+import { createApi, defineRequest } from 'liaise'
+
+type Report = { total: number }
+
+const api = createApi({
+  baseUrl: 'https://api.example.com',
+  headers: { 'x-api-version': '1' }, // every call
+  requests: {
+    getReport: defineRequest<Report>()({
+      method: 'GET',
+      path: '/report',
+      headers: { 'x-api-version': '2' }, // this endpoint: replaces the client's
+    }),
+  },
+})
+
+await api.getReport() // sends x-api-version: 2
+await api.getReport({}, { headers: { 'x-api-version': '3' } }) // sends x-api-version: 3
+
+api.getReport.getHeaders() // { 'x-api-version': '2' }
+```
+
+[`getHeaders()`](/reference/getheaders/) shows the headers an endpoint sends from the client and the endpoint, before any call adds its own.
+
+`timeout: 0` at the most specific level means no deadline, so an endpoint can opt out of the client's `timeout` ([details](/guide/cancelling-deadlines-and-stale-requests/#set-a-deadline-with-timeout)).
+
+The other settings each live at one level. `baseUrl`, `log` and `onError` go on the client. `method`, `path`, `responseType`, `schema`, `bodyAs`, `dedupe` and `share` go on the endpoint. `signal` and `skipMiddleware` go on the call. [createApi options](/reference/createapi-options/), [Endpoint options](/reference/endpoint-options/) and [CallOptions](/reference/calloptions/) list every setting at each level.
+
+**Next:** [Defining endpoints](/guide/defining-endpoints/) starts the guide: how the path and the types decide what a call accepts.
