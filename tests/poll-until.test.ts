@@ -1,0 +1,182 @@
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
+import { createApi, defineRequest, poll, pollUntil } from '../src/index.js'
+import { mockFetch, jsonResponse } from '../src/testing.js'
+import type { Result } from '../src/index.js'
+
+type Job = { id: string; status: 'queued' | 'running' | 'done' }
+let mock: ReturnType<typeof mockFetch>
+
+/** Each request the routes received, so a test can check its signal (RecordedCall has none). */
+let requests: Request[] = []
+
+/** GET /jobs/:id answers with these statuses (numbers are HTTP errors), then repeats the last one. */
+function jobs(answers: Array<Job['status'] | number>, delay = 0) {
+  let i = 0
+  requests = []
+  mock = mockFetch({ 'GET /jobs/:id': ({ params, request }) => {
+    requests.push(request)
+    const a = answers[Math.min(i++, answers.length - 1)]
+    const response = typeof a === 'number' ? jsonResponse({ message: 'no' }, { status: a }) : jsonResponse({ id: params.id, status: a })
+    return delay ? new Promise(r => setTimeout(() => r(response), delay)) : response
+  } })
+  mock.install()
+  const getJob = defineRequest<Job>()({ method: 'GET', path: '/jobs/:id' })
+  return createApi({ baseUrl: 'https://api.test', requests: { getJob } })
+}
+/** Whether `p` has settled by now: a hang fails an assertion instead of timing out. */
+const settled = async (p: Promise<unknown>): Promise<boolean> => {
+  let done = false
+  void p.then(() => { done = true })
+  await Promise.resolve()
+  return done
+}
+const isDone = (r: { data: Job }) => r.data.status === 'done'
+
+beforeEach(() => { vi.useFakeTimers() })
+afterEach(() => { mock?.restore(); vi.useRealTimers(); vi.unstubAllGlobals(); vi.restoreAllMocks() })
+
+describe('pollUntil', () => {
+  it('resolves with the first success where until is true, and stops polling', async () => {
+    const api = jobs(['queued', 'running', 'done'])
+    const done = pollUntil(api.getJob, { id: '7' }, { every: 1000, until: isDone })
+    await vi.advanceTimersByTimeAsync(2000)
+    const { data, error } = await done
+    expect(error).toBeNull()
+    expect(data).toEqual({ id: '7', status: 'done' })
+    await vi.advanceTimersByTimeAsync(10_000)
+    expect(mock.calls).toHaveLength(3)
+  })
+
+  it('a late joiner whose until is already true resolves without a new request', async () => {
+    const api = jobs(['done'])
+    const stop = poll(api.getJob, { id: '7' }, () => {}, { every: 1000 })
+    await vi.advanceTimersByTimeAsync(0)
+    const r = await pollUntil(api.getJob, { id: '7' }, { every: 1000, until: isDone })
+    expect(r.error).toBeNull()
+    expect(mock.calls).toHaveLength(1)
+    stop()
+  })
+
+  it('stops at an error waiting cannot fix (404), while a poll() on the same thing keeps going', async () => {
+    vi.spyOn(Math, 'random').mockReturnValue(0)
+    const api = jobs([404])
+    const seen: Result<Job>[] = []
+    const stop = poll(api.getJob, { id: '7' }, r => seen.push(r), { every: 1000 })
+    const pending = pollUntil(api.getJob, { id: '7' }, { every: 1000, until: isDone })
+    await vi.advanceTimersByTimeAsync(100)
+    expect(await settled(pending)).toBe(true)
+    const r = await pending
+    expect(r.error?.status).toBe(404)
+    await vi.advanceTimersByTimeAsync(2000)
+    expect(seen.length).toBeGreaterThanOrEqual(3)
+    stop()
+  })
+
+  it.each([500, 503, 408, 429])('keeps polling through %i', async status => {
+    vi.spyOn(Math, 'random').mockReturnValue(0)
+    const api = jobs([status, 'done'])
+    const r = pollUntil(api.getJob, { id: '7' }, { every: 1000, until: isDone })
+    await vi.advanceTimersByTimeAsync(1000)
+    expect((await r).error).toBeNull()
+  })
+
+  it('keeps polling through a network error', async () => {
+    let i = 0
+    mock = mockFetch({ 'GET /jobs/:id': () => (i++ === 0 ? Promise.reject(new TypeError('offline')) : jsonResponse({ id: '7', status: 'done' })) })
+    mock.install()
+    const api = createApi({ baseUrl: 'https://api.test', requests: { getJob: defineRequest<Job>()({ method: 'GET', path: '/jobs/:id' }) } })
+    vi.spyOn(Math, 'random').mockReturnValue(0)
+    const r = pollUntil(api.getJob, { id: '7' }, { every: 1000, until: isDone })
+    await vi.advanceTimersByTimeAsync(1000)
+    expect((await r).error).toBeNull()
+  })
+
+  it('stops at a parse error', async () => {
+    mock = mockFetch({ 'GET /jobs/:id': () => new Response('not json', { status: 200, headers: { 'content-type': 'application/json' } }) })
+    mock.install()
+    const api = createApi({ baseUrl: 'https://api.test', requests: { getJob: defineRequest<Job>()({ method: 'GET', path: '/jobs/:id' }) } })
+    const pending = pollUntil(api.getJob, { id: '7' }, { every: 1000, until: isDone })
+    await vi.advanceTimersByTimeAsync(100)
+    expect(await settled(pending)).toBe(true)
+    const r = await pending
+    expect(r.error?.kind).toBe('parse')
+    expect(mock.calls).toHaveLength(1)
+  })
+
+  it('giveUpAfter resolves with a timeout error that names the last attempt', async () => {
+    const api = jobs(['queued'])
+    const r = pollUntil(api.getJob, { id: '7' }, { every: 1000, until: isDone, giveUpAfter: 2500 })
+    await vi.advanceTimersByTimeAsync(2500)
+    const { error, data, response } = await r
+    expect(data).toBeNull()
+    expect(response).toBeNull()
+    expect(error).toMatchObject({ kind: 'timeout', status: 0, request: { method: 'GET', url: 'https://api.test/jobs/7', params: { id: '7' } } })
+    expect((error!.body as Error).name).toBe('TimeoutError')
+  })
+
+  it('giveUpAfter during a request in flight resolves timeout once and aborts the request', async () => {
+    const api = jobs(['done'], 5000)
+    const r = pollUntil(api.getJob, { id: '7' }, { every: 1000, until: isDone, giveUpAfter: 1000 })
+    await vi.advanceTimersByTimeAsync(1000)
+    expect((await r).error?.kind).toBe('timeout')
+    await vi.advanceTimersByTimeAsync(10_000)
+    expect(mock.calls).toHaveLength(1) // the only caller left: the poll stopped
+    expect(requests[0].signal.aborted).toBe(true)
+  })
+
+  it('a non-finite or non-positive giveUpAfter means no limit', async () => {
+    for (const giveUpAfter of [0, -1, Number.NaN, Number.POSITIVE_INFINITY]) {
+      const api = jobs(['queued', 'queued', 'queued', 'done'])
+      const r = pollUntil(api.getJob, { id: '7' }, { every: 1000, until: isDone, giveUpAfter })
+      await vi.advanceTimersByTimeAsync(3000)
+      expect((await r).error, `giveUpAfter: ${giveUpAfter}`).toBeNull()
+      mock.restore()
+    }
+  })
+
+  it("its signal aborting resolves with kind 'abort'; an already-aborted signal sends nothing", async () => {
+    const api = jobs(['queued'])
+    const controller = new AbortController()
+    const r = pollUntil(api.getJob, { id: '7' }, { every: 1000, until: isDone, signal: controller.signal })
+    await vi.advanceTimersByTimeAsync(0)
+    controller.abort()
+    expect((await r).error?.kind).toBe('abort')
+    mock.restore()
+    const api2 = jobs(['queued'])
+    const r2 = await pollUntil(api2.getJob, { id: '7' }, { every: 1000, until: isDone, signal: AbortSignal.abort() })
+    expect(r2.error?.kind).toBe('abort')
+    expect(mock.calls).toHaveLength(0)
+  })
+
+  it('until throwing counts as not done and is reported', async () => {
+    const reportError = vi.fn()
+    vi.stubGlobal('reportError', reportError)
+    const api = jobs(['queued', 'done'])
+    let first = true
+    const r = pollUntil(api.getJob, { id: '7' }, { every: 1000, until: res => { if (first) { first = false; throw new Error('boom') } return isDone(res) } })
+    await vi.advanceTimersByTimeAsync(1000)
+    expect((await r).error).toBeNull()
+    expect(reportError).toHaveBeenCalledTimes(1)
+  })
+
+  it('two pollUntil calls on the same job share requests', async () => {
+    const api = jobs(['queued', 'done'])
+    const a = pollUntil(api.getJob, { id: '7' }, { every: 1000, until: isDone })
+    const b = pollUntil(api.getJob, { id: '7' }, { every: 1000, until: isDone })
+    await vi.advanceTimersByTimeAsync(1000)
+    expect((await a).error).toBeNull()
+    expect((await b).error).toBeNull()
+    expect(mock.calls).toHaveLength(2)
+  })
+
+  it("its own timeout result's retry() runs pollUntil again", async () => {
+    const api = jobs(['queued'])
+    const r = pollUntil(api.getJob, { id: '7' }, { every: 1000, until: isDone, giveUpAfter: 500 })
+    await vi.advanceTimersByTimeAsync(500)
+    const first = await r
+    const again = first.retry()
+    await vi.advanceTimersByTimeAsync(500)
+    expect((await again).error?.kind).toBe('timeout')
+    expect(mock.calls.length).toBeGreaterThanOrEqual(2)
+  })
+})

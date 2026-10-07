@@ -26,7 +26,7 @@ export { paginate } from './paginate.js'
 export type { PaginateOptions } from './paginate.js'
 
 /** Asks an endpoint again on an interval; callers asking the same thing share one poll. */
-export { poll } from './poll.js'
+export { poll, pollUntil } from './poll.js'
 
 /** Options and the endpoint shape for `poll`. */
 export type { Pollable, PollOptions, PollUntilOptions } from './poll.js'
