@@ -618,6 +618,17 @@ describe('withHeaders types', () => {
     expectTypeOf<Results['health']['data']>().toEqualTypeOf<{ ok: boolean } | null>()
   })
 
+  it('accepts GraphQL clients and either side of a split one', () => {
+    const op = new Operation<Record<string, never>, { x: number }>({ operation: gql`query { x }` })
+    const flat = createGraphQL({ endpoint: '/graphql', operations: { x: op } })
+    const split = createGraphQL({ endpoint: '/graphql', queries: { x: op }, mutations: { y: op } })
+    expectTypeOf(withHeaders(flat, {})).toEqualTypeOf<typeof flat>()
+    expectTypeOf(withHeaders(split, {})).toEqualTypeOf<typeof split>()
+    expectTypeOf(withHeaders(split.query, {})).toEqualTypeOf<typeof split.query>()
+    // @ts-expect-error one operation is not a client
+    withHeaders(flat.x, {})
+  })
+
   it('exports WithHeadersOptions', () => {
     expectTypeOf<WithHeadersOptions>().toEqualTypeOf<{ dedupe?: boolean }>()
   })
