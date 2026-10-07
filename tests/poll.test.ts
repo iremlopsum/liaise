@@ -1,7 +1,8 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
+import { AsyncLocalStorage } from 'node:async_hooks'
 import { createApi, createGraphQL, defineRequest, Operation, gql, poll } from '../src/index.js'
 import { mockFetch, jsonResponse, successResult } from '../src/testing.js'
-import type { CallOptions, Result } from '../src/index.js'
+import type { CallOptions, Middleware, Result } from '../src/index.js'
 
 type Stats = { n: number }
 let mock: ReturnType<typeof mockFetch>
@@ -17,6 +18,8 @@ function client(routes?: Parameters<typeof mockFetch>[0]) {
 }
 const ns = (results: Result<Stats>[]) => results.map(r => (r.error ? r.error.status : r.data.n))
 const flush = () => vi.advanceTimersByTimeAsync(0)
+/** Polls are shared only where there is a `window` (browsers, React Native). Node has none, so a test of sharing stubs one. */
+const shareable = () => vi.stubGlobal('window', globalThis)
 
 beforeEach(() => { vi.useFakeTimers() })
 afterEach(() => { mock?.restore(); vi.useRealTimers(); vi.unstubAllGlobals(); vi.restoreAllMocks() })
@@ -60,6 +63,8 @@ describe('poll: the interval', () => {
 })
 
 describe('poll: sharing', () => {
+  beforeEach(shareable)
+
   it('five callers asking the same thing share one request per tick', async () => {
     const api = client()
     const seen: Result<Stats>[][] = [[], [], [], [], []]
@@ -149,6 +154,42 @@ describe('poll: sharing', () => {
   })
 })
 
+describe('poll: sharing needs a window', () => {
+  /** A server's client: a middleware adds the token of the user whose request is being handled. */
+  function perUser() {
+    const user = new AsyncLocalStorage<string>()
+    mock = mockFetch({ 'GET /me': ({ request }) => jsonResponse({ owner: request.headers.get('authorization') }) })
+    mock.install()
+    const auth: Middleware = (ctx, next) => { ctx.request.headers.set('authorization', `Bearer ${user.getStore()}`); return next() }
+    const getMe = defineRequest<{ owner: string }>()({ method: 'GET', path: '/me' })
+    const api = createApi({ baseUrl: 'https://api.test', middleware: [auth], requests: { getMe } })
+    const seen: Record<string, Array<string | null>> = { alice: [], bob: [] }
+    const stops = ['alice', 'bob'].map(name =>
+      user.run(name, () => poll(api.getMe, {}, r => seen[name].push(r.error ? null : r.data.owner), { every: 1000 })))
+    return { seen, stops }
+  }
+
+  it("on a server (no window) identical callers don't share: each gets its own requests, with its own middleware", async () => {
+    expect(typeof window).toBe('undefined')
+    const { seen, stops } = perUser()
+    await flush()
+    expect(seen).toEqual({ alice: ['Bearer alice'], bob: ['Bearer bob'] })
+    await vi.advanceTimersByTimeAsync(1000)
+    expect(mock.calls).toHaveLength(4) // two requests per tick
+    stops.forEach(stop => stop())
+  })
+
+  it('in a browser (a window) the same callers share one request per tick', async () => {
+    shareable()
+    const { seen, stops } = perUser()
+    await flush()
+    expect(seen).toEqual({ alice: ['Bearer alice'], bob: ['Bearer alice'] })
+    await vi.advanceTimersByTimeAsync(1000)
+    expect(mock.calls).toHaveLength(2)
+    stops.forEach(stop => stop())
+  })
+})
+
 describe('poll: edge cases', () => {
   it('params that are not plain objects are sent and keyed as they are', async () => {
     const api = client()
@@ -159,6 +200,7 @@ describe('poll: edge cases', () => {
   })
 
   it('two POST polls with different URLSearchParams bodies do not share', async () => {
+    shareable()
     mock = mockFetch({ 'POST /form': () => jsonResponse({ ok: true }) })
     mock.install()
     const send = defineRequest<{ ok: boolean }, URLSearchParams>()({ method: 'POST', path: '/form' })
@@ -173,6 +215,7 @@ describe('poll: edge cases', () => {
   })
 
   it("a callback that joins the same question doesn't start a second loop", async () => {
+    shareable()
     const api = client()
     const stops: Array<() => void> = []
     let joined = false
@@ -212,6 +255,7 @@ describe('poll: stopping', () => {
   })
 
   it('poll, stop, poll in the same tick leaves one shared poll and one request', async () => {
+    shareable()
     const api = client()
     const seen: Result<Stats>[] = []
     poll(api.getStats, {}, r => seen.push(r), { every: 1000 })()
@@ -226,6 +270,7 @@ describe('poll: stopping', () => {
   })
 
   it("an aborted signal stops that caller, not the others", async () => {
+    shareable()
     const api = client()
     const controller = new AbortController()
     const a: Result<Stats>[] = [], b: Result<Stats>[] = []
@@ -277,6 +322,7 @@ describe('poll: stopping', () => {
   })
 
   it("a callback that stops another caller during delivery means that caller gets nothing", async () => {
+    shareable()
     const api = client()
     const b: Result<Stats>[] = []
     let stopB = () => {}
@@ -289,6 +335,7 @@ describe('poll: stopping', () => {
 
 describe('poll: a callback that throws', () => {
   it("doesn't stop the poll or the other callbacks, and goes to reportError", async () => {
+    shareable()
     const reportError = vi.fn()
     vi.stubGlobal('reportError', reportError)
     const api = client()
@@ -388,6 +435,7 @@ describe('poll: backoff', () => {
   })
 
   it('callers sharing a poll use the smallest maxEvery', async () => {
+    shareable()
     vi.spyOn(Math, 'random').mockReturnValue(0.999999)
     const api = sequence([500, 500, 500, 500])
     const a = poll(api.getStats, {}, () => {}, { every: 1000, maxEvery: 5000 })
@@ -422,6 +470,7 @@ describe('poll: a hidden tab', () => {
   })
 
   it('keeps polling while hidden if any caller set inBackground', async () => {
+    shareable()
     const t = tab()
     const api = client()
     const a = poll(api.getStats, {}, () => {}, { every: 1000 })
@@ -434,6 +483,7 @@ describe('poll: a hidden tab', () => {
   })
 
   it('the last inBackground caller leaving while hidden pauses the poll', async () => {
+    shareable()
     const t = tab()
     const api = client()
     const a = poll(api.getStats, {}, () => {}, { every: 1000 })
@@ -502,6 +552,7 @@ describe('poll: any liaise endpoint', () => {
 
 describe('poll: what the docs promise', () => {
   it('equal headers objects, and an equal timeout, share one request per tick', async () => {
+    shareable()
     const api = client()
     const stops = [
       poll(api.getStats, {}, () => {}, { every: 1000, headers: { 'x-tenant': 'a' } }),
@@ -519,6 +570,7 @@ describe('poll: what the docs promise', () => {
   })
 
   it('skipMiddleware, or a Headers instance, gets a shared poll of its own', async () => {
+    shareable()
     const api = client()
     const skip = (_: unknown, next: () => Promise<Result<unknown>>) => next()
     const stops = [
@@ -537,6 +589,7 @@ describe('poll: what the docs promise', () => {
   })
 
   it("URLSearchParams, FormData, Blob and ArrayBuffer params can't be compared: each caller gets its own poll", async () => {
+    shareable()
     mock = mockFetch({ 'POST /upload': () => jsonResponse({ ok: true }) })
     mock.install()
     const upload = defineRequest<{ ok: boolean }, URLSearchParams | FormData | Blob | ArrayBuffer>()({ method: 'POST', path: '/upload' })
@@ -558,6 +611,7 @@ describe('poll: what the docs promise', () => {
   })
 
   it("a caller's signal isn't passed to the requests: aborting it leaves a shared request running", async () => {
+    shareable()
     // A hand-written Pollable sees exactly the options each request gets.
     const controller = new AbortController()
     const passed: Array<AbortSignal | undefined> = []

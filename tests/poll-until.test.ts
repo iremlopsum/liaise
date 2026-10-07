@@ -31,6 +31,8 @@ const settled = async (p: Promise<unknown>): Promise<boolean> => {
   return done
 }
 const isDone = (r: { data: Job }) => r.data.status === 'done'
+/** Polls are shared only where there is a `window` (browsers, React Native). Node has none, so a test of sharing stubs one. */
+const shareable = () => vi.stubGlobal('window', globalThis)
 
 beforeEach(() => { vi.useFakeTimers() })
 afterEach(() => { mock?.restore(); vi.useRealTimers(); vi.unstubAllGlobals(); vi.restoreAllMocks() })
@@ -48,6 +50,7 @@ describe('pollUntil', () => {
   })
 
   it('a late joiner whose until is already true resolves without a new request', async () => {
+    shareable()
     const api = jobs(['done'])
     const stop = poll(api.getJob, { id: '7' }, () => {}, { every: 1000 })
     await vi.advanceTimersByTimeAsync(0)
@@ -58,6 +61,7 @@ describe('pollUntil', () => {
   })
 
   it('stops at an error waiting cannot fix (404), while a poll() on the same thing keeps going', async () => {
+    shareable()
     vi.spyOn(Math, 'random').mockReturnValue(0)
     const api = jobs([404])
     const seen: Result<Job>[] = []
@@ -160,6 +164,7 @@ describe('pollUntil', () => {
   })
 
   it('two pollUntil calls on the same job share requests', async () => {
+    shareable()
     const api = jobs(['queued', 'done'])
     const a = pollUntil(api.getJob, { id: '7' }, { every: 1000, until: isDone })
     const b = pollUntil(api.getJob, { id: '7' }, { every: 1000, until: isDone })
@@ -307,6 +312,7 @@ describe('pollUntil: what the docs promise', () => {
   })
 
   it('keeps polling through a 304, and resolves on a later answer', async () => {
+    shareable()
     vi.spyOn(Math, 'random').mockReturnValue(0)
     let i = 0
     mock = mockFetch({ 'GET /jobs/:id': ({ params }) => (i++ === 0 ? new Response(null, { status: 304 }) : jsonResponse({ id: params.id, status: 'done' })) })

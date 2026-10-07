@@ -2,10 +2,11 @@
 // poll.ts — ask an endpoint again on an interval, one shared poll per question
 // =============================================================================
 //
-// Standalone, like paginate: it costs nothing unless imported. Callers that ask
-// the same thing — the same endpoint function, params and per-request options —
-// share one poll: one request per tick, every Result to all of them. Spec:
-// docs/superpowers/specs/2026-10-07-polling-design.md (local).
+// Standalone, like paginate: it costs nothing unless imported. Where there is a
+// `window` (browsers, React Native), callers that ask the same thing — the same
+// endpoint function, params and per-request options — share one poll: one request
+// per tick, every Result to all of them. On a server each caller polls on its own
+// (see join). Spec: docs/superpowers/specs/2026-10-07-polling-design.md (local).
 // =============================================================================
 import type { CallOptions, Middleware, Result, SuccessResult } from './types.js'
 import { ApiError, createNetworkErrorResult } from './result.js'
@@ -231,8 +232,13 @@ function join(
   // (Map, URLSearchParams, a binary body, a class with toJSON) goes through as it is.
   const snapshot = isPlain(params) ? { ...params } : params
   const callOptions = Object.fromEntries(Object.entries(options).filter(([k]) => !POLL_ONLY.has(k))) as CallOptions
-  const paramsKey = stableKey(snapshot)
-  const optionsKey = stableKey(callOptions)
+  // Shared only where there is a `window`: browsers and React Native. The key is
+  // decided here, before any middleware runs, so on a server, where one process
+  // serves many users, a middleware that adds the current user's token would hand
+  // one user's answers to another. There each caller gets a poll of its own.
+  const shareable = typeof window !== 'undefined'
+  const paramsKey = shareable ? stableKey(snapshot) : null
+  const optionsKey = paramsKey === null ? null : stableKey(callOptions)
   const key = paramsKey === null || optionsKey === null ? null : `${paramsKey}|${optionsKey}`
   let byKey = polls.get(endpoint)
   let shared = key === null ? undefined : byKey?.get(key)
@@ -258,8 +264,9 @@ function join(
 
 /**
  * Asks `endpoint` at once, then again `every` ms after each response, and hands
- * each Result to `callback` until `stop()`. Callers asking the same thing share
- * one poll. Never throws.
+ * each Result to `callback` until `stop()`. In a browser or React Native, callers
+ * asking the same thing share one poll; on a server (no `window`) each has its own.
+ * Never throws.
  */
 export function poll<P extends object, R>(
   endpoint: Pollable<P, R>,
