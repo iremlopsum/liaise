@@ -51,6 +51,8 @@ html { -webkit-font-smoothing: antialiased; text-rendering: optimizeLegibility; 
   --tw-prose-counters: var(--color-gray-400);
   --tw-prose-hr: rgb(255 255 255 / 0.1);
 }
+.table-scroll { overflow-x: auto; }
+.table-scroll:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .doc-prose :where(h2) { font-size: 1.25rem; font-weight: 600; letter-spacing: -0.015em; margin-top: 2.75em; scroll-margin-top: 6rem; }
 .doc-prose :where(h3) { font-size: 1.0625rem; font-weight: 600; letter-spacing: -0.01em; scroll-margin-top: 6rem; }
 .doc-prose :where(a) { text-decoration-line: underline; text-decoration-color: var(--accent); text-decoration-thickness: 1px; text-underline-offset: 3px; font-weight: 500; }
