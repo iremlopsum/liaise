@@ -50,10 +50,20 @@ const json = (status: number, body: unknown) =>
 
 export function createFakeServer({ onRequest = () => {}, onSettle = () => {} }: FakeServerOptions = {}): FakeServer {
   let flaky = 0
+  const jobPolls = new Map<string, number>()
   let seq = 0
   let people = seed()
 
   function route(method: string, url: URL, body: string): Route | Promise<Route> {
+    const job = /^\/jobs\/([^/]+)$/.exec(url.pathname)
+    if (method === 'GET' && job) {
+      const id = job[1]
+      if (id !== '42') return { kind: 'answer', status: 404, body: { message: `No job ${id}` }, delay: 60 }
+      const n = (jobPolls.get(id) ?? 0) + 1
+      jobPolls.set(id, n)
+      const status = n <= 2 ? 'queued' : n === 3 ? 'running' : 'done'
+      return { kind: 'answer', status: 200, body: status === 'done' ? { id, status, result: 'report.csv' } : { id, status }, delay: 80 }
+    }
     const user = /^\/users\/([^/]+)$/.exec(url.pathname)
     if (method === 'GET' && user) {
       const id = decodeURIComponent(user[1])
@@ -126,5 +136,5 @@ export function createFakeServer({ onRequest = () => {}, onSettle = () => {} }: 
     })
   }
 
-  return { fetch, reset: () => { flaky = 0; people = seed() } }
+  return { fetch, reset: () => { flaky = 0; people = seed(); jobPolls.clear() } }
 }

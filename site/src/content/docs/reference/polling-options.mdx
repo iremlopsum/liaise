@@ -1,0 +1,61 @@
+---
+title: "poll() and pollUntil() options"
+description: "Every option poll and pollUntil take, with its type and default, and every way a pollUntil can resolve."
+order: 10
+---
+This page lists the options of `poll` and `pollUntil`, and every way a `pollUntil` can resolve. Look here when you tune an interval, a backoff or a deadline. [Polling](/guide/polling/) shows when to use each one.
+
+`poll(endpoint, params, callback, options)` returns `stop`, a function that ends it, and `pollUntil(endpoint, params, options)` returns a promise of a `Result`. `endpoint` is a `Pollable`: any `createApi` endpoint or `createGraphQL` operation.
+
+Neither one throws. Called with options it can't use, such as none at all, `poll` reports the error, sends nothing and returns a `stop` that does nothing, and `pollUntil` resolves with a `kind: 'middleware'` error.
+
+## PollOptions
+
+`poll` takes a `PollOptions` as its last argument.
+
+| Option | Type | Default | What it does |
+| ------ | ---- | ------- | ------------ |
+| `every` | `number` (ms) | required | How long to wait after each answer before asking again. A value below 1, or one that isn't finite, such as `0` or `Infinity`, asks once and never repeats, and that caller leaves after its answer. A wait above 2 147 483 647 ms (about 24.8 days, the longest a timer can wait) is capped there. Callers sharing a poll use the shortest `every`. A caller that joins with a shorter one shortens the wait already started, unless that wait follows a failure. |
+| `inBackground` | `boolean` | `false` | Keeps polling while the browser tab is hidden. With `false`, the poll pauses while the tab is hidden and asks at once when it is visible again, or, after a 429 or 503 with a `Retry-After`, once that has passed. One caller with `true` keeps the shared poll going ([Hidden tabs](/guide/polling/#hidden-tabs)). |
+| `maxEvery` | `number` (ms) | `max(every, 60000)` | The longest wait after failures in a row ([When a poll fails](/guide/polling/#when-a-poll-fails)). Callers sharing a poll use the smallest one. |
+| `signal` | `AbortSignal` | — | Stops this caller, as `stop()` does. It isn't passed to the requests. With a signal that is already aborted, `poll` sends nothing and never calls the callback. |
+
+Every other option is one of the [`CallOptions`](/reference/calloptions/): `headers`, `timeout`, `middleware` and `skipMiddleware`. Each goes with every request, and is part of what decides whether callers [share a poll](/guide/polling/#several-callers-one-poll).
+
+Polls are shared in browsers and React Native. On a server (no `window`) each call gets its own poll, because sharing is decided before your middleware runs and a server handles many users. The check is `typeof window`. A server that defines a global `window`, such as Deno 1.x or a global jsdom, shares like a browser. There, pass the user's token in the poll's `headers` option, which is part of what decides sharing.
+
+## PollUntilOptions
+
+`pollUntil` takes a `PollUntilOptions`: every option of `PollOptions`, plus these two.
+
+| Option | Type | Default | What it does |
+| ------ | ---- | ------- | ------------ |
+| `until` | `(result: SuccessResult<R>) => boolean` | required | Called with each successful `Result`. Returning `true` resolves `pollUntil` with that result. If it throws, the result counts as not done, and the error goes to `reportError` in a browser, and to `console.error` everywhere else. |
+| `giveUpAfter` | `number` (ms) | no limit | How long after the call `pollUntil` gives up, resolving with `kind: 'timeout'`. It keeps counting while a hidden tab pauses the poll. A value that isn't finite, is 0 or less, or is above 2 147 483 647 ms means no limit. |
+
+## What pollUntil resolves with
+
+`pollUntil` never rejects. It resolves once, in one of these ways:
+
+| It resolves with | When |
+| ---------------- | ---- |
+| the endpoint's success `Result` | `until` returns `true` for it. That includes the last answer a caller gets when it joins a poll that already has one. |
+| the endpoint's error `Result` | An error waiting can't fix: an HTTP 4xx other than 408 and 429, a GraphQL error response (`kind: 'http'` with a 2xx status), `kind: 'parse'`, `kind: 'middleware'`, or `kind: 'abort'` from the request itself, such as the endpoint's own `dedupe` cancelling it. |
+| the first `Result` it gets, whatever it holds | Its `every` is below 1 or isn't finite, so it asks once. |
+| a `Result` it builds, with `kind: 'timeout'` | `giveUpAfter` passes first. `error.body` is an `Error` named `TimeoutError`. |
+| a `Result` it builds, with `kind: 'abort'` | Its `signal` aborts, or was already aborted at the call, in which case nothing is sent. `error.body` is the signal's `reason`. |
+
+Every other failure keeps it polling: a `network` error, a single request's own `timeout`, a 5xx, a 408, a 429, and any other status, such as a 304.
+
+The two results that `pollUntil` builds itself hold:
+
+| Field | Value |
+| ----- | ----- |
+| `data`, `response` | `null` |
+| `error.status` | `0` |
+| `error.request` | The `method` and `url` of the most recent request that was sent, and the `params` you passed. An attempt that a middleware answered without calling `next()` sent nothing, so it doesn't change them. If no request was sent yet, because the signal was already aborted, the tab was hidden, or a middleware answered every attempt, `method` and `url` are empty strings. |
+| `retry()` | Runs the whole `pollUntil` again, with the same arguments. |
+
+An endpoint that throws, rejects or resolves with something that isn't a `Result`, which a liaise endpoint never does but a hand-written function might, is reported, and that answer becomes a `kind: 'middleware'` error. `poll` delivers it and goes on polling, and `pollUntil` resolves with it. Its `retry()` calls the endpoint once more, and never throws or rejects either.
+
+**Next:** [liaise/testing](/reference/liaisetesting/) lists the test helpers and how the stub behaves.

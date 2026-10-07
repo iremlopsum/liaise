@@ -8,6 +8,7 @@ import { gzipSync, brotliCompressSync } from 'node:zlib'
 
 const entries = {
   'REST only': `import { createApi, Request, defineRequest } from './dist/index.js'; console.log(createApi, Request, defineRequest)`,
+  'core + polling': `import { createApi, defineRequest, poll, pollUntil } from './dist/index.js'; console.log(createApi, defineRequest, poll, pollUntil)`,
   'core entry': `export * from './dist/index.js'`,
   'core + middleware': `export * from './dist/index.js'; export * from './dist/built-in-middleware.js'`,
 }
@@ -17,7 +18,10 @@ const entries = {
 // 5.1.0 raised all three: sharing on what is sent moved into core (GraphQL share,
 // the wire-key, per-caller pipelines) and the logger moved into core (the `log`
 // option on both clients; logMiddleware now shares it).
-const budgets = { 'REST only': 7000, 'core entry': 8480, 'core + middleware': 10310 }
+// Polling raised the last two and added its own row: poll and pollUntil, with the
+// stableKey and Retry-After helpers they bring into core (core entry 7782 → 10276 B,
+// core + middleware 9443 → 11269 B, core + polling 8850 B). REST only is unchanged.
+const budgets = { 'REST only': 7000, 'core + polling': 9740, 'core entry': 11300, 'core + middleware': 12400 }
 
 let failed = false
 for (const [name, contents] of Object.entries(entries)) {

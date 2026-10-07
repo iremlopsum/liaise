@@ -63,4 +63,4 @@ Each call logs one line when it starts and one when it ends:
 
 The time covers everything that runs inside the logger. For `log` that is the whole call, and for `logMiddleware` it is the middleware after it and the request. An error with no response logs status `0`. Either end line ends in `, shared` when the call joined a [shared](/guide/sharing-identical-requests/) request. A console that throws never fails the call.
 
-**Next:** [liaise/testing](/reference/liaisetesting/) lists the test helpers and how the stub behaves.
+**Next:** [poll() and pollUntil() options](/reference/polling-options/) lists the options of the polling helpers, and what `pollUntil` resolves with.
