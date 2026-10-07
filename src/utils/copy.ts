@@ -21,16 +21,6 @@ import { mergeHeaders } from './headers.js'
 export const COPY = Symbol.for('liaise.copy')
 export const POLL_ID = Symbol.for('liaise.pollId')
 
-declare const clientBrand: unique symbol
-
-/**
- * Marks a client type — createApi's, createGraphQL's flat or split client, or
- * either side of a split one — so `withHeaders` accepts only those. Type-only:
- * nothing at runtime carries it. Not exported from index.ts: `typeof api`
- * already names a client (CLAUDE.md: nothing is exposed without a need).
- */
-export type LiaiseClient = { readonly [clientBrand]: true }
-
 /** The options of `withHeaders`. */
 export interface WithHeadersOptions {
   /**

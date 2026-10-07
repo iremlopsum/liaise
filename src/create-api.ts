@@ -61,7 +61,7 @@ import type { SchemaOutcome } from './utils/validate.js'
 import { sendExchange, sendSharedExchange, AbortedRead } from './utils/exchange.js'
 import type { Exchange } from './utils/exchange.js'
 import { stampClientFetch } from './utils/client-fetch.js'
-import { originalState, nextCopy, pollKeyOf, stampCopier, stampPollId, type CopyState, type LiaiseClient } from './utils/copy.js'
+import { originalState, nextCopy, pollKeyOf, stampCopier, stampPollId, type CopyState } from './utils/copy.js'
 import type { ApiConfig, CallOptions, EndpointExtras, ErrorResult, Middleware, MiddlewareContext, Result, ResponseType } from './types.js'
 
 // =============================================================================
@@ -135,7 +135,7 @@ type ApiMethod<TParams extends object, TResponse> =
  */
 type Api<TRequests extends Record<string, Request<any, any>>> = {
   [K in keyof TRequests]: ApiMethod<ExtractParams<TRequests[K]>, ExtractResponse<TRequests[K]>>
-} & LiaiseClient
+}
 
 // =============================================================================
 // Internal helpers
@@ -480,6 +480,10 @@ export function createApi<TRequests extends Record<string, Request<any, any>>>(
     }
   }
 
+  // Snapshot once: a `requests` record mutated after createApi must not give a
+  // copy endpoints the original lacks.
+  const entries = Object.entries(requests)
+
   /**
    * Builds the client — the original, or a copy `withHeaders` asked for —
    * from `copy`. Everything outside this function (the trackers, the logger,
@@ -495,7 +499,7 @@ export function createApi<TRequests extends Record<string, Request<any, any>>>(
     // are enforced by the return type cast `as Api<TRequests>` at the end.
     const api = {} as Record<string, Function>
 
-    for (const [name, request] of Object.entries(requests)) {
+    for (const [name, request] of entries) {
       // =========================================================================
       // Generate the API method for this request definition
       // =========================================================================

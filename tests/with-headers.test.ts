@@ -76,6 +76,11 @@ describe('withHeaders: headers', () => {
     expect([header(0, 'x-a'), header(0, 'x-b')]).toEqual(['1', '2'])
   })
 
+  it('getHeaders() on a chained copy has every layer, the later winning', () => {
+    const copy = withHeaders(withHeaders(makeApi(), { 'X-A': '1', 'X-B': '1' }), { 'X-B': '2' })
+    expect(copy.me.getHeaders()).toEqual({ authorization: 'Bearer app', 'x-a': '1', 'x-b': '2', 'x-client': 'web', 'x-layer': 'client' })
+  })
+
   it('takes every HeadersInit shape', async () => {
     serve()
     const api = makeApi()
@@ -157,6 +162,17 @@ describe('withHeaders: dedupe', () => {
     expect((await b).error).toBeNull()
     expect((await c).error).toBeNull()
     expect((await d).error).toBeNull()
+  })
+
+  it('{ dedupe: false }: a later call through the copy does not cancel an earlier one through an on copy', async () => {
+    serve(20)
+    const api = makeApi({ dedupe: true })
+    const on = withHeaders(api, { cookie: 's=alice' })
+    const off = withHeaders(api, { cookie: 's=alice' }, { dedupe: false })
+    const a = on.search({ q: '1' })
+    const b = off.search({ q: '2' })
+    expect((await a).error).toBeNull()
+    expect((await b).error).toBeNull()
   })
 
   it('a copy of a copy inherits dedupe: false, and dedupe: true turns it back on', async () => {

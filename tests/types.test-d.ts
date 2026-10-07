@@ -604,12 +604,18 @@ describe('withHeaders types', () => {
   })
 
   it('accepts only a client', () => {
-    // @ts-expect-error a plain object is not a client
-    withHeaders({ getUser: api.getUser }, {})
+    // @ts-expect-error an object holding something other than endpoints is not a client
+    withHeaders({ name: 'x' }, {})
     // @ts-expect-error a single endpoint is not a client
     withHeaders(api.getUser, {})
     // @ts-expect-error a number is not a client
     withHeaders(42, {})
+  })
+
+  it("doesn't change a client's keys: keyof typeof api is still just the endpoints", () => {
+    expectTypeOf<keyof typeof api>().toEqualTypeOf<'getUser' | 'health'>()
+    type Results = { [K in keyof typeof api]: Awaited<ReturnType<(typeof api)[K]>> }
+    expectTypeOf<Results['health']['data']>().toEqualTypeOf<{ ok: boolean } | null>()
   })
 
   it('exports WithHeadersOptions', () => {
