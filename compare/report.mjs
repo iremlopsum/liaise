@@ -1,10 +1,10 @@
-// Turns results.json into results.md, and with `--splice <readme>` into the README's comparison block.
+// Turns results.json into results.md. The docs site's /compare page reads results.json itself
+// (through cells.mjs); the README no longer carries the tables.
 import { readFileSync, writeFileSync } from 'node:fs'
 import { NAMES as names, OVERHEAD, cell } from './cells.mjs'
 
 // Absolute, so links into compare/ also work on npm, which doesn't ship compare/.
 const REPO = 'https://github.com/iremlopsum/liaise/blob/main/compare'
-const START = '<!-- compare:start -->', END = '<!-- compare:end -->'
 
 const results = JSON.parse(readFileSync(new URL('./results.json', import.meta.url), 'utf8'))
 const esc = s => String(s).replaceAll('|', '\\|')
@@ -17,21 +17,8 @@ const kb = b => (b / 1024).toFixed(1)
 const sizeNames = [...names, 'liaise + retryMiddleware']
 const sizeTable = () => table(['Library', 'gzip (kB)', 'brotli (kB)'], sizeNames.map(n => [n, kb(results.sizes[n].gzip), kb(results.sizes[n].brotli)]))
 
-// A sentence about liaise's out-of-the-box failures in the hang and 204 rows, from results.json.
-function liaiseDefaultSentence() {
-  const row = id => results.scenarios.find(s => s.id === id).results.liaise.default.outcome
-  const hang = row('hang'), empty = row('empty-204')
-  const hangBad = /^still waiting/.test(hang), emptyBad = /^(throws|error result)/.test(empty)
-  const others = names.filter(n => n !== 'liaise' && /^throws/.test(results.scenarios.find(s => s.id === 'hang').results[n].default.outcome))
-  const parts = []
-  if (hangBad) parts.push(`has no timeout (${others.length ? `only ${others.join(' and ')} ${others.length === 1 ? 'has one' : 'have one'} by default` : 'no library here has one by default'})`)
-  if (emptyBad) parts.push(`treats a 204 on a JSON call as ${/parse/.test(empty) ? 'a parse error' : 'an error'}`)
-  if (!parts.length) return `Out of the box, liaise handles the hang and 204 rows without a failure. See Table B in [compare/results.md](${REPO}/results.md).`
-  return `Out of the box, liaise ${parts.join(' and ')}. See Table B in [compare/results.md](${REPO}/results.md).`
-}
 const fmt = x => `${x.median.toLocaleString('en-US')} (${x.min.toLocaleString('en-US')}–${x.max.toLocaleString('en-US')})`
 const overheadTable = () => table(['Library', 'Sequential', `Concurrent (${OVERHEAD.inFlight} in flight)`], names.map(n => [n, fmt(results.overhead[n].sequential), fmt(results.overhead[n].concurrent)]))
-const overheadLine = () => `Request overhead on localhost, sequential (median requests per second): ${names.map(n => `${n} ${results.overhead[n].sequential.median.toLocaleString('en-US')}`).join(', ')}.`
 
 function notesSection() {
   const out = []
@@ -55,7 +42,6 @@ const contenderList = contenders.length > 1 ? `${contenders.slice(0, -1).join(',
 const disclaimer = `Measured on ${readableDate(meta.date)} against ${contenderList}. Other libraries change. Rerun it with \`npm run build\` in the repo root, then \`npm install && npm run compare\` in \`compare/\`.`
 // Every scenario runs in Node; in a browser axios switches to its XHR adapter.
 const axiosNote = 'In browsers axios uses XHR, so its results there can differ.'
-const runtimeNote = `Run in Node ${meta.node.replace(/^v/, '')} against a local server. ${axiosNote}`
 const full = `# Comparison results
 
 ${disclaimer}
@@ -95,34 +81,5 @@ ${overheadTable()}
 
 ${notesSection()}`
 
-if (process.argv[2] === '--splice') {
-  const file = process.argv[3]
-  if (!file) { console.error('usage: report.mjs --splice <readme>'); process.exit(1) }
-  const readme = readFileSync(file, 'utf8')
-  const a = readme.indexOf(START), b = readme.indexOf(END)
-  if (a === -1 || b === -1 || b < a) { console.error(`${file}: missing ${START} / ${END} markers`); process.exit(1) }
-  const block = `${START}
-
-${disclaimer} ${runtimeNote}
-
-${outcomes('configured')}
-
-\\* needed hand-written code, described in the [notes](${REPO}/results.md#notes). — means the library has no built-in option.
-
-${liaiseDefaultSentence()}
-
-${sizeTable()}
-
-fetch is built into the runtime; its row is the call site only, the floor rather than a library.
-
-${overheadLine()}
-
-Out-of-the-box results, request overhead in full and the notes: [compare/results.md](${REPO}/results.md).
-
-`
-  writeFileSync(file, readme.slice(0, a) + block + readme.slice(b))
-  console.log(`spliced into ${file}`)
-} else {
-  writeFileSync(new URL('./results.md', import.meta.url), full)
-  console.log('wrote compare/results.md')
-}
+writeFileSync(new URL('./results.md', import.meta.url), full)
+console.log('wrote compare/results.md')

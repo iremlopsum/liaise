@@ -235,7 +235,7 @@ const withFallback: Middleware = async (ctx, next) => {
 }
 ```
 
-Like the per-attempt example in the README, this *replaces* the signal, so the
+Like the [per-attempt example](https://iremlopsum.github.io/liaise/recipes/give-each-attempt-its-own-timeout/) in the docs, this *replaces* the signal, so the
 caller's own `AbortSignal` no longer reaches `fetch` — aborting it still settles
 the call (the backstop watches it), but the socket stays open until the 4-second
 signal fires. If that matters, merge the two instead of replacing, with

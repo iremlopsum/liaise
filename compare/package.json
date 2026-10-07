@@ -6,7 +6,6 @@
   "scripts": {
     "compare": "node run.mjs && node sizes.mjs && node overhead.mjs && node report.mjs",
     "compare:behaviour": "node run.mjs",
-    "compare:readme": "node report.mjs --splice ../README.md",
     "test": "node --test observe.test.mjs"
   },
   "devDependencies": {

@@ -1,6 +1,6 @@
 # compare
 
-The harness behind the comparison in liaise's README. It runs five HTTP clients (plain
+The harness behind liaise's comparison page. It runs five HTTP clients (plain
 `fetch`, axios, ky, ofetch and liaise) through ten failure scenarios against a local server,
 and records what the calling code receives. It also measures bundle size and request overhead.
 
@@ -15,8 +15,9 @@ cd compare && npm install
 npm run compare          # behaviour, sizes, overhead, then results.md
 ```
 
-`npm run compare:behaviour` runs only the scenarios. `npm run compare:readme` copies the
-tables into the README between `<!-- compare:start -->` and `<!-- compare:end -->`.
+`npm run compare:behaviour` runs only the scenarios. The docs site's comparison page
+(https://iremlopsum.github.io/liaise/compare/) is built from `results.json`, through the same
+`cells.mjs` as `results.md`, so a rerun reaches the site with its next deploy.
 
 ## Fairness rules
 
