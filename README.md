@@ -254,6 +254,7 @@ const api = createApi({ baseUrl: 'https://api.example.com', requests: { listRepo
 
 await api.listRepos({ org: 'acme' })           // GET /orgs/acme/repos
 await api.listRepos({ org: 'acme', page: 2 })  // GET /orgs/acme/repos?page=2
+// @ts-expect-error
 await api.listRepos({ page: 2 })               // ✗ compile error: org is required
 ```
 
@@ -1999,6 +2000,7 @@ A `#` written into a `path` or a `baseUrl` is refused, because a fragment is nev
 `defineRequest` also refuses a fragment in a `path` literal, at compile time:
 
 ```ts
+// @ts-expect-error
 defineRequest<Doc>()({ method: 'GET', path: '/docs#section' })
 //                                          ^ Property '__fragmentInPath' is missing:
 //                                            a URL fragment is never sent to the server

@@ -6,7 +6,7 @@ const src = (file: string) => fileURLToPath(new URL(`./src/${file}`, import.meta
 export default defineConfig({
   // README examples import 'liaise' by its published name. These aliases point
   // that name at src/, so a tested README block is byte-identical to the test
-  // that runs it (scripts/check-readme.mjs) and needs no build first.
+  // that runs it (scripts/check-docs.mjs) and needs no build first.
   resolve: {
     alias: [
       { find: /^liaise$/, replacement: src('index.ts') },
