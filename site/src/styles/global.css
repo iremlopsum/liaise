@@ -79,6 +79,9 @@ html { -webkit-font-smoothing: antialiased; text-rendering: optimizeLegibility; 
   font: 500 0.6875rem/1 var(--font-sans); color: #cbd5e1; background: rgb(255 255 255 / 0.06);
   border: 1px solid rgb(255 255 255 / 0.1); border-radius: 0.375rem; padding: 0.35rem 0.5rem;
 }
+/* Confirmed copy: the accent, so the change is obvious. */
+[data-copied] [data-label] { color: var(--accent); font-weight: 600; }
+.code-copy[data-copied] { color: #fff; background: var(--accent); border-color: var(--accent); opacity: 1; }
 /* Shown on hover, and to keyboard users (focus) and on touch screens (no hover), who can't hover. */
 .code-wrap:hover .code-copy, .code-copy:focus-visible, .code-wrap:focus-within .code-copy { opacity: 1; }
 @media (hover: none) { .code-copy { opacity: 1; } }

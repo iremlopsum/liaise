@@ -44,6 +44,7 @@ const ogImage = new URL(`${import.meta.env.BASE_URL.replace(/\/?$/, '/')}og.png`
   <body class="bg-white font-sans text-gray-950 dark:bg-gray-950 dark:text-white">
     <Header active={active} />
     <slot />
+    <p id="copy-status" class="sr-only" role="status" aria-live="polite"></p>
 
     <!-- Search -->
     <dialog id="search" data-base={import.meta.env.BASE_URL} class="m-0 h-full max-h-none w-full max-w-none bg-transparent p-4 backdrop:bg-gray-950/25 backdrop:backdrop-blur-sm sm:p-6 md:pt-[12vh] dark:backdrop:bg-gray-950/60">
@@ -74,10 +75,6 @@ const ogImage = new URL(`${import.meta.env.BASE_URL.replace(/\/?$/, '/')}og.png`
         const wrap = document.createElement('div'); wrap.className = 'code-wrap'
         pre.replaceWith(wrap); wrap.append(pre)
         const btn = document.createElement('button'); btn.className = 'code-copy'; btn.textContent = 'Copy'
-        btn.addEventListener('click', async () => {
-          await navigator.clipboard.writeText(pre.innerText); btn.textContent = 'Copied'
-          setTimeout(() => (btn.textContent = 'Copy'), 1200)
-        })
         wrap.append(btn)
       }
 
@@ -133,6 +130,18 @@ const ogImage = new URL(`${import.meta.env.BASE_URL.replace(/\/?$/, '/')}og.png`
           return row(p.url, p.meta.title, p.excerpt, false) + subs.map((s) => row(s.url, s.title, s.excerpt, true)).join('')
         }).join('')
         highlight(0)
+      })
+    </script>
+    <script>
+      import { copyWithFeedback } from '../scripts/copy'
+      // One handler for every Copy button: the install pill and the code blocks.
+      document.addEventListener('click', (e) => {
+        const button = (e.target as Element).closest<HTMLElement>('[data-copy-install], .code-copy')
+        if (!button) return
+        const code = button.classList.contains('code-copy')
+        const source = code ? (button.previousElementSibling as HTMLElement) : button.querySelector<HTMLElement>('[data-copy-text]')!
+        const text = code ? source.innerText : 'npm install liaise'
+        copyWithFeedback(button, text, { onFail: () => getSelection()?.selectAllChildren(source) })
       })
     </script>
   </body>
