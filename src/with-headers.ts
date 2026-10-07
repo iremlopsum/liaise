@@ -41,7 +41,9 @@ const NOT_A_CLIENT =
  * page), so the mistake surfaces on the first call instead: every call, at any
  * property depth, resolves to a 'network' Result naming it. `then` and symbol
  * keys are undefined, so the stand-in is not a promise — `await` on it would
- * otherwise hang.
+ * otherwise hang. `toString` gives the message, so printing it (`String()`, a
+ * template) doesn't throw, and `getHeaders()` at any depth is `{}`, at once,
+ * as on a copy whose headers are invalid.
  */
 function standIn(): unknown {
   const call = (): Promise<Result<never>> => Promise.resolve(createNetworkErrorResult(new ApiError({
@@ -52,7 +54,12 @@ function standIn(): unknown {
     headers: new Headers(),
     request: { method: '', url: '', params: {} },
   }), call))
-  return new Proxy(call, { get: (_, key) => (key === 'then' || typeof key === 'symbol' ? undefined : standIn()) })
+  return new Proxy(call, {
+    get: (_, key) => key === 'then' || typeof key === 'symbol' ? undefined
+      : key === 'toString' ? () => NOT_A_CLIENT
+      : key === 'getHeaders' ? () => ({})
+      : standIn(),
+  })
 }
 
 /**
@@ -64,6 +71,8 @@ function standIn(): unknown {
  *
  * Never throws: an invalid header value fails each call as a 'network' Result,
  * and something that isn't a client returns a stand-in whose calls do the same.
+ * So does anything that throws while copying — a revoked Proxy, a throwing
+ * getter on the client or on `options`.
  *
  * @example
  * ```ts
@@ -72,6 +81,11 @@ function standIn(): unknown {
  * ```
  */
 export function withHeaders<T extends object & ClientShape<T>>(client: T, headers: HeadersInit, options?: WithHeadersOptions): T {
-  const copier = copierOf(client)
-  return (copier ? copier(parent => nextCopy(parent, headers, options)) : standIn()) as T
+  try {
+    const copier = copierOf(client)
+    if (copier) return copier(parent => nextCopy(parent, headers, options)) as T
+  } catch {
+    // Hostile input (a revoked Proxy, a throwing getter) isn't a client either.
+  }
+  return standIn() as T
 }

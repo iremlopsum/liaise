@@ -767,6 +767,21 @@ describe('poll: never throws, whatever it is given', () => {
     stop()
   })
 
+  it('a revoked Proxy as the endpoint, where polls share: polled like any endpoint that throws, not refused by poll()', async () => {
+    shareable()
+    const { proxy, revoke } = Proxy.revocable(async () => successResult({ n: 1 }), {})
+    revoke()
+    const seen: Result<unknown>[] = []
+    let stop = () => {}
+    expect(() => { stop = poll(proxy as never, {}, r => seen.push(r), { every: 1000 }) }).not.toThrow()
+    await flush()
+    expect(seen.map(r => r.error?.kind)).toEqual(['middleware'])
+    // As for any endpoint that throws: the call failed, not poll() itself.
+    expect(console.error).toHaveBeenCalledTimes(1)
+    expect(console.error).toHaveBeenCalledWith('[liaise] poll: the endpoint failed:', expect.any(TypeError))
+    stop()
+  })
+
   it('a signal that is not an AbortSignal (the controller itself): reported, and nothing is sent', async () => {
     const api = client()
     let calls = 0

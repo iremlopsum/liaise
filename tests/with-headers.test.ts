@@ -37,6 +37,7 @@ function makeApi(extra: { dedupe?: boolean; share?: boolean } = {}) {
   })
 }
 
+type Api = ReturnType<typeof makeApi>
 const header = (i: number, name: string) => mock.calls[i].headers.get(name)
 
 describe('withHeaders: headers', () => {
@@ -181,6 +182,49 @@ describe('withHeaders: never throws', () => {
       Promise.resolve(junk).then(() => 'resolved'),
       new Promise(r => setTimeout(() => r('hung'), 50)),
     ])).resolves.toBe('resolved')
+  })
+
+  const revoked = () => {
+    const { proxy, revoke } = Proxy.revocable({}, {})
+    revoke()
+    return proxy
+  }
+  const hostile: [string, () => unknown][] = [
+    ['a revoked Proxy as the client', () => withHeaders(revoked() as Api, { cookie: 'x' })],
+    ['a client whose copy stamp is a throwing getter', () => withHeaders(
+      Object.defineProperty({}, Symbol.for('liaise.copy'), { get() { throw new Error('boom') } }) as Api, { cookie: 'x' })],
+    ['a Proxy that throws on unknown keys', () => withHeaders(new Proxy({}, {
+      get(target, key) { if (!(key in target)) throw new Error(`no ${String(key)}`); return Reflect.get(target, key) },
+    }) as Api, { cookie: 'x' })],
+    ['options whose dedupe getter throws', () => withHeaders(makeApi(), { cookie: 'x' }, { get dedupe(): boolean { throw new Error('boom') } })],
+    ['a revoked Proxy as options', () => withHeaders(makeApi(), { cookie: 'x' }, revoked())],
+  ]
+  it.each(hostile)("%s: a stand-in whose calls are 'network' Results, and nothing is sent", async (_, make) => {
+    serve()
+    let copy!: Api
+    expect(() => { copy = make() as Api }).not.toThrow()
+    expect((await copy.me()).error?.kind).toBe('network')
+    expect(mock.calls).toHaveLength(0)
+  })
+
+  it('the stand-in prints as a string, and getHeaders() at any depth is {}, at once', () => {
+    const junk = withHeaders({} as Api, { cookie: 'x' })
+    expect(() => [String(junk), `${junk.me}`, String((junk as unknown as { query: { who: unknown } }).query.who)]).not.toThrow()
+    expect(String(junk)).toMatch(/isn't a client/)
+    expect(junk.me.getHeaders()).toEqual({})
+    const deep = junk as unknown as { query: { who: { getHeaders(): unknown } } }
+    expect(deep.query.who.getHeaders()).toEqual({})
+    expect(deep.query.who.getHeaders()).not.toBeInstanceOf(Promise)
+  })
+
+  it('the stand-in has no then and no symbol keys, at any depth', () => {
+    const junk = withHeaders({} as Api, { cookie: 'x' }) as unknown as Record<string | symbol, Record<string | symbol, unknown>>
+    // typeof, so a failure prints a word: printing the stand-in itself could throw.
+    for (const node of [junk, junk.me]) {
+      expect(typeof node.then).toBe('undefined')
+      expect(typeof node[Symbol.toPrimitive]).toBe('undefined')
+      expect(typeof node[Symbol.iterator]).toBe('undefined')
+    }
   })
 
   it('a spread client gets the stand-in, and its message says why', async () => {

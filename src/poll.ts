@@ -300,6 +300,8 @@ function join(
   // copy adds (src/utils/copy.ts), so copies that send the same thing share one
   // poll however often they are rebuilt, and copies with different headers never
   // do. Its key starts with NUL or is '', and a stableKey never starts with NUL.
+  // pollIdOf never throws: an endpoint whose read throws (a revoked Proxy) keys
+  // on itself, as before copies existed.
   const id = shareable ? pollIdOf(endpoint) : undefined
   const owner: object = id?.origin ?? endpoint
   const key = paramsKey === null || optionsKey === null ? null : `${id?.key ?? ''}${paramsKey}|${optionsKey}`

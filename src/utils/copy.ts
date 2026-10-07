@@ -124,6 +124,11 @@ export function stampPollId(endpoint: object, origin: object, key: string): void
   Object.defineProperty(endpoint, POLL_ID, { value: { origin, key } })
 }
 
+/** Never throws: an endpoint whose read throws (a revoked Proxy) has no poll identity, so it keys on itself, as before 5.3.0. */
 export function pollIdOf(endpoint: object): PollId | undefined {
-  return (endpoint as Record<symbol, PollId | undefined>)[POLL_ID]
+  try {
+    return (endpoint as Record<symbol, PollId | undefined>)[POLL_ID]
+  } catch {
+    return undefined
+  }
 }
