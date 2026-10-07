@@ -1,0 +1,24 @@
+---
+title: "How it compares"
+description: "What the comparison of fetch, axios, ky, ofetch and liaise measures, how it stays fair, and where to read the results."
+order: 2
+---
+Read this page when you're weighing liaise against another HTTP client. It says what the comparison measures and the rules that keep it fair. The results are on [the comparison page](/compare/): every scenario in both setups, the size and overhead figures, and a section on where liaise loses.
+
+## What it measures
+
+A harness in the liaise repo runs plain `fetch`, axios, ky, ofetch and liaise through ten failure scenarios against a local server, and records what the calling code gets back. The scenarios are a server error, an unreachable server, a server that never answers, a broken body, an empty body, a search box whose answers arrive out of order, five requests that get a 401 at once, retries under a deadline, an undefined path param, and a response that is missing a field its type promises.
+
+Each library runs every scenario twice: once set up the way its own docs describe, and once out of the box, with no options. The harness also measures each library's bundle size and the overhead it adds to a request.
+
+## How it stays fair
+
+- **The documented setup uses only each library's own docs.** Every option it sets has a link to the doc it comes from.
+- **Code beyond the docs is used only where a scenario can't be done otherwise**, and the results mark it as hand-written.
+- **A capability a library lacks is left out**, and the results say it has no built-in option.
+- **Every library gets the same hand-written guards**, such as one shared token refresh.
+- **Whatever the run shows is published**, including where liaise loses.
+
+Other libraries change, so the comparison page shows the date of the run and the version of every library measured. [compare/README.md](https://github.com/iremlopsum/liaise/blob/main/compare/README.md) has the full rules and the commands to run it yourself. If you maintain one of these libraries and think its setup is unfair, a pull request is welcome.
+
+**Next:** [Where it runs](/choosing/where-it-runs/) lists the runtimes liaise is tested on.

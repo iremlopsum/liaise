@@ -1,0 +1,42 @@
+---
+title: "When it fits, and when it doesn't"
+description: "The projects liaise suits, and when to use Apollo Client, urql, TanStack Query, a client that throws, or plain fetch instead."
+order: 1
+---
+Read this page when you're deciding whether liaise belongs in your project. It starts with the cases where something else is the right choice, then lists the projects liaise suits.
+
+## When to use something else
+
+### You need a normalized cache, optimistic updates or subscriptions
+
+A normalized cache keeps each object once, so when you update one user, every screen showing that user updates. Optimistic updates put the expected result of a change on screen before the server confirms it. A subscription is a GraphQL operation that stays open and changes its result as the server sends updates.
+
+If you need any of these, use Apollo Client or urql. Both are GraphQL clients. Apollo Client keeps query results in a normalized cache and supports optimistic updates and subscriptions. In urql, the normalized cache is Graphcache, which you add in place of the default cache, and it handles optimistic updates too. Apollo's [caching overview](https://www.apollographql.com/docs/react/caching/overview) and urql's [Graphcache docs](https://nearform.com/open-source/urql/docs/graphcache/) explain how each one caches.
+
+liaise has none of the three. Its [`cacheMiddleware`](/guide/retries-caching-and-logging/#cache-repeated-reads) keeps successful responses in memory, one entry for each distinct request, for five minutes unless you set another time. Its [GraphQL client](/guide/graphql/) sends queries and mutations, each as a POST. [Why another API client?](/start/the-problem-it-solves/#why-another-api-client) covers the trade-off.
+
+### You want caching and refetching in your UI
+
+Use TanStack Query *with* liaise. TanStack Query keeps results in a cache, and by default refetches stale data in the background when a new component using the query mounts, the window regains focus or the network reconnects ([Important Defaults](https://tanstack.com/query/latest/docs/framework/react/guides/important-defaults)). Its query function can be any function that returns a promise, so it can call liaise.
+
+liaise has no hooks, and it sends a request only when your code makes a call. The [TanStack Query recipe](/recipes/use-with-tanstack-query/) shows the two together.
+
+### You make two or three calls
+
+For two or three calls, plain `fetch` is fine. You can write the few checks they need yourself, and [The problem it solves](/start/the-problem-it-solves/) lists what to watch for.
+
+### You want failed calls to throw
+
+liaise never throws. Every failure comes back as a value, and you check `error` after each call ([Never throws](/about/design-principles/#never-throws)). If you'd rather a failed call threw, so that one `try` covers a block of calls, use a client that throws. ky, for one, throws an `HTTPError` when a response's status is outside 2xx ([ky's docs](https://github.com/sindresorhus/ky#readme)).
+
+With liaise, you convert at the one place that needs a throw, as the [TanStack Query recipe](/recipes/use-with-tanstack-query/) does, and every other call checks `error`. [How it compares](/choosing/how-it-compares/) shows what ky and the others give back for each kind of failure.
+
+## When liaise fits
+
+liaise is a good fit when you have:
+
+- **Many endpoints with one auth setup.** Each endpoint is one [`defineRequest`](/guide/defining-endpoints/), and one [auth middleware](/recipes/add-an-auth-header-and-refresh-the-token-on-a-401/) covers them all.
+- **Failure handling that matters**, such as a checkout or a form. Every failure comes back as a value with a [kind you can switch on](/guide/handling-errors/).
+- **One API layer shared across frameworks, servers and scripts.** A client is a plain object of functions that return promises, so the same one runs in each. [Where it runs](/choosing/where-it-runs/) lists the runtimes.
+
+**Next:** [How it compares](/choosing/how-it-compares/) explains how liaise was measured against fetch, axios, ky and ofetch, and where to read the results.
