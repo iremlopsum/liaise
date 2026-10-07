@@ -5,6 +5,23 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [5.2.1] — 2026-10-07
+
+Fixes a `:name` in a path being filled where the types said it couldn't be. Two path shapes that used to build a wrong URL are now refused; see [MIGRATION.md](./MIGRATION.md#upgrading-to-521).
+
+### Fixed
+
+- **A `:name` in the middle of a path segment was filled.** The types and the check for unfilled path params only count a `:name` that starts a segment, but the URL was built by filling one anywhere: `path: '/v1/documents:batchGet'` called with `{ batchGet: 'yes' }` sent `/v1/documentsyes`. A `:name` is now filled only where it starts a segment, so `/v1/documents:batchGet` and `/time/12:30` are sent as written. A call that passes a param named after a `:name` in the middle of a segment, such as `/items/v:version` with `{ version: '2' }`, is refused with a message that says to move the `:name` to the start of a segment. Before, the value was filled in; without the refusal it would have gone to the query string or the body instead.
+- **A `:name` in a path's query string built a broken query.** `path: '/v2/simple/price?:qs'` typed its params as `{}`, sent `?:qs` as text when called without `qs`, and with `qs` encoded the whole value into one parameter (`price?ids%3Dbitcoin%26…`). A `:name` right after `?`, `&` or `=` is now refused on every call, and `defineRequest` refuses it at compile time. Query params go in the second type argument: `defineRequest<Price, { ids: string }>()({ method: 'GET', path: '/v2/simple/price' })`.
+
+Both refusals return a `'network'` error with a `TypeError` in `error.body` that says what to change, and nothing is sent ([Colons in a path](https://iremlopsum.github.io/liaise/reference/behaviour-in-detail/#colons-in-a-path)).
+
+### Documentation
+
+- Handling errors said the message of every refused call ends in "so the call was not sent". Most don't; it now says the message names what liaise refused and what to change.
+
+Sizes, gzipped: a REST-only import is 6.8 kB (was 6.5 kB), and 9.2 kB with `poll` and `pollUntil` (was 8.9 kB). The core entry is 10.6 kB (was 10.4 kB), and 12.0 kB with all the middleware (was 11.7 kB).
+
 ## [5.2.0] — 2026-10-07
 
 Adds polling, `fetchOptions` for `credentials`, `mode`, `cache` and the rest of `RequestInit`, and a client's own `fetch`. `cacheMiddleware` now caches only `GET` and `HEAD` unless you say otherwise; see [MIGRATION.md](./MIGRATION.md#upgrading-to-520).
@@ -1211,6 +1228,7 @@ Initial release of the rewritten client. Reconstructed from the release commit
   `ArrayBuffer` and strings
 - Response parsing as `json`, `text`, `blob`, `arrayBuffer` or `formData`
 
+[5.2.1]: https://github.com/iremlopsum/liaise/compare/v5.2.0...v5.2.1
 [5.2.0]: https://github.com/iremlopsum/liaise/compare/v5.1.2...v5.2.0
 [5.1.2]: https://github.com/iremlopsum/liaise/compare/v5.1.1...v5.1.2
 [5.1.1]: https://github.com/iremlopsum/liaise/compare/v5.1.0...v5.1.1
