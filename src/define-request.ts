@@ -20,7 +20,7 @@ import type { RequestConfig, ResponseType, StandardSchemaV1, InferOutput } from 
  * The characters a path token name may contain.
  *
  * This list is not arbitrary and must not be "simplified": it mirrors
- * the `/:([a-zA-Z0-9_]+)/g` template scan in `buildUrl`
+ * the `/(^|\/):([a-zA-Z0-9_]+)/g` template scan in `buildUrl`
  * (src/utils/path-params.ts). If the two ever disagree, the types describe a
  * URL the runtime does not build.
  */
@@ -33,7 +33,8 @@ type WordChar =
 
 /**
  * Consumes the leading word characters of `S` — a token name — and stops at the
- * first character that is not one, exactly where `buildUrl`'s lookahead stops.
+ * first character that is not one, exactly where `buildUrl`'s greedy name match
+ * stops.
  *
  * Character-at-a-time rather than splitting on '/', because a token does not
  * have to end at a slash: `/users/:id.json` substitutes `:id` and leaves
@@ -55,12 +56,20 @@ type TakeName<S extends string, Acc extends string = ''> =
  * holds, so `ApiMethod`'s optional-params branch still fires and `api.health()`
  * stays callable with no arguments.
  *
- * A token must BEGIN a path segment, mirroring `buildUrl`'s Phase 1b
- * (src/utils/path-params.ts, search "A token must BEGIN a path segment"):
- * matching is anchored to `/:` rather than a bare `:`, so a colon that appears
- * mid-segment — a Google-style custom method like `/v1/documents:batchGet`,
- * or a time like `/events/at/12:30` — is never mistaken for a token. Both of
- * those paths parse to `{}`, not `{ batchGet: ... }` or `{ '30': ... }`.
+ * A token must BEGIN a path segment, mirroring `buildUrl`'s Phase 1 fill and
+ * its Phase 1b check (src/utils/path-params.ts, search "A token must BEGIN a
+ * path segment"): matching is anchored to `/:` rather than a bare `:`, so a
+ * colon that appears mid-segment — a Google-style custom method like
+ * `/v1/documents:batchGet`, or a time like `/events/at/12:30` — is never
+ * mistaken for a token. Both of those paths parse to `{}`, not
+ * `{ batchGet: ... }` or `{ '30': ... }`, and `buildUrl` sends them as written.
+ *
+ * Until 5.2.1 that was true of the type and of Phase 1b but not of the fill,
+ * which substituted a `:name` anywhere: `/v1/documents:batchGet` with
+ * `{ batchGet: 'yes' }` built `/v1/documentsyes`. The fill is anchored now,
+ * and a mid-segment `:name` that a param names is refused at runtime rather
+ * than sent as text with the value moved elsewhere. A `:name` after `?`, `&`
+ * or `=` in the query string is refused as well, here by `QueryTokenGuard`.
  *
  * A missing leading slash is normalised before anchoring. `buildUrl` requires a
  * token to sit at index 0 of a `split('/')` segment, which means "preceded by
@@ -164,6 +173,53 @@ type EmptyBodyGuard<TRT, TResponse> =
 type FragmentGuard<TPath> =
   TPath extends `${string}#${string}`
     ? { __fragmentInPath: 'a URL fragment is never sent to the server — remove the # and everything after it' }
+    : unknown
+
+/**
+ * Whether a path's query string (the text after its first `?`, without it)
+ * holds a `:name` right after the `?`, a `&` or a `=` — the shapes `buildUrl`
+ * finds in its Phase 0a and refuses in Phase 0c (src/utils/path-params.ts).
+ *
+ * Character at a time with the previous character carried along, because the
+ * rule is about what PRECEDES the colon, and splitting on ':' would lose that
+ * for back-to-back colons. `Prev` starts as '?': the first character of the
+ * query string follows the '?'. A colon counts only when a word character
+ * follows it, as `buildUrl`'s token grammar requires, so `'/x?a=:'` passes.
+ * The recursion is a tail call, which TypeScript runs as a loop.
+ */
+type QueryHasToken<Q extends string, Prev extends string = '?'> =
+  Q extends `${infer C}${infer Rest}`
+    ? C extends ':'
+      ? Prev extends '?' | '&' | '='
+        ? Rest extends `${WordChar}${string}` ? true : QueryHasToken<Rest, C>
+        : QueryHasToken<Rest, C>
+      : QueryHasToken<Rest, C>
+    : false
+
+/**
+ * Rejects a `path` literal with a `:name` in its query string: `?:qs`,
+ * `&:sort`, `=:sort`.
+ *
+ * A path template can't fill a query string. Before 5.2.1 `buildUrl`
+ * substituted a `:name` anywhere, so `'/v2/simple/price?:qs'` with `{ qs }`
+ * encoded the whole value into one broken parameter, while `PathParams` (which
+ * only counts a `:name` that starts a segment) typed the endpoint as `{}` and
+ * never asked for `qs`. 5.2.1 anchored the fill, which would leave `?:qs` to
+ * be sent as text, so the runtime refuses it, and this guard refuses it where
+ * it is written, the way `FragmentGuard` does for a `#`. Query params belong in
+ * `defineRequest`'s second type argument.
+ *
+ * Fires only on a literal, for `FragmentGuard`'s reason: `string extends
+ * `${string}?${infer Q}`` is false, so a widened path compiles and is refused
+ * when called. The marker property follows the same reasoning as
+ * `__fragmentInPath`: a name nothing real has, so TypeScript reports it as a
+ * missing property and the sentence rides along in the message.
+ */
+type QueryTokenGuard<TPath> =
+  TPath extends `${string}?${infer Query}`
+    ? QueryHasToken<Query> extends true
+      ? { __queryTokenInPath: "a path can't fill a query string — declare query params in defineRequest's second type argument" }
+      : unknown
     : unknown
 
 /**
@@ -292,6 +348,7 @@ export function defineRequest<TResponse = unknown, TExtra extends object = {}>()
       & EmptyBodyGuard<TRT, TResponse>
       & SchemaConflictGuard<TSchema, TResponse>
       & FragmentGuard<TPath>
+      & QueryTokenGuard<TPath>
   ): Request<Id<PathParams<TPath> & TExtra>, unknown extends SchemaOut<TSchema> ? TResponse : SchemaOut<TSchema>> =>
     new Request<Id<PathParams<TPath> & TExtra>, unknown extends SchemaOut<TSchema> ? TResponse : SchemaOut<TSchema>>(config)
 }

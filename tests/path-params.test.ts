@@ -454,3 +454,127 @@ describe('path param values that cannot make a segment are refused', () => {
     expect(() => buildUrl('/api', '/users/:id#top', { id: undefined })).toThrow(/fragment/i)
   })
 })
+
+// -----------------------------------------------------------------------------
+// 5.2.1: a `:name` is a path token only where it starts a path segment.
+// Before, the fill scanned the template for `:name` anywhere, while the
+// PathParams type and the unresolved-token check (Phase 1b) only counted one
+// that starts a segment. The two disagreed in both directions:
+// '/v1/documents:batchGet' + { batchGet: 'yes' } built '/v1/documentsyes', and
+// '/v2/simple/price?:qs' typed as {} but substituted a value it was never told
+// about, URL-encoded, into a broken query string.
+// -----------------------------------------------------------------------------
+describe('a :name fills only where it starts a path segment', () => {
+  it('sends a mid-segment colon unchanged when no param has its name', () => {
+    // Google-style custom methods. The colon is part of the resource name.
+    expect(buildUrl('/api', '/v1/documents:batchGet', {}).url).toBe('/api/v1/documents:batchGet')
+    expect(buildUrl('/api', '/time/12:30', {}, true).url).toBe('/api/time/12:30')
+  })
+
+  it('leaves a mid-segment colon alone while a real token fills', () => {
+    // ':name' starts its segment, ':cancel' does not: one token, one literal.
+    const { url, remaining } = buildUrl('/api', '/v1/operations/:name:cancel', { name: 'op1', force: true })
+    expect(url).toBe('/api/v1/operations/op1:cancel')
+    expect(remaining).toEqual({ force: true })
+  })
+
+  it('refuses /v1/documents:batchGet with a param named batchGet, instead of building /v1/documentsyes', () => {
+    // The C9 repro. The old fill substituted it; the types said it never could.
+    expect(() => buildUrl('/api', '/v1/documents:batchGet', { batchGet: 'yes' })).toThrow(TypeError)
+    expect(() => buildUrl('/api', '/v1/documents:batchGet', { batchGet: 'yes' }))
+      .toThrow(/":batchGet" in path "\/v1\/documents:batchGet".*must start a path segment/)
+  })
+
+  it('refuses /time/12:30 with a param named 30, instead of building /time/12x', () => {
+    expect(() => buildUrl('/api', '/time/12:30', { 30: 'x' }, true))
+      .toThrow(/":30" in path "\/time\/12:30".*must start a path segment/)
+  })
+
+  it('refuses a mid-segment :name a param names, rather than moving the value to the query string', () => {
+    // `new Request` with explicit types was substituted before 5.2.1. Anchoring
+    // alone would have sent '/items/v:version?version=2' -- the value silently
+    // relocated. Refusing makes the one changed behaviour loud.
+    expect(() => buildUrl('/api', '/items/v:version', { version: '2' }, true)).toThrow(TypeError)
+    expect(() => buildUrl('/api', '/items/v:version', { version: '2' }, true))
+      .toThrow(/":version" in path "\/items\/v:version".*must start a path segment/)
+  })
+
+  it('refuses a mid-segment :name after a real token in the same segment', () => {
+    expect(() => buildUrl('/api', '/v1/operations/:name:cancel', { name: 'op1', cancel: true }))
+      .toThrow(/":cancel" in path/)
+  })
+})
+
+describe('a :name in the query string of a path template is refused', () => {
+  // A path template has no way to fill a query string, and after anchoring a
+  // '?:qs' would be sent as literal text. Refused whether or not a param has
+  // the name, because the template is wrong for every call.
+  it('refuses ?:qs without the param, instead of sending it as text', () => {
+    expect(() => buildUrl('/api', '/v2/simple/price?:qs', {}, true)).toThrow(TypeError)
+    expect(() => buildUrl('/api', '/v2/simple/price?:qs', {}, true))
+      .toThrow(/can't fill a query string: ":qs" in "\/v2\/simple\/price\?:qs"/)
+  })
+
+  it('refuses ?:qs with the param, instead of encoding it into a broken query', () => {
+    // The C9 repro: 'price?ids%3Dbitcoin%26vs_currencies%3Dusd'.
+    expect(() => buildUrl('/api', '/v2/simple/price?:qs', { qs: 'ids=bitcoin&vs_currencies=usd' }, true))
+      .toThrow(/can't fill a query string/)
+  })
+
+  it.each([
+    ['&:name', '/search?x=1&:sort'],
+    ['=:name', '/search?sort=:sort'],
+  ])('refuses %s', (_name, path) => {
+    expect(() => buildUrl('/api', path, {}, true)).toThrow(/can't fill a query string: ":sort"/)
+    expect(() => buildUrl('/api', path, { sort: 'asc' }, true)).toThrow(/can't fill a query string: ":sort"/)
+  })
+
+  it("points to defineRequest's second type argument, with the token names", () => {
+    expect(() => buildUrl('/api', '/v2/simple/price?ids=:ids&vs=:vs', {}, true))
+      .toThrow(/":ids", ":vs".*defineRequest's second type argument.*\{ ids: string; vs: string \}/)
+  })
+
+  it('still fills a token that starts a segment before the ?', () => {
+    expect(buildUrl('/api', '/search/:q?x=1', { q: 'hi', page: 2 }, true).url).toBe('/api/search/hi?x=1&page=2')
+  })
+
+  it('leaves a colon in a query value alone when it does not follow ?, & or =', () => {
+    expect(buildUrl('/api', '/events?at=12:30', {}, true).url).toBe('/api/events?at=12:30')
+  })
+
+  it('fills a :name right after a / even inside the query string, as the type reads it', () => {
+    expect(buildUrl('', '/login?next=/:id', { id: '7' }).url).toBe('/login?next=/7')
+  })
+
+  it('reads & and = before a colon as text in the path part, before any ?', () => {
+    // Only the query string is refused; a matrix-style '/a/x=:b' is a
+    // mid-segment colon like any other.
+    expect(() => buildUrl('/api', '/a/x=:b', {}, true)).not.toThrow()
+    expect(buildUrl('/api', '/a/x=:b', {}, true).url).toBe('/api/a/x=:b')
+    expect(() => buildUrl('/api', '/a/x=:b', { b: '1' }, true)).toThrow(/":b" in path.*must start a path segment/)
+  })
+})
+
+describe('the order of the path refusals', () => {
+  // A template mistake is wrong for every call, a per-call mistake only for
+  // this one, so the template mistakes are reported first: the fragment, then a
+  // :name in the query string. Among the per-call ones, a mid-segment :name
+  // comes first, because the fix is to the template and it may change which
+  // tokens there are.
+  it('reports a fragment before a :name in the query string', () => {
+    expect(() => buildUrl('/api', '/x?:qs#top', {}, true)).toThrow(/fragment/i)
+  })
+
+  it('reports a :name in the query string before an unfilled token', () => {
+    expect(() => buildUrl('/api', '/users/:id?:qs', {}, true)).toThrow(/can't fill a query string/)
+  })
+
+  it('reports a :name in the query string before an unusable value', () => {
+    expect(() => buildUrl('/api', '/users/:id?:qs', { id: undefined }, true)).toThrow(/can't fill a query string/)
+  })
+
+  it('reports a mid-segment :name before an unusable value or an unfilled token', () => {
+    expect(() => buildUrl('/api', '/a/v:version/:id/:org', { version: '2', id: undefined }, true))
+      .toThrow(/":version" in path.*must start a path segment/)
+  })
+})

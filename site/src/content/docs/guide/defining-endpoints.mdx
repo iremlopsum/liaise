@@ -13,7 +13,9 @@ The path `/orgs/:org/repos` names `org`, so every call must pass it, and its val
 
 ## Path params
 
-- **The path names the required params.** Each `:name` in the path becomes a required param of type `string | number`. Its value is filled into the URL and left out of the query string and the body.
+- **The path names the required params.** Each `:name` that starts a path segment becomes a required param of type `string | number`. Its value is filled into the URL and left out of the query string and the body.
+- **A colon anywhere else is plain text.** In `/v1/documents:batchGet` and `/time/12:30` the colon doesn't start a segment, so nothing is filled and the path is sent as written. A call that passes a param named after one, such as `batchGet`, is refused, so its value isn't sent somewhere you didn't put it. [Colons in a path](/reference/behaviour-in-detail/#colons-in-a-path) has the details.
+- **Query params go in the second type argument, not in the path.** A path can't fill a query string, so a `:name` after `?`, `&` or `=`, as in `/v2/simple/price?:qs`, is a compile error. Declare the params instead, as in [Query string or body](#query-string-or-body).
 - **A path param must have a usable value.** It must be a non-empty string, a finite number, a bigint or a boolean. `undefined`, `null`, `''`, an object, an array, a `Date` and `NaN` are refused before anything is sent, with an error naming the param.
 - That catches the most common mistake, which is calling before an id has loaded. An `org` that is still `undefined` at runtime returns an error with `kind: 'network'` instead of fetching `/orgs/undefined/repos`.
 - **A `#` in the path is a compile error.** A URL fragment is never sent to the server, so `path: '/docs#section'` is refused where you write it. [URL fragments](/reference/behaviour-in-detail/#url-fragments) has the details.

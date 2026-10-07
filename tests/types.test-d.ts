@@ -196,11 +196,14 @@ describe('defineRequest — the path parser', () => {
     // than tested. Note buildUrl produces a second '?' if the call also has
     // query params (BACKLOG §2.3); that is pre-existing and not this feature's.
     expectTypeOf<keyof PathParams<'/search/:q?x=1'>>().toEqualTypeOf<'q'>()
-    // A token must BEGIN a path segment, matching buildUrl's Phase 1b. A colon
-    // inside a segment — a Google-style custom method, or a time — is not a token.
+    // A token must BEGIN a path segment, matching buildUrl's Phase 1 and 1b. A
+    // colon inside a segment — a Google-style custom method, or a time — is not
+    // a token.
     expectTypeOf<keyof PathParams<'/v1/documents:batchGet'>>().toEqualTypeOf<never>()
     expectTypeOf<keyof PathParams<'/events/at/12:30'>>().toEqualTypeOf<never>()
     expectTypeOf<keyof PathParams<'/v1/docs:run/:id'>>().toEqualTypeOf<'id'>()
+    expectTypeOf<keyof PathParams<'/v1/operations/:name:cancel'>>().toEqualTypeOf<'name'>()
+    expectTypeOf<keyof PathParams<'/login?next=/:id'>>().toEqualTypeOf<'id'>()
     // ...but a token at character zero IS one: buildUrl's anchor is the start of
     // each split('/') segment, and segment 0 begins at index 0 whether or not the
     // path has a leading slash.
@@ -364,6 +367,49 @@ describe('defineRequest — the fragment guard', () => {
 
     const loose: RequestConfig = { method: 'GET', path: '/docs#section' }
     defineRequest<User>()({ ...loose, path: loose.path })
+  })
+})
+
+describe('defineRequest — the query-string token guard', () => {
+  // 5.2.1. A path template can't fill a query string: the runtime refuses
+  // '?:name', '&:name' and '=:name' after the '?', so the type refuses them too,
+  // the same way FragmentGuard keeps the type from accepting what the runtime
+  // refuses.
+  it('rejects ?:name in the path literal', () => {
+    // @ts-expect-error  a path template cannot fill a query string
+    defineRequest<User>()({ method: 'GET', path: '/v2/simple/price?:qs' })
+  })
+
+  it('rejects &:name and =:name', () => {
+    // @ts-expect-error  a :name after & is in the query string
+    defineRequest<User>()({ method: 'GET', path: '/search?x=1&:sort' })
+    // @ts-expect-error  a :name after = is in the query string
+    defineRequest<User>()({ method: 'GET', path: '/search?sort=:sort' })
+  })
+
+  it('accepts a fixed query string, a token before the ?, and a colon inside a query value', () => {
+    // The positive half: only a :name right after ?, & or = is refused.
+    defineRequest<User>()({ method: 'GET', path: '/search?x=1' })
+    defineRequest<User>()({ method: 'GET', path: '/events?at=12:30' })
+    defineRequest<User>()({ method: 'GET', path: '/search?x=:' })
+    // A :name right after a '/' is a path token wherever it is, as at runtime.
+    defineRequest<User>()({ method: 'GET', path: '/login?next=/:id' })
+    const search = defineRequest<User>()({ method: 'GET', path: '/search/:q?x=1' })
+    const searchApi = createApi({ baseUrl: '/api', requests: { search } })
+    searchApi.search({ q: 'hi' })
+    // @ts-expect-error  :q is still required, and still named q
+    searchApi.search({ query: 'hi' })
+  })
+
+  it('declares query params in the second type argument instead', () => {
+    const price = defineRequest<User, { ids: string; vs_currencies: string }>()({ method: 'GET', path: '/v2/simple/price' })
+    const priceApi = createApi({ baseUrl: '/api', requests: { price } })
+    priceApi.price({ ids: 'bitcoin', vs_currencies: 'usd' })
+  })
+
+  it('stays quiet for a path that is not a literal', () => {
+    const path: string = '/v2/simple/price?:qs'
+    defineRequest<User>()({ method: 'GET', path })
   })
 })
 

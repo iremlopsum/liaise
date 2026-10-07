@@ -132,6 +132,38 @@ await api.getDoc({ id: 'a#b' })   // GET /docs/a%23b
 await api.search({ tag: 'a#b' })  // GET /search?tag=a%23b
 ```
 
+## Colons in a path
+
+A `:name` is a path param only where it starts a path segment: at the start of the path, or right after a `/`. The same rule decides which params `defineRequest` infers and which ones a call fills. A colon anywhere else is text, and the path is sent as written:
+
+```ts
+type Job = { name: string; done: boolean }
+
+const cancel = defineRequest<Job>()({ method: 'POST', path: '/v1/operations/:name:cancel' })
+// api.cancel({ name: 'op1' })  →  POST /v1/operations/op1:cancel
+```
+
+Two shapes are refused. The call returns an error with `kind: 'network'` and a `TypeError` in `error.body` that says what to change, and nothing is sent.
+
+- **A param named after a colon that isn't a path param.** `/items/v:version` called with `{ version: '2' }` is refused. Otherwise `version` would quietly go to the query string or the body while the path kept the text `v:version`. Move the `:name` to the start of a segment, or leave the param out if the colon is meant as text. `error.request.url` is `baseUrl` plus the path template, as when a path param is missing.
+- **A `:name` in the path's query string**, right after `?`, `&` or `=`, as in `/v2/simple/price?:qs`. A path can't fill a query string, so this is refused on every call, whether or not you pass `qs`. `error.request.url` has the path params filled in and the `?:qs` left as written. Declare query params in the second type argument instead ([Query string or body](/guide/defining-endpoints/#query-string-or-body)).
+
+`defineRequest` also refuses a `:name` in the query string of a `path` literal, at compile time:
+
+```ts
+type Price = Record<string, { usd: number }>
+
+// @ts-expect-error
+defineRequest<Price>()({ method: 'GET', path: '/v2/simple/price?:qs' })
+//                                            ^ Property '__queryTokenInPath' is missing:
+//                                              a path can't fill a query string
+
+// The params go in the second type argument instead:
+defineRequest<Price, { ids: string; vs_currencies: string }>()({ method: 'GET', path: '/v2/simple/price' })
+```
+
+As with a fragment, the check reads the literal, and `new Request` has no compile-time check.
+
 ## Stream bodies
 
 A `ReadableStream` body is used up as it is sent, so liaise can't send it again. A second attempt, from `retryMiddleware` or `result.retry()`, returns `kind: 'network'` and `status: 0`, with a `TypeError` that tells you to read the stream into a `Blob` or `ArrayBuffer` first. Under `retryMiddleware` that error is the final `Result`, so the 5xx that caused the retry isn't in it.

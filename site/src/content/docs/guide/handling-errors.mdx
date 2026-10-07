@@ -34,10 +34,11 @@ Plain `fetch` reports failures three different ways. A 500 resolves like a succe
 liaise refuses to send a call it can't build correctly, and reports it as `'network'` with `status: 0`, the same as being offline. These are bugs in the calling code, not outages:
 
 - a path param that is `undefined`, `null`, `''`, an object or `NaN` ([Path params](/guide/defining-endpoints/#path-params))
+- a `:name` the path can't fill: one in the path's query string, or a param named after a colon in the middle of a segment ([Colons in a path](/reference/behaviour-in-detail/#colons-in-a-path))
 - a nested object or a `Date` in the query string ([Sending data](/guide/sending-data/))
 - params of a type liaise can't send, such as a `Set`
 
-The example above would tell the user "You're offline" for any of them. Only the message tells them apart: `error.body` holds a `TypeError`, and for a refused call its message names the param and ends in "so the call was not sent". `fetch` failing offline gives a `TypeError` too, such as "Failed to fetch" in Chrome or "fetch failed" in Node.
+The example above would tell the user "You're offline" for any of them. Only the message tells them apart: `error.body` holds a `TypeError`, and for a refused call its message says what liaise refused and what to change. `fetch` failing offline gives a `TypeError` too, such as "Failed to fetch" in Chrome or "fetch failed" in Node.
 
 - **TypeScript catches most of these first.** A param typed `id: string` can't be `undefined` without a cast or an `any`.
 - **Log `error.body` for every `'network'` error**, at least in development, so a bug doesn't hide behind the offline message.

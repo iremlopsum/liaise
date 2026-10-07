@@ -350,3 +350,39 @@ describe('error.request.url when a middleware rethrows the signal reason', () =>
     expect(r.error?.request.url).toBe('https://api.test/users/42')
   })
 })
+
+describe('error.request.url for a :name that cannot be a path token', () => {
+  // 5.2.1 refuses two shapes the fill used to substitute. Each reports the URL
+  // the same way as the refusal it sits next to in buildUrl.
+  afterEach(() => { vi.restoreAllMocks() })
+
+  it('names the substituted URL for a :name in the query string, as a fragment does', async () => {
+    // A template mistake: substitution worked, only the query string is wrong,
+    // so the report names the URL the call was for, with ':qs' where it was
+    // written, instead of the raw '/coins/:id/price?:qs'.
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('{}', { status: 200 })))
+    const api = createApi({
+      baseUrl: 'https://api.test',
+      requests: { price: new Request<{ id: string; qs: string }, unknown>({ method: 'GET', path: '/coins/:id/price?:qs' }) },
+    })
+    const r = await api.price({ id: 'btc', qs: 'vs=usd' })
+
+    expect(r.error?.request.url).toBe('https://api.test/coins/btc/price?:qs')
+    // The message names the template, what to edit; the URL names what was called.
+    expect(String(r.error?.body)).toContain('"/coins/:id/price?:qs"')
+  })
+
+  it('names the template for a mid-segment :name, as an unfilled token does', async () => {
+    // A per-call refusal: buildUrl threw before a URL existed, so the template
+    // is the honest answer, same as '/users/:id' for a missing id.
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('{}', { status: 200 })))
+    const api = createApi({
+      baseUrl: 'https://api.test',
+      requests: { getItem: new Request<{ id: string; version: string }, unknown>({ method: 'GET', path: '/items/:id/v:version' }) },
+    })
+    const r = await api.getItem({ id: '7', version: '2' })
+
+    expect(r.error?.kind).toBe('network')
+    expect(r.error?.request.url).toBe('https://api.test/items/:id/v:version')
+  })
+})

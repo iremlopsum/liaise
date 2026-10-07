@@ -5,7 +5,8 @@
 // This utility handles the URL construction pipeline:
 //
 // 1. Start with a base URL and a path template (e.g., '/api' + '/items/:id')
-// 2. Scan the params object for keys that match `:param` tokens in the path
+// 2. Find the `:param` tokens in the path -- a `:name` that starts a path
+//    segment -- and look each one up in the params object
 // 3. Replace matched tokens with URI-encoded values
 // 4. Separate consumed (path) params from remaining params
 // 5. Optionally serialize remaining params as a query string
@@ -130,15 +131,23 @@ function splitFragment(value: string): [rest: string, fragment: string] {
 }
 
 /**
- * The `TypeError` `buildUrl` throws for a URL fragment, carrying the URL the
+ * The `TypeError` `buildUrl` throws for a mistake in the template itself — a
+ * URL fragment, or a `:name` in the path's query string — carrying the URL the
  * request would have used.
  *
- * A thrown error cannot return a value, and the fragment refusal is the one
- * failure where a useful URL still exists: substitution would have worked
- * perfectly: only the fragment is wrong. Without this, `urlForError` had
- * nothing to report but the raw template, so `error.request.url` came back as
- * `/users/:id#f` — the same `:id`-in-telemetry defect 4.0.2 removed from the
- * middleware path (BACKLOG §2.7, fixed 4.4.1).
+ * A thrown error cannot return a value, and these two refusals are the
+ * failures where a useful URL still exists: substitution would have worked
+ * perfectly: only the fragment, or the query string, is wrong. Without this,
+ * `urlForError` had nothing to report but the raw template, so
+ * `error.request.url` came back as `/users/:id#f` — the same
+ * `:id`-in-telemetry defect 4.0.2 removed from the middleware path (BACKLOG
+ * §2.7, fixed 4.4.1). It was `FragmentError` until 5.2.1 added the query-string
+ * refusal, which has the same shape and the same reason to carry a URL.
+ *
+ * The per-call refusals (an unusable value, an unfilled token, a mid-segment
+ * `:name` a param names) throw a plain `TypeError`, and `urlForError` reports
+ * the template for them: this call's params did not make a URL, so there is
+ * none to name.
  *
  * It extends `TypeError` rather than replacing it so nothing else has to
  * change: `name` stays `'TypeError'`, `String(err)` is byte-identical, and
@@ -146,7 +155,7 @@ function splitFragment(value: string): [rest: string, fragment: string] {
  * Deliberately NOT exported from `src/index.ts` — consumers read
  * `error.request.url`, not this.
  */
-export class FragmentError extends TypeError {
+export class TemplateError extends TypeError {
   constructor(message: string, readonly resolvedUrl: string) {
     super(message)
   }
@@ -184,10 +193,22 @@ function unusableSegment(value: unknown): string | null {
  *
  * **Path param matching** scans the template once for `:name` tokens
  * (`[a-zA-Z0-9_]+`, greedy), so a param key `id` fills `:id` but never part of
- * `:idExtra`. A token is filled only from a non-empty string, a finite number,
+ * `:idExtra`. A `:name` is a token only where it STARTS a path segment — at
+ * the start of the path or right after a `/` — which is the same rule the
+ * `PathParams` type and the unresolved-token check use. A colon anywhere else
+ * is text: `/v1/documents:batchGet` and `/time/12:30` are sent as written.
+ * A token is filled only from a non-empty string, a finite number,
  * a bigint or a boolean; `undefined`, `null`, `''`, objects, arrays and Dates
  * throw a TypeError naming the param, so a call is never sent to
  * '/users/undefined'.
+ *
+ * **Refused templates.** Every refusal is a TypeError, which `execute()` turns
+ * into a `'network'` Result, so nothing is sent. Two are mistakes in the
+ * template, wrong for every call: a URL fragment, and a `:name` in the path's
+ * query string (`?:name`, `&:name`, `=:name`). Three depend on this call's
+ * params: a mid-segment `:name` that a param names (`/items/v:version` with
+ * `{ version }`), a value that cannot make a segment, and a token no param
+ * fills. The template mistakes are reported first.
  *
  * **Query string rules** (when `asQuery` is true):
  * - Primitives: `{ page: 1 }` → `?page=1`
@@ -240,18 +261,77 @@ export function buildUrl(baseUrl: string, path: string, params: Record<string, u
 
   let resolvedPath = path
   const remaining: Record<string, unknown> = {}
+  const lookup = new Map(Object.entries(params))
+
+  // -------------------------------------------------------------------------
+  // Phase 0a: Find every `:name` that does NOT start a path segment
+  // -------------------------------------------------------------------------
+  // Phase 1 fills a `:name` only at the start of a segment, so every other one
+  // is sent as text. That is right for a colon that is part of the resource
+  // ('/v1/documents:batchGet', '/time/12:30'), and wrong in two cases, which
+  // are found here and thrown later, each in its precedence slot:
+  //
+  // - A `:name` right after the '?', a '&' or a '=' in the template's query
+  //   string ('/price?:qs', '/search?sort=:sort'). A path template has no way
+  //   to fill a query string, and sending ':qs' as text is never what the
+  //   template meant. Refused whether or not a param has the name: the
+  //   template is wrong for every call (thrown in Phase 0c).
+  // - Any other mid-segment `:name` that a param of this call NAMES
+  //   ('/items/v:version' with { version: '2' }). Before 5.2.1 the fill was
+  //   unanchored and substituted it, and an explicit `new Request` type could
+  //   ask for exactly that. Anchoring alone would quietly move the value to the
+  //   query string or the body instead; refusing makes the one behaviour the
+  //   anchor changes loud (thrown in Phase 1b). With no param of that name the
+  //   colon is literal text and nothing is said.
+  //
+  // The scan uses the token grammar Phase 1 uses, unanchored, and reads the
+  // character before each match through its index. A lookbehind would say the
+  // same thing in the regex, and is banned for the reason Phase 1b gives. An
+  // index of 0 (`path[-1]` is undefined) counts as a segment start, as `^`
+  // does in Phase 1's pattern. The query string starts after the template's
+  // first '?', so a '&' or '=' before it ('/a/x=:b') is mid-segment text like
+  // any other. A `:name` right after a '/' is a token wherever it sits, even
+  // in the query string ('?next=/:id'): the type and Phase 1b read it that
+  // way too, so it is filled, not refused.
+  // -------------------------------------------------------------------------
+  const queryAt = path.indexOf('?')
+  const inQuery: string[] = []
+  const midSegment: string[] = []
+  const anyToken = /:([a-zA-Z0-9_]+)/g
+  for (let match = anyToken.exec(path); match; match = anyToken.exec(path)) {
+    const at = match.index
+    const before = path[at - 1] ?? '/'
+    const name = match[1]
+    const found = before === '/' ? null
+      : queryAt >= 0 && at > queryAt && '?&='.includes(before) ? inQuery
+      : lookup.has(name) ? midSegment : null
+    // Record once per name: a repeated `:name` is one mistake.
+    if (found && !found.includes(name)) found.push(name)
+  }
 
   // -------------------------------------------------------------------------
   // Phase 1: Path parameter substitution
   // -------------------------------------------------------------------------
-  // Scan the template once for `:name` tokens and look each up in params.
-  // Before 5.0.1 this built a RegExp from every param KEY, unescaped, so a key
-  // like 'a.b' (where '.' matches any character) could substitute the token
-  // ':aXb'. The token grammar is the one define-request.ts's type-level parser
-  // uses: [a-zA-Z0-9_]+, matched greedily, so ':id' never matches inside
-  // ':idExtra'. A repeated token ('/orgs/:id/members/:id') is substituted at
-  // every occurrence. encodeURIComponent escapes ':' to '%3A', so a value can
-  // never produce a token of its own.
+  // Scan the template once for `:name` tokens that START a path segment, and
+  // look each up in params. Before 5.0.1 this built a RegExp from every param
+  // KEY, unescaped, so a key like 'a.b' (where '.' matches any character) could
+  // substitute the token ':aXb'. The token grammar is the one
+  // define-request.ts's type-level parser uses: [a-zA-Z0-9_]+, matched
+  // greedily, so ':id' never matches inside ':idExtra'. A repeated token
+  // ('/orgs/:id/members/:id') is substituted at every occurrence.
+  // encodeURIComponent escapes ':' to '%3A', so a value can never produce a
+  // token of its own.
+  //
+  // Anchored since 5.2.1: `(^|\/)` before the colon, re-emitted as `start` in
+  // front of the value, so the anchor is a capture and not a lookbehind. Until
+  // then this scan matched a `:name` anywhere, while the `PathParams` type and
+  // Phase 1b's unresolved-token check only counted one at the start of a
+  // segment, and the three disagreed: '/v1/documents:batchGet' with
+  // { batchGet: 'yes' } built '/v1/documentsyes', a URL the type said could
+  // not exist, and '/price?:qs' typed as {} but encoded any `qs` it was given
+  // into a broken query string. Now one rule serves all three. The anchor
+  // consumes only the '/' in front of its own colon, and a name never contains
+  // a '/', so back-to-back tokens ('/:a/:b') each still find theirs.
   // -------------------------------------------------------------------------
   //
   // A token is filled only from a value that makes a real segment (see
@@ -260,10 +340,9 @@ export function buildUrl(baseUrl: string, path: string, params: Record<string, u
   // component-rendered-before-the-id-loaded bug. A bad value is recorded here
   // and thrown after Phase 0b, so a fragment still wins when both are wrong.
   // -------------------------------------------------------------------------
-  const lookup = new Map(Object.entries(params))
   const consumed = new Set<string>()
   const unusable: string[] = []
-  resolvedPath = resolvedPath.replace(/:([a-zA-Z0-9_]+)/g, (token: string, name: string) => {
+  resolvedPath = resolvedPath.replace(/(^|\/):([a-zA-Z0-9_]+)/g, (token: string, start: string, name: string) => {
     if (!lookup.has(name)) return token
     consumed.add(name)
     const value = lookup.get(name)
@@ -273,7 +352,7 @@ export function buildUrl(baseUrl: string, path: string, params: Record<string, u
       if (!unusable.some(entry => entry.startsWith(`"${name}"`))) unusable.push(`"${name}" is ${problem}`)
       return token
     }
-    return encodeURIComponent(String(value))
+    return start + encodeURIComponent(String(value))
   })
   for (const [key, value] of lookup) {
     if (!consumed.has(key)) remaining[key] = value
@@ -294,7 +373,7 @@ export function buildUrl(baseUrl: string, path: string, params: Record<string, u
   // -------------------------------------------------------------------------
   if (fragmentIn) {
     const fragment = fragmentIn.value.slice(fragmentIn.value.indexOf('#'))
-    throw new FragmentError(
+    throw new TemplateError(
       `A URL fragment is never sent to the server, so it cannot appear in a ${fragmentIn.where}. ` +
       `Remove "${fragment}" from "${fragmentIn.value}".`,
       joinUrl(baseUrl, resolvedPath)
@@ -302,11 +381,47 @@ export function buildUrl(baseUrl: string, path: string, params: Record<string, u
   }
 
   // -------------------------------------------------------------------------
-  // Phase 1b: Reject any :token that no param filled in
+  // Phase 0c: Throw the query-string refusal found in Phase 0a
   // -------------------------------------------------------------------------
-  // A mismatch between the path template and the params type would otherwise
-  // ship the literal token in the URL AND duplicate the value as a query
-  // param — a silently wrong request that looks plausible in a network tab.
+  // The second template mistake, so it goes right after the first: after the
+  // fragment, which is the older refusal and also wrong for every call, and
+  // before Phase 1b, whose refusals depend on this call's params. Thrown as a
+  // `TemplateError` for the fragment's reason: substitution ran, so the report
+  // names the URL the call was for, with the `:name` text where the template
+  // put it ('/coins/btc/price?:qs', not '/coins/:id/price?:qs'). Moving this
+  // below Phase 1b would flip the order; there is a test for it.
+  //
+  // The message points to where query params belong — the params type, which
+  // `defineRequest` takes as its second type argument — and builds the example
+  // from the names the template used.
+  // -------------------------------------------------------------------------
+  if (inQuery.length > 0) {
+    throw new TemplateError(
+      `A path template can't fill a query string: ${inQuery.map(name => `":${name}"`).join(', ')} in "${path}". ` +
+      "Declare query params in defineRequest's second type argument, " +
+      `e.g. defineRequest<TResponse, { ${inQuery.map(name => `${name}: string`).join('; ')} }>().`,
+      joinUrl(baseUrl, resolvedPath)
+    )
+  }
+
+  // -------------------------------------------------------------------------
+  // Phase 1b: Reject the per-call mistakes
+  // -------------------------------------------------------------------------
+  // Three of them, in this order:
+  //
+  // 1. A mid-segment `:name` a param names (found in Phase 0a). First, because
+  //    the fix is to the template, and moving the `:name` to the start of a
+  //    segment can change which tokens there are, so the other two would be
+  //    about a template that is about to change.
+  // 2. A param that was provided but cannot make a segment. More specific than
+  //    "unresolved", which it would otherwise also trip, since its token was
+  //    left in place.
+  // 3. A token no param filled.
+  //
+  // For (3): a mismatch between the path template and the params type would
+  // otherwise ship the literal token in the URL AND duplicate the value as a
+  // query param — a silently wrong request that looks plausible in a network
+  // tab.
   //
   // Substitution above scans the template for tokens using the documented
   // grammar `[a-zA-Z0-9_]` (including one starting with a digit, e.g. `:2fa`),
@@ -316,7 +431,9 @@ export function buildUrl(baseUrl: string, path: string, params: Record<string, u
   // A token must BEGIN a path segment. Splitting on '/' and anchoring the
   // match to the start of each segment expresses that without a lookbehind:
   // a colon appearing mid-segment (a time like `12:30`, a port embedded in a
-  // path) is never mistaken for a token because it is not at index 0.
+  // path) is never mistaken for a token because it is not at index 0. Phase 1
+  // anchors the same way since 5.2.1 (`(^|\/)`, a capture), so the tokens it
+  // fills and the tokens this checks are the same set.
   //
   // Lookbehind is avoided deliberately. It is the only construct here that
   // some supported runtimes lack (Safari below 16.4), and an unsupported
@@ -324,9 +441,13 @@ export function buildUrl(baseUrl: string, path: string, params: Record<string, u
   // module rather than fail on the one call that used it. For a library whose
   // first promise is "runtime-agnostic", that trade is not worth one regex.
   // -------------------------------------------------------------------------
-  // A param that was provided but cannot make a segment is the more specific
-  // mistake, so it is reported before "unresolved" (which it would otherwise
-  // also trip, since its token was left in place).
+  if (midSegment.length > 0) {
+    throw new TypeError(
+      `${midSegment.map(name => `":${name}"`).join(', ')} in path "${path}" can't be filled: a :name must start a ` +
+      'path segment. Move it there, or leave out the param of that name.'
+    )
+  }
+
   if (unusable.length > 0) {
     throw new TypeError(
       `Path parameter ${unusable.join(', ')} in path "${path}", so the call was not sent. ` +

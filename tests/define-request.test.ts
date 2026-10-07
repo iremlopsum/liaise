@@ -10,7 +10,7 @@ import { vi, afterEach } from 'vitest'
  * tests/types.test-d.ts, which pins the same key sets at compile time).
  *
  * buildUrl ends a token at the first character outside [a-zA-Z0-9_]
- * (src/utils/path-params.ts, the `:${key}(?=[^a-zA-Z0-9_]|$)` pattern). A
+ * (src/utils/path-params.ts, the `(^|\/):([a-zA-Z0-9_]+)` pattern). A
  * type-level parser that split on '/' instead would infer `id.json` for
  * `/users/:id.json`; the consumer would then pass a key buildUrl cannot
  * substitute, `:id` would survive, and buildUrl THROWS on a leftover token.
@@ -26,12 +26,14 @@ const cases: Array<[path: string, params: Record<string, string | number>, url: 
   ['/users/:id_v2',           { id_v2: 9 },                        '/users/9'],
   ['/a/:one/b/:two/c/:three', { one: 1, two: 2, three: 3 },        '/a/1/b/2/c/3'],
   ['/search/:q?x=1',          { q: 'hi' },                         '/search/hi?x=1'],
-  // A token must BEGIN a path segment, matching buildUrl's Phase 1b. A colon
-  // mid-segment — a Google-style custom method, or a time — is not a token,
-  // so the path is returned unchanged and the params are NOT consumed.
+  // A token must BEGIN a path segment, matching buildUrl's Phase 1 and 1b. A
+  // colon mid-segment — a Google-style custom method, or a time — is not a
+  // token, so the path is returned unchanged. (A param named after one is
+  // refused instead: tests/path-params.test.ts.)
   ['/v1/documents:batchGet',  {},                                  '/v1/documents:batchGet'],
   ['/events/at/12:30',        {},                                  '/events/at/12:30'],
   ['/v1/docs:run/:id',        { id: 7 },                           '/v1/docs:run/7'],
+  ['/v1/operations/:name:cancel', { name: 'op1' },                 '/v1/operations/op1:cancel'],
   // A token at character zero, with no leading slash. buildUrl splits on '/' and
   // segment 0 begins at index 0, so this IS a token to the runtime — and the type
   // must agree. It did not in 4.1.0 for the first two: the anchor added there
