@@ -27,7 +27,7 @@ const runnable = Object.fromEntries(await Promise.all(SCENARIOS.map(async (s) =>
   <div class="flex items-center gap-1 overflow-x-auto border-b border-white/[0.07] px-3 pt-2.5" role="tablist" aria-label="Examples">
     {SCENARIOS.map((s, i) => (
       <button type="button" role="tab" data-id={s.id} aria-selected={i === 0 ? 'true' : 'false'}
-        class="shrink-0 rounded-t-lg px-3 py-2 text-[13px] font-medium text-gray-500 transition hover:text-gray-300 aria-selected:bg-white/[0.06] aria-selected:text-white aria-selected:shadow-[inset_0_-2px_0_var(--accent)]">{s.label}</button>
+        class="shrink-0 rounded-t-lg px-3 py-2 text-[13px] font-medium text-gray-400 transition hover:text-gray-300 aria-selected:bg-white/[0.06] aria-selected:text-white aria-selected:shadow-[inset_0_-2px_0_var(--accent)]">{s.label}</button>
     ))}
   </div>
 
@@ -45,13 +45,13 @@ const runnable = Object.fromEntries(await Promise.all(SCENARIOS.map(async (s) =>
     <!-- Output -->
     <div class="flex h-[22rem] min-w-0 flex-col border-t border-white/[0.07] lg:h-auto lg:border-t-0 lg:border-l">
       <div class="flex items-center justify-between px-4 pt-3.5 pb-2">
-        <h3 class="text-[11px] font-medium tracking-wider text-gray-500 uppercase">Network</h3>
-        <span data-net-count class="font-mono text-[11px] text-gray-500"></span>
+        <h2 class="text-[11px] font-medium tracking-wider text-gray-400 uppercase">Network</h2>
+        <span data-net-count class="font-mono text-[11px] text-gray-400"></span>
       </div>
       <ul data-net class="max-h-[45%] space-y-px overflow-y-auto px-2 font-mono text-[12px]"></ul>
       <p data-cors hidden class="px-4 pt-1.5 text-[11px] leading-4 text-amber-300/80">Requests to other sites fail like this when you’re offline, the URL is wrong, or the site doesn’t allow cross-origin requests (CORS).</p>
       <div class="mt-2 flex items-center justify-between border-t border-white/[0.07] px-4 pt-3.5 pb-2">
-        <h3 class="text-[11px] font-medium tracking-wider text-gray-500 uppercase">Console</h3>
+        <h2 class="text-[11px] font-medium tracking-wider text-gray-400 uppercase">Console</h2>
       </div>
       <ol data-console class="flex-1 space-y-1.5 overflow-y-auto px-4 pb-4 font-mono text-[12px] leading-5"></ol>
     </div>
@@ -61,8 +61,8 @@ const runnable = Object.fromEntries(await Promise.all(SCENARIOS.map(async (s) =>
   <div class="flex flex-col gap-3 border-t border-white/[0.07] px-4 py-3 sm:flex-row sm:items-center">
     <p data-hint class="flex-1 text-[13px] leading-5 text-gray-400">{SCENARIOS[0].hint}</p>
     <div class="flex shrink-0 items-center gap-3">
-      <span class="hidden font-mono text-[11px] text-gray-500 md:inline">Ctrl+Space or ⌘I for suggestions · ⌘↵ to run or stop</span>
-      <span class="text-[12px] text-gray-500 md:hidden">Editing works on a larger screen.</span>
+      <span class="hidden font-mono text-[11px] text-gray-400 md:inline">Ctrl+Space or ⌘I for suggestions · ⌘↵ to run or stop</span>
+      <span class="text-[12px] text-gray-400 md:hidden">Editing works on a larger screen.</span>
       <button type="button" data-run data-state="run" class="group inline-flex w-[5.5rem] items-center justify-center gap-2 rounded-full bg-white py-1.5 text-[13px] font-semibold text-gray-950 transition hover:bg-gray-200">
         <svg viewBox="0 0 12 12" class="size-3 fill-current group-data-[state=stop]:hidden" aria-hidden="true"><path d="M3 1.8v8.4a.6.6 0 0 0 .9.52l7-4.2a.6.6 0 0 0 0-1.04l-7-4.2A.6.6 0 0 0 3 1.8Z"/></svg>
         <svg viewBox="0 0 12 12" class="hidden size-3 fill-current group-data-[state=stop]:block" aria-hidden="true"><rect x="2" y="2" width="8" height="8" rx="1.2"/></svg>
@@ -112,13 +112,13 @@ const runnable = Object.fromEntries(await Promise.all(SCENARIOS.map(async (s) =>
     // A row's outcome: a status, or how it failed ('network' is a real request that never got an answer).
     type RowOutcome = Outcome | 'network'
     const statusClass = (o: RowOutcome) =>
-      o === 'cancelled' ? 'text-gray-500 line-through decoration-gray-600' :
+      o === 'cancelled' ? 'text-gray-400 line-through decoration-gray-600' :
       o === 'offline' || o === 'network' ? 'text-rose-400' : o >= 500 ? 'text-rose-400' : o >= 400 ? 'text-amber-300' : 'text-emerald-400'
     function addRow(method: string, where: string, operation?: string) {
       const li = document.createElement('li')
       li.className = 'flex items-center gap-2 rounded-md px-2 py-1 hover:bg-white/[0.03]'
-      const op = operation ? ` <span class="text-gray-500">(${esc(operation)})</span>` : ''
-      li.innerHTML = `<span class="w-9 text-gray-500">${esc(method)}</span><span class="min-w-0 flex-1 truncate text-gray-200">${esc(where)}${op}</span><span data-o class="text-gray-500">…</span><span data-ms class="w-14 text-right text-gray-600"></span>`
+      const op = operation ? ` <span class="text-gray-400">(${esc(operation)})</span>` : ''
+      li.innerHTML = `<span class="w-9 text-gray-400">${esc(method)}</span><span class="min-w-0 flex-1 truncate text-gray-200">${esc(where)}${op}</span><span data-o class="text-gray-400">…</span><span data-ms class="w-14 text-right text-gray-400"></span>`
       net.append(li); count.textContent = `${net.children.length} request${net.children.length === 1 ? '' : 's'}`
       net.scrollTop = net.scrollHeight
       return li
@@ -138,7 +138,7 @@ const runnable = Object.fromEntries(await Promise.all(SCENARIOS.map(async (s) =>
     const print = (args: unknown[], tone = 'text-gray-200') => {
       const li = document.createElement('li')
       li.className = 'flex gap-3'
-      li.innerHTML = `<span class="shrink-0 whitespace-pre text-gray-600">${stamp()}</span><span class="min-w-0 break-words ${tone}">${esc(args.map(fmt).join(' '))}</span>`
+      li.innerHTML = `<span class="shrink-0 whitespace-pre text-gray-400">${stamp()}</span><span class="min-w-0 break-words ${tone}">${esc(args.map(fmt).join(' '))}</span>`
       out.append(li); out.scrollTop = out.scrollHeight
     }
 

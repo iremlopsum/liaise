@@ -106,4 +106,41 @@ describe('front page', () => {
     expect(urls).toContain('/guide/handling-errors/')
     expect(urls).not.toContain('/')
   })
+  describe('meta', () => {
+    const pages = () => distFiles(/\.html$/).filter(f => !f.startsWith('pagefind/'))
+    it('every page has a unique title and a description', () => {
+      const titles = new Map<string, string>()
+      for (const f of pages()) {
+        const html = readFileSync(dist(f), 'utf8')
+        const title = html.match(/<title>([^<]+)<\/title>/)?.[1]
+        expect(title, `${f} title`).toBeTruthy()
+        expect(titles.get(title!), `${f} repeats the title of ${titles.get(title!)}`).toBeUndefined()
+        titles.set(title!, f)
+        expect(html, `${f} description`).toMatch(/<meta name="description" content="[^"]{20,}"/)
+      }
+    })
+    it('every page carries absolute Open Graph tags that point at the base', () => {
+      for (const f of pages()) {
+        const html = readFileSync(dist(f), 'utf8')
+        expect(html, f).toContain('<meta property="og:image" content="https://iremlopsum.github.io/liaise/og.png"')
+        expect(html, f).toMatch(/<meta property="og:url" content="https:\/\/iremlopsum\.github\.io\/liaise\/[^"]*"/)
+        expect(html, f).toMatch(/<meta property="og:title" content="[^"]+"/)
+        expect(html, f).toMatch(/<meta property="og:description" content="[^"]+"/)
+        expect(html, f).toContain('<meta name="twitter:card" content="summary_large_image"')
+      }
+    })
+    it('ships a 1200x630 PNG for og:image', () => {
+      const png = readFileSync(dist('og.png'))
+      expect(png.subarray(1, 4).toString()).toBe('PNG')
+      expect([png.readUInt32BE(16), png.readUInt32BE(20)]).toEqual([1200, 630])
+    })
+    it('lists the docs pages in the sitemap, under the base', () => {
+      const index = readFileSync(dist('sitemap-index.xml'), 'utf8')
+      expect(index).toContain('https://iremlopsum.github.io/liaise/sitemap-0.xml')
+      const map = readFileSync(dist('sitemap-0.xml'), 'utf8')
+      expect(map).toContain('<loc>https://iremlopsum.github.io/liaise/guide/handling-errors/</loc>')
+      expect(map).toContain('<loc>https://iremlopsum.github.io/liaise/compare/</loc>')
+      expect(map).not.toContain('/404')
+    })
+  })
 })

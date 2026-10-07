@@ -2,6 +2,7 @@
 import { defineConfig } from 'astro/config'
 import tailwindcss from '@tailwindcss/vite'
 import mdx from '@astrojs/mdx'
+import sitemap from '@astrojs/sitemap'
 import { fileURLToPath } from 'node:url'
 
 import rehypeBaseLinks from './plugins/rehype-base-links.mjs'
@@ -12,7 +13,7 @@ export default defineConfig({
   site: 'https://iremlopsum.github.io',
   base: '/liaise',
   output: 'static',
-  integrations: [mdx()],
+  integrations: [mdx(), sitemap({ filter: (page) => !page.endsWith('/404/') })],
   trailingSlash: 'always',
   vite: {
     // monacoCssWithEditor: the editor's CSS loads with the editor, not in every playground page's <head>.

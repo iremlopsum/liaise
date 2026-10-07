@@ -67,18 +67,18 @@ const editUrl = `https://github.com/iremlopsum/liaise/edit/main/site/src/content
         <div class="grid gap-3 sm:grid-cols-2">
           {prev ? (
             <a href={prev.href} class="group rounded-xl px-4 py-3 ring-1 ring-gray-950/[0.07] transition hover:ring-gray-950/20 dark:ring-white/10 dark:hover:ring-white/25">
-              <span class="text-xs text-gray-500">Previous</span>
+              <span class="text-xs text-gray-500 dark:text-gray-400">Previous</span>
               <span class="mt-0.5 block text-sm font-medium group-hover:text-accent">← {prev.title}</span>
             </a>
           ) : <span />}
           {next && (
             <a href={next.href} class="group rounded-xl px-4 py-3 text-right ring-1 ring-gray-950/[0.07] transition hover:ring-gray-950/20 dark:ring-white/10 dark:hover:ring-white/25">
-              <span class="text-xs text-gray-500">Next</span>
+              <span class="text-xs text-gray-500 dark:text-gray-400">Next</span>
               <span class="mt-0.5 block text-sm font-medium group-hover:text-accent">{next.title} →</span>
             </a>
           )}
         </div>
-        <div class="mt-10 flex items-center justify-between border-t border-gray-950/5 pt-6 text-[13px] text-gray-500 dark:border-white/10">
+        <div class="mt-10 flex items-center justify-between border-t border-gray-950/5 pt-6 text-[13px] text-gray-500 dark:text-gray-400 dark:border-white/10">
           <a href={editUrl} class="hover:text-gray-950 dark:hover:text-white">Edit this page on GitHub</a>
           <span>liaise {pkg.version} · MIT</span>
         </div>

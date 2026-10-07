@@ -41,7 +41,7 @@ const code = (s: string) => s.replace(/`([^`]+)`/g, '<code class="rounded-md bg-
           <a href={url('/start/quick-start/')} class="rounded-full bg-gray-950 px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-gray-800 dark:bg-white dark:text-gray-950 dark:hover:bg-gray-200">Get started</a>
           <button data-copy-install class="group inline-flex items-center gap-3 rounded-full px-4 py-2.5 font-mono text-[13px] text-gray-700 ring-1 ring-gray-950/10 ring-inset transition hover:ring-gray-950/20 dark:text-gray-300 dark:ring-white/10 dark:hover:ring-white/20">
             <span><span class="text-gray-400 select-none">$ </span>npm install liaise</span>
-            <span data-label class="font-sans text-[12px] text-gray-400 group-hover:text-gray-600 dark:group-hover:text-gray-300">Copy</span>
+            <span data-label class="font-sans text-[12px] text-gray-500 dark:text-gray-400 group-hover:text-gray-600 dark:group-hover:text-gray-300">Copy</span>
           </button>
         </div>
       </div>
@@ -49,7 +49,7 @@ const code = (s: string) => s.replace(/`([^`]+)`/g, '<code class="rounded-md bg-
       <div class="mt-14 sm:mt-16">
         <div class="mb-3 flex items-baseline justify-between gap-4">
           <p class="text-[13px] font-medium text-gray-950 dark:text-white">Try it. This is the real library, running in your browser against a fake API.</p>
-          <p class="hidden text-[13px] text-gray-500 md:block">Edit anything, then press Run.</p>
+          <p class="hidden text-[13px] text-gray-500 dark:text-gray-400 md:block">Edit anything, then press Run.</p>
         </div>
         <Playground />
       </div>
@@ -61,21 +61,21 @@ const code = (s: string) => s.replace(/`([^`]+)`/g, '<code class="rounded-md bg-
         <p class="mt-2 text-3xl font-semibold tracking-tight text-balance sm:text-4xl">The parts every project ends up writing around fetch.</p>
       </div>
       <div class="mt-12 divide-y divide-gray-950/[0.07] border-y border-gray-950/[0.07] dark:divide-white/10 dark:border-white/10">
-        <div class="hidden grid-cols-[1fr_1fr_6rem] gap-10 py-3 text-[12px] font-medium tracking-wide text-gray-500 uppercase md:grid">
+        <div class="hidden grid-cols-[1fr_1fr_6rem] gap-10 py-3 text-[12px] font-medium tracking-wide text-gray-500 dark:text-gray-400 uppercase md:grid">
           <span>With plain fetch</span><span>With liaise</span><span></span>
         </div>
         {problems.map(([pain, fix, href]) => (
           <a href={url(href)} data-problem class="group grid gap-2 py-6 md:grid-cols-[1fr_1fr_6rem] md:gap-10">
             <p class="text-[15px] leading-7 text-gray-600 dark:text-gray-400">{pain}</p>
             <p class="text-[15px] leading-7 text-gray-950 dark:text-white" set:html={code(fix)} />
-            <span class="text-[13px] font-medium text-gray-400 transition group-hover:text-accent md:text-right">Read →</span>
+            <span class="text-[13px] font-medium text-gray-500 transition dark:text-gray-400 group-hover:text-accent md:text-right">Read →</span>
           </a>
         ))}
       </div>
     </section>
 
     <footer class="border-t border-gray-950/5 dark:border-white/10">
-      <div class="mx-auto flex max-w-[90rem] flex-wrap items-center justify-between gap-4 px-4 py-8 text-[13px] text-gray-500 sm:px-6 lg:px-8">
+      <div class="mx-auto flex max-w-[90rem] flex-wrap items-center justify-between gap-4 px-4 py-8 text-[13px] text-gray-500 dark:text-gray-400 sm:px-6 lg:px-8">
         <span>liaise {pkg.version} · MIT · Made by Kristjan Vool</span>
         <div class="flex gap-6">
           <a href={url('/start/quick-start/')} class="hover:text-gray-950 dark:hover:text-white">Docs</a>
