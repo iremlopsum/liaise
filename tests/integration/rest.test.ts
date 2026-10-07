@@ -3,6 +3,7 @@ import { AsyncLocalStorage } from 'node:async_hooks'
 import { createApi } from '../../src/create-api.js'
 import { Request } from '../../src/request.js'
 import { defineRequest } from '../../src/define-request.js'
+import { withHeaders } from '../../src/with-headers.js'
 import type { Middleware } from '../../src/types.js'
 import { retryMiddleware, cacheMiddleware, logMiddleware } from '../../src/built-in-middleware.js'
 import { startServer, type TestServer } from './server.js'
@@ -633,6 +634,21 @@ describe('REST — share decides on what is sent (5.1.0)', () => {
     expect(server.callCounts.get('GET /whoami')).toBe(2)
     expect(alice.data?.authorization).toBe('Bearer alice')
     expect(bob.data?.authorization).toBe('Bearer bob')
+  })
+})
+
+describe('REST — withHeaders: one client, a copy per user (5.3.0)', () => {
+  it('two loaders for one user share a request; another user never joins', async () => {
+    const whoami = defineRequest<{ authorization: string | null }>()({ method: 'GET', path: '/whoami', share: true })
+    const api = createApi({ baseUrl: server.baseUrl, requests: { whoami } })
+    const page = (token: string) => {
+      const user = withHeaders(api, { authorization: `Bearer ${token}` }, { dedupe: false })
+      return Promise.all([user.whoami(), user.whoami()])
+    }
+    const [alice, bob] = await Promise.all([page('alice'), page('bob')])
+    expect(server.callCounts.get('GET /whoami')).toBe(2)
+    expect(alice.map(r => r.data?.authorization)).toEqual(['Bearer alice', 'Bearer alice'])
+    expect(bob.map(r => r.data?.authorization)).toEqual(['Bearer bob', 'Bearer bob'])
   })
 })
 

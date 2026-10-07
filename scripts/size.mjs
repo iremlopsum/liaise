@@ -21,7 +21,11 @@ const entries = {
 // Polling raised the last two and added its own row: poll and pollUntil, with the
 // stableKey and Retry-After helpers they bring into core (core entry 7782 → 10276 B,
 // core + middleware 9443 → 11269 B, core + polling 8850 B). REST only is unchanged.
-const budgets = { 'REST only': 7000, 'core + polling': 9740, 'core entry': 11300, 'core + middleware': 12400 }
+// 5.3.0 raised REST only, core entry and core + middleware: withHeaders' copy state
+// and the endpoint loop as a function (build / buildSide) are in every client, used or not
+// (REST only 6966 → 7241 B, core entry 10887 → 11500 B, core + middleware 12239 → 12843 B;
+// core + polling 9415 → 9713 B stays within its budget).
+const budgets = { 'REST only': 7700, 'core + polling': 9740, 'core entry': 12100, 'core + middleware': 13500 }
 
 let failed = false
 for (const [name, contents] of Object.entries(entries)) {
