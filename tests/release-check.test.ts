@@ -177,3 +177,76 @@ describe('release-check, dry-run', () => {
     expect(r.err).toMatch(/no link definition "\[1\.0\.0\]: …"/)
   })
 })
+
+// The target commit, against real git history. This repo merges release PRs with
+// merge commits, so the commit npm published (and the tag must name) is the merge
+// on main, not the "chore(release)" commit on the PR branch.
+describe('release-check, target commit (real git)', () => {
+  const git = (...a: string[]) => execFileSync('git', a, { cwd: dir, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim()
+  const commit = (message: string) => { git('add', '-A'); git('commit', '-q', '-m', message); return git('rev-parse', 'HEAD') }
+  function writeVersion(version: string, compact: boolean) {
+    const pkg = { name: 'liaise', version }
+    // npm writes package.json with two-space indentation; `compact` imitates a hand edit.
+    writeFileSync(join(dir, 'package.json'), compact ? JSON.stringify(pkg) : JSON.stringify(pkg, null, 2) + '\n')
+    writeFileSync(join(dir, 'package-lock.json'), JSON.stringify({ name: 'liaise', version, packages: { '': { name: 'liaise', version } } }, null, 2) + '\n')
+    writeFileSync(join(dir, 'CHANGELOG.md'), changelog(version))
+  }
+  /** main: A (1.0.0) ─ C ─ M (merges the PR branch, whose B bumps to 1.1.0) ─ D */
+  function mergedRelease(compact = false) {
+    git('init', '-q', '-b', 'main')
+    git('config', 'user.email', 'test@example.com'); git('config', 'user.name', 'test'); git('config', 'commit.gpgsign', 'false')
+    writeVersion('1.0.0', compact); commit('A')
+    git('checkout', '-q', '-b', 'release')
+    writeVersion('1.1.0', compact); const B = commit('chore(release): 1.1.0')
+    git('checkout', '-q', 'main')
+    writeFileSync(join(dir, 'other.txt'), 'x'); commit('C')
+    git('merge', '-q', '--no-ff', '-m', 'Merge pull request: release 1.1.0', 'release')
+    const M = git('rev-parse', 'HEAD')
+    writeFileSync(join(dir, 'docs.txt'), 'y'); const D = commit('D: docs after the release')
+    return { B, M, D }
+  }
+  function runGit(flags: Record<string, unknown>) {
+    const args = ['--mode', 'push', '--root', dir]
+    for (const [k, v] of Object.entries(flags)) args.push(`--${k}`, typeof v === 'string' ? v : JSON.stringify(v))
+    let code = 0, out = '', err = ''
+    try { out = execFileSync('node', [script, ...args], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }) }
+    catch (e: any) { code = e.status; out = String(e.stdout); err = String(e.stderr) }
+    return { code, err, outputs: Object.fromEntries(out.trim().split('\n').filter(Boolean).map(l => l.split('=') as [string, string])) }
+  }
+
+  it('publish targets HEAD', () => {
+    const { D } = mergedRelease()
+    const r = runGit({ 'npm-versions': ['1.0.0'], tags: [], releases: [] })
+    expect(r.code).toBe(0)
+    expect(r.outputs.target).toBe(D)
+  })
+
+  it('repair targets the merge commit on main, not the release commit on the PR branch', () => {
+    const { B, M } = mergedRelease()
+    const r = runGit({ 'npm-versions': ['1.0.0', '1.1.0'], tags: [], releases: [], 'npm-githead': 'none' })
+    expect(r.code).toBe(0)
+    expect(r.outputs.target).not.toBe(B)
+    expect(r.outputs.target).toBe(M)
+  })
+
+  it('repair targets the commit npm recorded when it is on main', () => {
+    const { D } = mergedRelease()
+    const r = runGit({ 'npm-versions': ['1.0.0', '1.1.0'], tags: [], releases: [], 'npm-githead': D })
+    expect(r.code).toBe(0)
+    expect(r.outputs.target).toBe(D)
+  })
+
+  it('repair refuses when npm recorded a commit that is not on main', () => {
+    mergedRelease()
+    const r = runGit({ 'npm-versions': ['1.0.0', '1.1.0'], tags: [], releases: [], 'npm-githead': '1111111111111111111111111111111111111111' })
+    expect(r.code).toBe(1)
+    expect(r.err).toMatch(/not on this branch/)
+  })
+
+  it('repair refuses when no commit on main introduced the version', () => {
+    mergedRelease(true)
+    const r = runGit({ 'npm-versions': ['1.0.0', '1.1.0'], tags: [], releases: [], 'npm-githead': 'none' })
+    expect(r.code).toBe(1)
+    expect(r.err).toMatch(/cannot find the commit/)
+  })
+})

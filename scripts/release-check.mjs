@@ -11,7 +11,7 @@
 // stdout: key=value lines for $GITHUB_OUTPUT. stderr: messages for people.
 // Exit 0 = decided, 1 = refused (every problem listed), 2 = bad usage.
 // Tests inject the network answers with --npm-versions / --tags / --releases /
-// --target; without them the real sources are asked.
+// --npm-githead (or 'none') / --target; without them the real sources are asked.
 import { execFileSync } from 'node:child_process'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
@@ -107,6 +107,29 @@ function emit(o) {
   process.exit(0)
 }
 
+// --- the commit a repair tags --------------------------------------------------
+// It must be the commit npm published, or the tag disagrees with the package's
+// provenance. npm records it as gitHead; use that when it is on this branch. With
+// no record, take the first commit on this branch's first-parent line that set
+// the version: in a merge-commit workflow that is the merge on main, not the
+// release commit on the PR branch, whose tree differs. Anything else is refused.
+function repairTarget() {
+  const recorded = flag('npm-githead') ?? npmGitHead()
+  if (recorded && recorded !== 'none') {
+    if (isAncestorOfHead(recorded)) return recorded
+    refuseIf([`repair path: npm says ${version} was published from ${recorded}, which is not on this branch; tag and release it by hand`])
+  }
+  const found = lines(sh('git', ['log', '--first-parent', '--reverse', '--format=%H', '-G', `"version": "${version}"`, '--', 'package.json']))[0]
+  if (!found) refuseIf([`repair path: cannot find the commit on this branch that set package.json's version to ${version}; tag and release it by hand`])
+  return found
+}
+function npmGitHead() {
+  try { return sh('npm', ['view', `${pkg.name}@${version}`, 'gitHead']) || null } catch { return null }
+}
+function isAncestorOfHead(sha) {
+  try { execFileSync('git', ['merge-base', '--is-ancestor', sha, 'HEAD'], { cwd: root, stdio: 'ignore' }); return true } catch { return false }
+}
+
 // --- decide -------------------------------------------------------------------
 if (mode === 'pr') {
   if (flag('base-version') === version) {
@@ -139,8 +162,6 @@ if (publish) refuseIf(problemsFor({ requireNewer: true, npm, tagList }))
 else if (sectionBody(changelog, version) === null) refuseIf([`repair path: CHANGELOG has no section for ${version}, so there are no notes`])
 
 const higherRelease = stable(released.map(t => t.replace(/^v/, ''))).some(v => compare(v, version) > 0)
-const target = flag('target') ?? (publish
-  ? sh('git', ['rev-parse', 'HEAD'])
-  : lines(sh('git', ['log', '--reverse', '--format=%H', '-G', `"version": "${version}"`, '--', 'package.json']))[0])
+const target = flag('target') ?? (publish ? sh('git', ['rev-parse', 'HEAD']) : repairTarget())
 console.error(`release-check: ${publish ? 'publish and release' : 'repair: release only'} ${version} at ${target}`)
 emit({ publish, release, create_tag: !hasTag, latest: !higherRelease, target })

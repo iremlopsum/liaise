@@ -27,6 +27,9 @@ concurrency:
 
 jobs:
   check:
+    # Only main releases. Without this, a dispatch from another branch would rely
+    # entirely on the npm environment's branch policy — a setting, not code.
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -107,13 +110,17 @@ jobs:
       - name: Publish
         env:
           DRY_RUN: ${{ needs.check.outputs.dry_run }}
+          VERSION: ${{ needs.check.outputs.version }}
         # prepublishOnly runs the full suite again inside the publish, on purpose:
         # the tarball is built and tested in the job that ships it. A dry run
         # packs instead — npm refuses `publish --dry-run` for a version it
-        # already has, and the gate job has run the suite.
+        # already has, and the gate job has run the suite. "Re-run failed jobs"
+        # after a publish by hand finds the version on npm and moves on.
         run: |
           if [ "$DRY_RUN" = "true" ]; then
             npm run build && npm pack --dry-run
+          elif [ -n "$(npm view "liaise@$VERSION" version 2>/dev/null)" ]; then
+            echo "npm already has liaise@$VERSION; not publishing it again"
           else
             npm publish
           fi
@@ -127,16 +134,27 @@ jobs:
     permissions:
       contents: write
     steps:
+      # The run's own commit: the CHANGELOG `check` validated, which the notes
+      # come from. The tag names `target` explicitly (full history is fetched).
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ needs.check.outputs.target }}
           fetch-depth: 0
+      # Both steps are safe to run twice ("Re-run failed jobs" reuses the old
+      # check outputs): an existing tag on the right commit or an existing
+      # Release is reported and skipped; a tag on another commit stops the run.
       - name: Tag
-        if: needs.check.outputs.create_tag == 'true'
         env:
           VERSION: ${{ needs.check.outputs.version }}
           TARGET: ${{ needs.check.outputs.target }}
         run: |
+          if existing="$(git rev-parse -q --verify "refs/tags/v$VERSION^{commit}")"; then
+            if [ "$existing" = "$TARGET" ]; then
+              echo "tag v$VERSION already points at $TARGET"
+              exit 0
+            fi
+            echo "::error::tag v$VERSION points at $existing, not $TARGET; fix it by hand"
+            exit 1
+          fi
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git tag -a "v$VERSION" -m "v$VERSION" "$TARGET"
@@ -147,6 +165,10 @@ jobs:
           VERSION: ${{ needs.check.outputs.version }}
           LATEST: ${{ needs.check.outputs.latest }}
         run: |
+          if gh release view "v$VERSION" > /dev/null 2>&1; then
+            echo "GitHub Release v$VERSION already exists"
+            exit 0
+          fi
           node scripts/release-notes.mjs "$VERSION" > "$RUNNER_TEMP/notes.md"
           latest="--latest"
           [ "$LATEST" = "true" ] || latest="--latest=false"
@@ -156,9 +178,11 @@ jobs:
   # live in this workflow: a Release created with GITHUB_TOKEN does not trigger
   # other workflows.
 
+  # After any real publish — by this run, or earlier (repair path): once npm has
+  # the version, what it serves can be checked whoever published it.
   verify:
     needs: [check, publish]
-    if: needs.publish.result == 'success' && needs.check.outputs.dry_run != 'true'
+    if: ${{ !cancelled() && needs.check.outputs.dry_run != 'true' && (needs.publish.result == 'success' || (needs.check.outputs.publish == 'false' && needs.check.outputs.release == 'true')) }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
