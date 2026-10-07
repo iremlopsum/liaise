@@ -15,7 +15,7 @@ liaise has no dependencies and uses the standard `fetch`. CI tests it on Node 20
 
 - **It is ESM only.** `import` it. `require('liaise')` fails with `ERR_PACKAGE_PATH_NOT_EXPORTED`, so from CommonJS use `await import('liaise')`.
 - **Set TypeScript's `moduleResolution` to `bundler`, `node16` or `nodenext`.** liaise has three entry points, and the old `node` setting finds only the first, so `liaise/middleware` and `liaise/testing` don't resolve.
-- **liaise is built and tested with TypeScript 5.8.** Its types also compile on versions back to 4.7, but CI doesn't test those.
+- **liaise is built and tested with TypeScript 5.8.** CI also checks that its types compile on every TypeScript version from 4.7 to 6.0.
 
 Coming from `@iremlopsum/apify`? That is liaise's old name. Switching takes two steps, listed in [MIGRATION.md](https://github.com/iremlopsum/liaise/blob/main/MIGRATION.md#upgrading-to-500).
 
