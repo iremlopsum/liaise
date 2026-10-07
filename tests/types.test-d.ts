@@ -533,6 +533,10 @@ describe('fetchOptions types', () => {
     expectTypeOf<CallOptions['fetchOptions']>().toEqualTypeOf<FetchOptions | undefined>()
     expectTypeOf<MiddlewareContext['request']['fetchOptions']>().toEqualTypeOf<FetchOptions | undefined>()
   })
+  it('accepts fetch options on createGraphQL and an Operation', () => {
+    const op = new Operation<Record<string, never>, { ok: boolean }>({ operation: 'query { ok }', fetchOptions: { cache: 'no-store' } })
+    createGraphQL({ endpoint: '/graphql', operations: { op }, fetchOptions: { credentials: 'include' } })
+  })
   it('refuses the fields liaise controls', () => {
     // @ts-expect-error method is liaise's
     const a: FetchOptions = { method: 'DELETE' }

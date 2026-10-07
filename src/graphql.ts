@@ -5,6 +5,7 @@ import { callLoggerFor } from './utils/log.js'
 import { ShareTracker, requestKey, narrowTag, stampShared, stampPreempted } from './utils/share.js'
 import type { SharedRound } from './utils/share.js'
 import { mergeHeaders, headersRecord } from './utils/headers.js'
+import { mergeFetchOptions, sendableFetchOptions } from './utils/fetch-options.js'
 import { abortKind, propagatesReason } from './utils/abort-kind.js'
 import { callBudget } from './utils/budget.js'
 import { anySignal, releaseSignal } from './utils/any-signal.js'
@@ -88,6 +89,7 @@ export function createGraphQL(config: any): any {
     onError,
     timeout: clientTimeout,
     fetch: clientFetch,
+    fetchOptions: clientFetchOptions,
   } = config
   // Not a middleware: it wraps each whole call, ending in the post-execution
   // hook — see the same line in create-api.ts. Null when off.
@@ -266,7 +268,12 @@ export function createGraphQL(config: any): any {
               // so it is what fetch receives by construction.
               const sendUrl = ctx.request.url
               const sendHeaders = ctx.request.headers
+              // The fetch options as the middleware left them, without the
+              // fields liaise controls, under liaise's own (create-api.ts does
+              // the same). The share key below takes the same copy.
+              const sendOptions = sendableFetchOptions(ctx.request.fetchOptions)
               const fetchInit: RequestInit = {
+                ...sendOptions,
                 method: 'POST',
                 headers: sendHeaders,
                 body: ctx.request.body as string,
@@ -290,7 +297,7 @@ export function createGraphQL(config: any): any {
               // copy of the one read. A body a middleware replaced with one
               // that can't be compared has no key and is sent as usual.
               const shareKey = operation.config.share === true
-                ? requestKey(lane, 'POST', sendUrl, sendHeaders, fetchInit.body ?? null)
+                ? requestKey(lane, 'POST', sendUrl, sendHeaders, fetchInit.body ?? null, sendOptions)
                 : null
               let exchange: Exchange
               if (shareKey === null) {
@@ -563,6 +570,9 @@ export function createGraphQL(config: any): any {
             headers.set('Content-Type', 'application/json')
           }
 
+          // Merged like REST's (create-api.ts Step 5), into a fresh object.
+          const fetchOptions = mergeFetchOptions(clientFetchOptions, operation.config.fetchOptions, options.fetchOptions)
+
           const body = JSON.stringify({ query: operation.config.operation, variables })
 
           const context: MiddlewareContext = {
@@ -573,6 +583,7 @@ export function createGraphQL(config: any): any {
               params: variables,
               headers,
               body,
+              fetchOptions,
               signal: callerSignal,
             },
             requestName: name,

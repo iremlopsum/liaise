@@ -98,6 +98,7 @@ Most of what the guide says about `createApi` holds for `createGraphQL`.
 - **`middleware`** runs on the client, the `Operation` and the call, in the same order. The context has the same shape, so the [built-in middleware](/guide/retries-caching-and-logging/) and [yours](/guide/writing-middleware/) work unchanged.
 - **`headers`** go on the client, the `Operation` and the call, and merge by the [three levels](/start/how-it-fits-together/#three-levels-of-settings).
 - **`onError`** goes on `createGraphQL` and works as in [Reporting errors with onError](/guide/handling-errors/#reporting-errors-with-onerror).
+- **`fetchOptions`** go on `createGraphQL`, an `Operation` or a call, and merge as on REST ([Cookies and other fetch options](/guide/defining-endpoints/#cookies-and-other-fetch-options)).
 - **`retry()`** is on every `Result`.
 - **`dedupe`** goes on the `Operation`, as in [Drop stale calls with dedupe](/guide/cancelling-deadlines-and-stale-requests/#drop-stale-calls-with-dedupe).
 - **`share`** goes on the `Operation`, as in [Sharing identical requests](/guide/sharing-identical-requests/). Variables must match exactly, key order included. On a mutation, the note there about writes applies.

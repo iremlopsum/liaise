@@ -888,6 +888,13 @@ export interface OperationConfig {
   headers?: HeadersInit
 
   /**
+   * Options passed through to `fetch` for every call to this operation. Each
+   * field replaces the client's, and a call's replaces this.
+   * @see {@link FetchOptions}
+   */
+  fetchOptions?: FetchOptions
+
+  /**
    * When `true`, enables auto-cancellation of duplicate in-flight requests.
    *
    * If a new call to this operation starts while a previous one is still
@@ -1024,6 +1031,12 @@ export interface GraphQLBaseConfig {
    * Lowest merge priority — overridden by per-operation and per-call headers.
    */
   headers?: HeadersInit
+  /**
+   * Options passed through to `fetch` for every operation, such as
+   * `credentials: 'include'`. Lowest priority: an operation or a call replaces
+   * a field. @see {@link FetchOptions}
+   */
+  fetchOptions?: FetchOptions
   /**
    * The `fetch` this client sends with. Without it, liaise looks up the
    * global `fetch` on every call, so a stub or polyfill installed after the
