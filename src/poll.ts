@@ -50,8 +50,8 @@ interface Caller {
 }
 
 /**
- * A thrown callback or `until` never breaks the poll. Like an EventTarget listener's
- * error it goes to `reportError` (browsers, Deno, Bun); where there is none it's
+ * A thrown callback or `until` never breaks the poll. Like an error thrown from an
+ * EventTarget handler it goes to `reportError` (browsers, Deno, Bun); where there is none it's
  * logged. Never re-thrown later: in Node an async throw would crash the process.
  */
 function report(error: unknown): void {
@@ -72,6 +72,9 @@ function deliver(caller: Caller, result: Result<unknown>): void {
 function page(): Pick<Document, 'visibilityState' | 'addEventListener' | 'removeEventListener'> | undefined {
   return typeof document === 'undefined' ? undefined : document
 }
+
+/** The longest setTimeout delay; anything above fires at once. */
+const MAX_TIMER = 2_147_483_647
 
 const positive = (ms: number | undefined): number => (typeof ms === 'number' && Number.isFinite(ms) && ms >= 1 ? ms : Number.NaN)
 
@@ -144,6 +147,7 @@ class SharedPoll {
   }
 
   private async ask(): Promise<void> {
+    if (this.stopped) return
     this.clearTimer()
     const controller = new AbortController()
     this.controller = controller
@@ -168,15 +172,18 @@ class SharedPoll {
         () => this.endpoint(this.params, this.callOptions),
       )
     }
-    if (this.stopped || controller.signal.aborted) return // stopped while in flight: not delivered
-    this.controller = undefined
+    if (this.stopped) return // stopped while in flight: not delivered
     this.last = result
     this.failures = result.error ? this.failures + 1 : 0
-    for (const caller of [...this.callers]) deliver(caller, result)
+    // The request stays "in flight" through delivery, so a callback that joins this
+    // question can't start a second loop; schedule() ends it.
+    for (const caller of [...this.callers]) if (this.callers.has(caller)) deliver(caller, result)
+    this.controller = undefined
     this.schedule(result)
   }
 
   private schedule(result: Result<unknown>): void {
+    this.clearTimer()
     if (this.stopped || this.paused()) return
     const repeating = [...this.callers].filter(c => !Number.isNaN(c.every))
     if (repeating.length === 0) return
@@ -196,8 +203,15 @@ class SharedPoll {
     this.timer = setTimeout(() => {
       this.timer = undefined
       void this.ask()
-    }, wait)
+    }, Math.min(wait, MAX_TIMER))
   }
+}
+
+/** A plain object, as classify-params.ts counts one: another realm's Object.prototype included. */
+function isPlain(value: object): boolean {
+  if (Array.isArray(value)) return false
+  const proto = Object.getPrototypeOf(value) as unknown
+  return proto === Object.prototype || proto === null || Object.getPrototypeOf(proto as object) === null
 }
 
 const polls = new WeakMap<object, Map<string, SharedPoll>>()
@@ -209,7 +223,9 @@ function join(
   options: PollOptions,
   deliverTo: (result: Result<unknown>) => void,
 ): { leave: () => void; shared: SharedPoll } {
-  const snapshot = { ...params } // mutating params after the call changes nothing
+  // Mutating params after the call changes nothing: copy a plain object. Anything else
+  // (Map, URLSearchParams, a binary body, a class with toJSON) goes through as it is.
+  const snapshot = isPlain(params) ? { ...params } : params
   const callOptions = Object.fromEntries(Object.entries(options).filter(([k]) => !POLL_ONLY.has(k))) as CallOptions
   const paramsKey = stableKey(snapshot)
   const optionsKey = stableKey(callOptions)

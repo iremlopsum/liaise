@@ -149,13 +149,61 @@ describe('poll: sharing', () => {
   })
 })
 
+describe('poll: edge cases', () => {
+  it('params that are not plain objects are sent and keyed as they are', async () => {
+    const api = client()
+    const stop = poll(api.getStats, new Map([['a', 1]]) as never, () => {}, { every: 1000 })
+    await flush()
+    expect(mock.calls[0].url).toBe('https://api.test/stats?a=1')
+    stop()
+  })
+
+  it('two POST polls with different URLSearchParams bodies do not share', async () => {
+    mock = mockFetch({ 'POST /form': () => jsonResponse({ ok: true }) })
+    mock.install()
+    const send = defineRequest<{ ok: boolean }, URLSearchParams>()({ method: 'POST', path: '/form' })
+    const api = createApi({ baseUrl: 'https://api.test', requests: { send } })
+    const stops = [
+      poll(api.send, new URLSearchParams({ x: '1' }), () => {}, { every: 1000 }),
+      poll(api.send, new URLSearchParams({ x: '2' }), () => {}, { every: 1000 }),
+    ]
+    await flush()
+    expect(mock.calls).toHaveLength(2)
+    stops.forEach(stop => stop())
+  })
+
+  it("a callback that joins the same question doesn't start a second loop", async () => {
+    const api = client()
+    const stops: Array<() => void> = []
+    let joined = false
+    stops.push(poll(api.getStats, {}, () => {
+      if (!joined) { joined = true; stops.push(poll(api.getStats, {}, () => {}, { every: 1000 })) }
+    }, { every: 1000 }))
+    await vi.advanceTimersByTimeAsync(5000)
+    expect(mock.calls).toHaveLength(6)
+    stops.forEach(stop => stop())
+    expect(vi.getTimerCount()).toBe(0)
+  })
+
+  it('an every beyond the timer limit is clamped, not fired at once', async () => {
+    const api = client()
+    const stop = poll(api.getStats, {}, () => {}, { every: 3e9 })
+    await vi.advanceTimersByTimeAsync(2_000_000_000)
+    expect(mock.calls).toHaveLength(1)
+    stop()
+  })
+})
+
 describe('poll: stopping', () => {
   it('stopping the last caller aborts the request in flight and delivers nothing', async () => {
-    const api = client({ 'GET /stats': () => new Promise(r => setTimeout(() => r(jsonResponse({ n: 1 })), 3000)) })
+    const signals: AbortSignal[] = []
+    const api = client({ 'GET /stats': ({ request }) => { signals.push(request.signal); return new Promise(r => setTimeout(() => r(jsonResponse({ n: 1 })), 3000)) } })
     const seen: Result<Stats>[] = []
     const stop = poll(api.getStats, {}, r => seen.push(r), { every: 1000 })
     await vi.advanceTimersByTimeAsync(100)
+    expect(signals[0].aborted).toBe(false)
     stop()
+    expect(signals[0].aborted).toBe(true)
     await vi.advanceTimersByTimeAsync(10_000)
     expect(seen).toEqual([])
     expect(mock.calls).toHaveLength(1)
@@ -201,6 +249,7 @@ describe('poll: stopping', () => {
 
   it('stopping the last caller clears its timer and its visibilitychange listener', async () => {
     const doc = Object.assign(new EventTarget(), { visibilityState: 'visible' })
+    const add = vi.spyOn(doc, 'addEventListener')
     const remove = vi.spyOn(doc, 'removeEventListener')
     vi.stubGlobal('document', doc)
     const api = client()
@@ -209,7 +258,30 @@ describe('poll: stopping', () => {
     expect(vi.getTimerCount()).toBe(1)
     stop()
     expect(vi.getTimerCount()).toBe(0)
-    expect(remove).toHaveBeenCalledWith('visibilitychange', expect.any(Function))
+    const added = add.mock.calls.find(c => c[0] === 'visibilitychange')![1]
+    expect(remove).toHaveBeenCalledWith('visibilitychange', added)
+  })
+
+  it("stopping a caller removes its signal's abort listener", async () => {
+    const api = client()
+    const controller = new AbortController()
+    const add = vi.spyOn(controller.signal, 'addEventListener')
+    const remove = vi.spyOn(controller.signal, 'removeEventListener')
+    const stop = poll(api.getStats, {}, () => {}, { every: 1000, signal: controller.signal })
+    await flush()
+    const added = add.mock.calls.find(c => c[0] === 'abort')![1]
+    stop()
+    expect(remove).toHaveBeenCalledWith('abort', added)
+  })
+
+  it("a callback that stops another caller during delivery means that caller gets nothing", async () => {
+    const api = client()
+    const b: Result<Stats>[] = []
+    let stopB = () => {}
+    poll(api.getStats, {}, () => stopB(), { every: 1000 })
+    stopB = poll(api.getStats, {}, r => b.push(r), { every: 1000 })
+    await flush()
+    expect(b).toEqual([])
   })
 })
 
@@ -386,13 +458,15 @@ describe('poll: any liaise endpoint', () => {
   })
 
   it('a Pollable that throws becomes a middleware error Result, delivered, and polling goes on', async () => {
-    vi.stubGlobal('reportError', vi.fn())
+    const reportError = vi.fn()
+    vi.stubGlobal('reportError', reportError)
     let calls = 0
     const flaky = async () => { calls++; if (calls === 1) throw new Error('not a liaise endpoint'); return { data: { n: calls }, error: null } as unknown as Result<Stats> }
     const seen: Result<Stats>[] = []
     const stop = poll(flaky, {}, r => seen.push(r), { every: 1000 })
     await flush()
     await vi.advanceTimersByTimeAsync(2000)
+    expect(reportError).toHaveBeenCalledWith(expect.objectContaining({ message: 'not a liaise endpoint' }))
     expect(seen[0].error?.kind).toBe('middleware')
     expect(seen[1].error).toBeNull()
     stop()
