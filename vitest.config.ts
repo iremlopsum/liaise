@@ -29,7 +29,9 @@ export default defineConfig({
     //
     // `compare/` is the library comparison harness: its own package.json, its
     // own dependencies, never part of this suite.
-    exclude: [...configDefaults.exclude, '**/.worktrees/**', 'compare/**'],
+    // `site/` is the docs site: its own package.json and its own vitest run, which
+    // reads a built `site/dist` this suite never has.
+    exclude: [...configDefaults.exclude, '**/.worktrees/**', 'compare/**', 'site/**'],
     typecheck: { tsconfig: './tsconfig.test.json', include: ['tests/**/*.test.ts', 'tests/**/*.test-d.ts'], only: true },
   }
 })
