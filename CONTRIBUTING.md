@@ -52,15 +52,15 @@ frontmatter giving its `title`, a one-sentence `description` (used in search res
 
 - **Runnable examples come from tests.** A page shows one with `<Example name="…" />`, which
   renders the region between `// example:<name>:start` and `:end` in a test under `tests/`. To
-  change an example, change the test, run it, then check the page. The README copies the same
-  regions, and `npm run docs:check` fails when a copy drifts.
+  change an example, change the test, run it, then check the page. The README's quick start is
+  a copy of its region, and `npm run docs:check` fails when the copy drifts.
 - **Every other TypeScript block must type-check** (`npm run docs:types`). If a block is
   deliberately incomplete, put a marker with the reason just before it: `<!-- untyped: reason -->`
   in Markdown, `{/* untyped: reason */}` in MDX.
 - **Links between pages** are written without the `/liaise` prefix (`/guide/handling-errors/`).
   The build adds it, and the site tests fail on any link that goes nowhere.
-- **The README is still a full reference** until it is shortened in a later release. If your change affects
-  something a user calls, passes or gets back, update the page and the README section.
+- **The README is the front page:** the pitch, install, the quick start and links to the docs. It
+  changes only when one of those does.
 
 ## The rules that matter
 
@@ -69,7 +69,7 @@ These are the ones a pull request gets checked against.
 - **No runtime dependencies.** Anything liaise depends on ends up in every user's bundle. If a change needs a library, it probably belongs in user code or middleware instead.
 - **Never throw.** Every public call returns a `Result` (`{ data, error }`), even when the network fails or the code inside a middleware throws. The single exception is a configuration mistake caught when `createApi` is called.
 - **Every fix comes with a test, and the test must fail without the fix.** Undo your fix, run the test, check that it fails because of the bug (an assertion error, not a crash from missing code), then put the fix back.
-- **Docs change with the code.** If your change affects anything a user calls, passes or gets back, update the docs page in `site/src/content/docs/` and `README.md` in the same pull request.
+- **Docs change with the code.** If your change affects anything a user calls, passes or gets back, update its page in `site/src/content/docs/` in the same pull request.
 - **Leave the version alone.** `package.json` version, `CHANGELOG.md` and `MIGRATION.md` are updated by the maintainer when a release is cut.
 - **Commit messages carry no tool attribution.** No `Co-Authored-By:` lines naming an AI tool and no "Generated with" lines. CI rejects them.
 

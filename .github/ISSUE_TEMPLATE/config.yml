@@ -1,5 +1,5 @@
 blank_issues_enabled: true
 contact_links:
   - name: Read the docs
-    url: https://github.com/iremlopsum/liaise#readme
-    about: The README covers every option, with examples. Worth a quick search before opening an issue.
+    url: https://iremlopsum.github.io/liaise/
+    about: The docs cover every option, with examples and search. Worth a quick search before opening an issue.

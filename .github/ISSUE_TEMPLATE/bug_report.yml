@@ -1,5 +1,5 @@
 name: Bug report
-description: Something in liaise behaves differently from what the README says.
+description: Something in liaise behaves differently from what the docs say.
 labels: [bug]
 body:
   - type: markdown
