@@ -63,8 +63,13 @@ async function readBody(response: Response, read: ReadAs): Promise<unknown> {
       // Cancel rather than leave unread: an abandoned body can hold a
       // keep-alive connection open. Cancelling an absent or consumed stream
       // can throw; cleanup must never fail a request.
+      //
+      // Started, never awaited (5.1.2). On a cloned Response the body is one
+      // branch of a tee, and its cancel() does not settle while the other
+      // branch is unread — awaiting it hung the call for good. mockFetch's
+      // static routes are clones, and so can any fetch wrapper's responses be.
       try {
-        await response.body?.cancel()
+        response.body?.cancel().catch(() => { /* nothing to release */ })
       } catch {
         /* nothing to release */
       }
