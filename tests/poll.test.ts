@@ -550,6 +550,123 @@ describe('poll: any liaise endpoint', () => {
   })
 })
 
+describe('poll: never throws, whatever it is given', () => {
+  beforeEach(() => { vi.spyOn(console, 'error').mockImplementation(() => {}) })
+
+  it('no options: reports it, sends nothing, and returns a stop that does nothing', async () => {
+    const api = client()
+    let stop: unknown
+    expect(() => { stop = poll(api.getStats, {}, () => {}, undefined as never) }).not.toThrow()
+    expect(stop).toBeTypeOf('function')
+    await vi.advanceTimersByTimeAsync(5000)
+    expect(mock.calls).toHaveLength(0)
+    expect(console.error).toHaveBeenCalledTimes(1)
+    expect(() => (stop as () => void)()).not.toThrow()
+  })
+
+  it('params that are undefined or null are passed on as they are', async () => {
+    shareable()
+    const passed: unknown[] = []
+    const endpoint = async (params: unknown) => { passed.push(params); return successResult({ n: 1 }) }
+    for (const params of [undefined, null]) {
+      let stop = () => {}
+      expect(() => { stop = poll(endpoint, params as never, () => {}, { every: 1000 }) }).not.toThrow()
+      await flush()
+      stop()
+    }
+    expect(passed).toEqual([undefined, null])
+    const api = client()
+    const seen: Result<Stats>[] = []
+    const stop = poll(api.getStats, undefined as never, r => seen.push(r), { every: 1000 })
+    await flush()
+    expect(ns(seen)).toEqual([1])
+    stop()
+  })
+
+  it('an endpoint that is not a function: each request becomes a middleware error', async () => {
+    shareable()
+    const seen: Result<unknown>[] = []
+    let stop = () => {}
+    expect(() => { stop = poll(undefined as never, {}, r => seen.push(r), { every: 1000 }) }).not.toThrow()
+    await flush()
+    expect(seen.map(r => r.error?.kind)).toEqual(['middleware'])
+    stop()
+  })
+
+  it('a signal that is not an AbortSignal (the controller itself): reported, and nothing keeps polling', async () => {
+    const api = client()
+    let stop: unknown
+    expect(() => { stop = poll(api.getStats, {}, () => {}, { every: 1000, signal: new AbortController() as never }) }).not.toThrow()
+    expect(stop).toBeTypeOf('function')
+    await vi.advanceTimersByTimeAsync(5000)
+    expect(mock.calls.length).toBeLessThanOrEqual(1) // the first request, if it was sent, was aborted
+    expect(vi.getTimerCount()).toBe(0)
+    expect(console.error).toHaveBeenCalledTimes(1)
+  })
+
+  it('a Pollable that resolves with something other than a Result: a middleware error, delivered, and polling goes on', async () => {
+    vi.spyOn(Math, 'random').mockReturnValue(0)
+    let calls = 0
+    const bad = async () => { calls++; return undefined as unknown as Result<Stats> }
+    const seen: Result<Stats>[] = []
+    const stop = poll(bad, {}, r => seen.push(r), { every: 1000 })
+    await flush()
+    await vi.advanceTimersByTimeAsync(1000)
+    expect(seen.map(r => r.error?.kind)).toEqual(['middleware', 'middleware'])
+    expect(calls).toBe(2)
+    stop()
+  })
+
+  it('a hand-written 429 or 503 Result whose response has no headers: polling goes on', async () => {
+    vi.spyOn(Math, 'random').mockReturnValue(0)
+    for (const status of [429, 503]) {
+      let calls = 0
+      const endpoint = async () => {
+        calls++
+        return { data: null, error: { kind: 'http', status }, response: { status }, retry: () => endpoint() } as unknown as Result<Stats>
+      }
+      const stop = poll(endpoint, {}, () => {}, { every: 1000 })
+      await flush()
+      await vi.advanceTimersByTimeAsync(1000)
+      expect(calls, `status ${status}`).toBe(2)
+      stop()
+    }
+  })
+
+  it("retry() on the middleware error from a throwing Pollable never throws or rejects either", async () => {
+    const seen: Result<Stats>[] = []
+    const syncThrow = (() => { throw new Error('sync') }) as unknown as () => Promise<Result<Stats>>
+    const rejects = async (): Promise<Result<Stats>> => { throw new Error('async') }
+    for (const endpoint of [syncThrow, rejects]) {
+      const stop = poll(endpoint, {}, r => seen.push(r), { every: 1000 })
+      await flush()
+      stop()
+    }
+    expect(seen.map(r => r.error?.kind)).toEqual(['middleware', 'middleware'])
+    for (const result of seen) {
+      let again: Promise<Result<Stats>> | undefined
+      expect(() => { again = result.retry() }).not.toThrow()
+      await expect(again).resolves.toMatchObject({ error: { kind: 'middleware' } })
+    }
+  })
+
+  it('a document without addEventListener or removeEventListener (a partial shim) still polls, and stop() ends it', async () => {
+    for (const doc of [{ visibilityState: 'visible' }, { visibilityState: 'visible', addEventListener() {} }]) {
+      vi.stubGlobal('document', doc)
+      const api = client()
+      const stop = poll(api.getStats, {}, () => {}, { every: 1000 })
+      await flush()
+      await vi.advanceTimersByTimeAsync(1000)
+      expect(mock.calls, Object.keys(doc).join()).toHaveLength(2)
+      expect(() => stop()).not.toThrow()
+      await vi.advanceTimersByTimeAsync(5000)
+      expect(mock.calls).toHaveLength(2)
+      expect(vi.getTimerCount()).toBe(0)
+      mock.restore()
+    }
+  })
+})
+
 describe('poll: what the docs promise', () => {
   it('equal headers objects, and an equal timeout, share one request per tick', async () => {
     shareable()

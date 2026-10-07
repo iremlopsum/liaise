@@ -98,12 +98,14 @@ class SharedPoll {
   ) {}
 
   join(caller: Caller): () => void {
-    const first = this.callers.size === 0
-    this.callers.add(caller)
-    if (first) {
-      page()?.addEventListener('visibilitychange', this.onVisibility)
+    if (this.callers.size === 0) {
+      // A partial document shim may have no addEventListener: then there's nothing to watch.
+      const doc = page()
+      if (typeof doc?.addEventListener === 'function') doc.addEventListener('visibilitychange', this.onVisibility)
+      this.callers.add(caller)
       if (!this.paused()) void this.ask()
     } else {
+      this.callers.add(caller)
       const last = this.last
       if (last) queueMicrotask(() => { if (this.callers.has(caller)) deliver(caller, last) })
       // A joiner can make an idle poll ask again: an inBackground caller in a hidden
@@ -124,7 +126,8 @@ class SharedPoll {
     this.clearTimer()
     this.controller?.abort()
     this.controller = undefined
-    page()?.removeEventListener('visibilitychange', this.onVisibility)
+    const doc = page()
+    if (typeof doc?.removeEventListener === 'function') doc.removeEventListener('visibilitychange', this.onVisibility)
     this.forget(this)
   }
 
@@ -147,36 +150,44 @@ class SharedPoll {
     this.timer = undefined
   }
 
+  /**
+   * Innermost and passive: records what is sent, so pollUntil's own results can
+   * name the attempt. Runs after every user middleware and leaves ctx alone.
+   */
+  private readonly record: Middleware = (ctx, next) => {
+    this.request = { method: ctx.request.method, url: ctx.request.url }
+    return next()
+  }
+
+  /**
+   * One request; with a signal, a poll's own, with the recorder. Never throws or rejects:
+   * a liaise endpoint never does, but a hand-written Pollable that throws, rejects or
+   * resolves with something other than a Result is reported, and becomes a middleware error.
+   */
+  private async call(signal?: AbortSignal): Promise<Result<unknown>> {
+    try {
+      const result = await this.endpoint(this.params, signal
+        ? { ...this.callOptions, signal, middleware: [...(this.callOptions.middleware ?? []), this.record] }
+        : this.callOptions)
+      if (typeof result === 'object' && result !== null) return result
+      throw new TypeError(`the endpoint resolved with ${String(result)}, not a Result`)
+    } catch (error) {
+      report(error)
+      return createNetworkErrorResult(
+        new ApiError({ kind: 'middleware', status: 0, statusText: '', body: error, headers: new Headers(), request: { method: this.request?.method ?? '', url: this.request?.url ?? '', params: this.params } }),
+        () => this.call(),
+      )
+    }
+  }
+
   private async ask(): Promise<void> {
     if (this.stopped) return
     this.clearTimer()
     const controller = new AbortController()
     this.controller = controller
-    // Innermost and passive: records what is sent, so pollUntil's own results can
-    // name the attempt. Runs after every user middleware and leaves ctx alone.
-    const record: Middleware = (ctx, next) => {
-      this.request = { method: ctx.request.method, url: ctx.request.url }
-      return next()
-    }
-    let result: Result<unknown>
-    try {
-      result = await this.endpoint(this.params, {
-        ...this.callOptions,
-        signal: controller.signal,
-        middleware: [...(this.callOptions.middleware ?? []), record],
-      })
-    } catch (error) {
-      // A liaise endpoint never throws; a hand-written Pollable might.
-      report(error)
-      // Never deliver inside the join() that started this ask: a synchronous throw would
-      // otherwise reach the caller before it has its `leave`.
-      await Promise.resolve()
-      if (this.stopped) return
-      result = createNetworkErrorResult(
-        new ApiError({ kind: 'middleware', status: 0, statusText: '', body: error, headers: new Headers(), request: { method: this.request?.method ?? '', url: this.request?.url ?? '', params: this.params } }),
-        () => this.endpoint(this.params, this.callOptions),
-      )
-    }
+    // Always at least one microtask: nothing is delivered inside the join() that started
+    // this ask, so a caller always has its `leave` before its first Result.
+    const result = await this.call(controller.signal)
     if (this.stopped) return // stopped while in flight: not delivered
     this.last = result
     this.failures = result.error ? this.failures + 1 : 0
@@ -201,7 +212,8 @@ class SharedPoll {
       wait = every + Math.random() * Math.max(0, target - every)
       const status = result.error?.status
       if (status === 429 || status === 503) {
-        const after = parseRetryAfter(result.response?.headers.get('retry-after') ?? null)
+        // A hand-written Result may have a response without headers.
+        const after = parseRetryAfter(result.response?.headers?.get?.('retry-after') ?? null)
         if (after !== null) wait = Math.max(wait, Math.min(after, cap))
       }
     }
@@ -213,8 +225,8 @@ class SharedPoll {
 }
 
 /** A plain object, as classify-params.ts counts one: another realm's Object.prototype included. */
-function isPlain(value: object): boolean {
-  if (Array.isArray(value)) return false
+function isPlain(value: unknown): value is object {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return false
   const proto = Object.getPrototypeOf(value) as unknown
   return proto === Object.prototype || proto === null || Object.getPrototypeOf(proto as object) === null
 }
@@ -235,8 +247,9 @@ function join(
   // Shared only where there is a `window`: browsers and React Native. The key is
   // decided here, before any middleware runs, so on a server, where one process
   // serves many users, a middleware that adds the current user's token would hand
-  // one user's answers to another. There each caller gets a poll of its own.
-  const shareable = typeof window !== 'undefined'
+  // one user's answers to another. There each caller gets a poll of its own. Only a
+  // function can be a key; anything else gets its own poll, whose request fails.
+  const shareable = typeof window !== 'undefined' && typeof endpoint === 'function'
   const paramsKey = shareable ? stableKey(snapshot) : null
   const optionsKey = paramsKey === null ? null : stableKey(callOptions)
   const key = paramsKey === null || optionsKey === null ? null : `${paramsKey}|${optionsKey}`
@@ -274,15 +287,24 @@ export function poll<P extends object, R>(
   callback: (result: Result<R>) => void,
   options: PollOptions,
 ): () => void {
-  const signal = options.signal
-  if (signal?.aborted) return () => {}
-  const { leave } = join(endpoint as unknown as Pollable<object, unknown>, params, options, r => callback(r as Result<R>))
-  if (!signal) return leave
-  const onAbort = (): void => leave()
-  signal.addEventListener('abort', onAbort, { once: true })
-  return () => {
-    signal.removeEventListener('abort', onAbort)
+  let leave = (): void => {}
+  try {
+    const signal = options.signal
+    if (signal?.aborted) return () => {}
+    ;({ leave } = join(endpoint as unknown as Pollable<object, unknown>, params, options, r => callback(r as Result<R>)))
+    if (!signal) return leave
+    const onAbort = (): void => leave()
+    signal.addEventListener('abort', onAbort, { once: true })
+    return () => {
+      signal.removeEventListener('abort', onAbort)
+      leave()
+    }
+  } catch (error) {
+    // Untyped misuse, such as no options or a signal that isn't one: report it, stop
+    // what it started, and hand back a stop that does nothing.
+    report(error)
     leave()
+    return () => {}
   }
 }
 
@@ -333,9 +355,9 @@ export function pollUntil<P extends object, R>(
         if (settled) return
         settled = true
         if (giveUp !== undefined) clearTimeout(giveUp)
-        signal?.removeEventListener('abort', onAbort)
         leave()
         resolve(result)
+        signal?.removeEventListener('abort', onAbort)
       }
       const onAbort = (): void => finish(own('abort', signal!.reason))
 

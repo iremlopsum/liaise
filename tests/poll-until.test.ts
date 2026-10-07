@@ -281,6 +281,35 @@ describe('pollUntil: how it ends, and what it leaves behind', () => {
     expect(removed).toHaveBeenCalledWith('abort', expect.any(Function))
   })
 
+  it('a Pollable that resolves with something other than a Result resolves middleware, with no unhandled rejection', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+    const bad = (async () => undefined) as unknown as (p: { id: string }) => Promise<Result<Job>>
+    const pending = pollUntil(bad, { id: '7' }, { every: 1000, until: isDone, giveUpAfter: 5000 })
+    await vi.advanceTimersByTimeAsync(100)
+    expect(await settled(pending)).toBe(true)
+    expect((await pending).error?.kind).toBe('middleware')
+    expect(vi.getTimerCount()).toBe(0)
+  })
+
+  it('a signal-like object without removeEventListener still resolves, and stops the poll', async () => {
+    const api = jobs(['queued', 'done'])
+    const signal = { aborted: false, addEventListener() {} } as unknown as AbortSignal
+    const pending = pollUntil(api.getJob, { id: '7' }, { every: 1000, until: isDone, signal })
+    await vi.advanceTimersByTimeAsync(1000)
+    expect(await settled(pending)).toBe(true)
+    expect((await pending).error).toBeNull()
+    await vi.advanceTimersByTimeAsync(5000)
+    expect(mock.calls).toHaveLength(2)
+  })
+
+  it('params that are undefined are passed on as they are', async () => {
+    const passed: unknown[] = []
+    const endpoint = async (params: unknown) => { passed.push(params); return successResult<Job>({ id: '7', status: 'done' }) }
+    const r = await pollUntil(endpoint, undefined as never, { every: 1000, until: isDone })
+    expect(r.error).toBeNull()
+    expect(passed).toEqual([undefined])
+  })
+
   it('never rejects, even for options that are not an object', async () => {
     vi.stubGlobal('reportError', vi.fn())
     const api = jobs(['done'])
