@@ -40,7 +40,7 @@ it('resolves with the typed response', async () => {
   const { data, error } = await api.listRepos({ org: 'acme' })
   mock.restore()
   // Fails intermittently under load (docs/TODO.md C10): the message says which error came back.
-  expect(error, error ? `${error.kind} ${error.status}: ${error.message}` : '').toBeNull()
+  expect(error, error ? `${error.kind} ${error.status}: ${String(error.body)}` : '').toBeNull()
   expect(data).toEqual([{ id: 1, name: 'liaise' }])
 })
 
