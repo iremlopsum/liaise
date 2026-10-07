@@ -5,7 +5,9 @@ const page = (p: string) => readFileSync(new URL(`../dist/${p}/index.html`, impo
 
 describe('docs pages', () => {
   it('render under /<group>/<slug>/ with sidebar groups in order', () => {
-    const html = page('guide/handling-errors')
+    const full = page('guide/handling-errors')
+    const html = full.slice(full.indexOf('<aside data-sidebar'), full.indexOf('</aside>', full.indexOf('<aside data-sidebar')))
+    expect(html.length).toBeGreaterThan(0)
     const order = ['Getting started', 'Guide', 'Recipes', 'Choosing liaise', 'Reference', 'About'].map(l => html.indexOf(`>${l}<`))
     expect(order.every(i => i > 0)).toBe(true)
     expect([...order].sort((a, b) => a - b)).toEqual(order)

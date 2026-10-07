@@ -1,0 +1,80 @@
+---
+title: "Defining endpoints"
+order: 1
+---
+You describe each endpoint once, with its method, its path, and the types of its params and response. Every call to it is then checked against that description.
+
+```ts
+import { createApi, defineRequest } from 'liaise'
+
+type Repo = { id: number; name: string }
+
+// The first type is the response. The second is the params the path doesn't name.
+const listRepos = defineRequest<Repo[], { page?: number }>()({
+  method: 'GET',
+  path: '/orgs/:org/repos',
+})
+
+const api = createApi({ baseUrl: 'https://api.example.com', requests: { listRepos } })
+
+await api.listRepos({ org: 'acme' })           // GET /orgs/acme/repos
+await api.listRepos({ org: 'acme', page: 2 })  // GET /orgs/acme/repos?page=2
+// @ts-expect-error
+await api.listRepos({ page: 2 })               // ✗ compile error: org is required
+```
+
+- **The path names the required params.** Each `:name` in the path becomes a required param of type `string | number`. Its value is filled into the URL and left out of the query string and the body.
+- **Every other param goes in the second type argument.** For `GET` and `DELETE`, these params go in the query string. For `POST`, `PUT` and `PATCH`, they go in a JSON body. [Sending data](/guide/sending-data/) covers what each one can hold.
+- **`bodyAs` flips that default.** Use it for an API that does it the other way round:
+
+  ```ts
+  type Job = { id: string }
+
+  // A DELETE that takes a JSON body
+  const bulkDelete = defineRequest<{ deleted: number }, { ids: string[] }>()({
+    method: 'DELETE',
+    path: '/items',
+    bodyAs: 'body',
+  })
+
+  // A POST that sends its params in the query string
+  const triggerJob = defineRequest<Job, { priority: number }>()({
+    method: 'POST',
+    path: '/jobs/trigger',
+    bodyAs: 'query',
+  })
+  ```
+
+- **A path param must have a usable value.** It must be a non-empty string, a finite number, a bigint or a boolean. `undefined`, `null`, `''`, an object, an array, a `Date` and `NaN` are refused before anything is sent, with an error naming the param.
+- That catches the most common mistake, which is calling before an id has loaded. An `org` that is still `undefined` at runtime returns an error instead of fetching `/orgs/undefined/repos`.
+- **An endpoint with no params** is called with no arguments. With `defineRequest<{ status: string }>()({ method: 'GET', path: '/health' })`, both `api.health()` and `api.health({})` work.
+- **`responseType`** says how to read the response body. It defaults to `'json'`. The options are under [Reading responses](/guide/reading-responses/).
+- **`responseType: 'none'` needs the response type `undefined`.** Anything else is a compile error, because `data` is always `undefined` for an endpoint that sends no body:
+
+  ```ts
+  defineRequest<undefined>()({ method: 'POST', path: '/ping', responseType: 'none' })  // ✓
+  // @ts-expect-error
+  defineRequest<Repo>()({ method: 'POST', path: '/ping', responseType: 'none' })       // ✗
+  ```
+
+- **A `#` in the path is a compile error.** A URL fragment is never sent to the server, so `path: '/docs#section'` is refused where you write it. [URL fragments](/reference/behaviour-in-detail/#url-fragments) has the details.
+
+**Why two calls.** `defineRequest<Repo[]>()({ ... })` is two calls because TypeScript can't infer some type arguments while you write others. The first call takes the response type you write, and the second infers the params from the path. In a single call, writing the response type would quietly turn the path checking off.
+
+## Without defineRequest
+
+`new Request<TParams, TResponse>(config)` is the class that `defineRequest` builds. You write the params type yourself, covering path, query and body params together, and nothing checks it against the path:
+
+```ts
+import { createApi, Request } from 'liaise'
+
+type User = { id: string; name: string }
+
+const getUser = new Request<{ userId: string }, User>({ method: 'GET', path: '/users/:id' })
+const api = createApi({ baseUrl: 'https://api.example.com', requests: { getUser } })
+
+await api.getUser({ userId: '42' })
+// Compiles. The call then returns an error, because the path has no :userId and :id is never filled in.
+```
+
+Use `new Request` when the config isn't a literal, for example when you build it at runtime, or when you don't want the path checked. It is not deprecated. For an endpoint with no params, write `Record<string, never>` as `TParams`.

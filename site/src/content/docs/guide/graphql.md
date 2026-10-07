@@ -1,0 +1,117 @@
+---
+title: "GraphQL"
+order: 11
+---
+`createGraphQL` is the client for a GraphQL backend. Its calls return the same `Result`, run the same middleware and report errors the same way. Every operation is sent as a POST with `{ query, variables }`.
+
+```ts
+import { createGraphQL, Operation, gql } from 'liaise'
+
+type Category = { id: string; name: string; status: string }
+
+const GET_CATEGORY = gql`
+  query GetCategory($id: String!) {
+    category(id: $id) {
+      id
+      name
+      status
+    }
+  }
+`
+
+const getCategory = new Operation<{ id: string }, Category>({
+  operation: GET_CATEGORY,
+})
+
+const graphql = createGraphQL({
+  endpoint: 'https://api.example.com/graphql',
+  operations: { getCategory },
+  onError: (error) => console.error(error.status, error.body),
+})
+
+const { data, error, response, retry } = await graphql.getCategory({ id: '123' })
+```
+
+`Operation<TVariables, TData>` takes the variables type first and the response type second. `gql` marks the string as GraphQL for your editor.
+
+An operation with no variables is called without arguments. Write `Record<string, never>` as its variables type:
+
+```ts
+type Viewer = { id: string; name: string }
+
+const getViewer = new Operation<Record<string, never>, Viewer>({
+  operation: gql`query { viewer { id name } }`,
+})
+
+const api = createGraphQL({ endpoint: 'https://api.example.com/graphql', operations: { getViewer } })
+
+const { data } = await api.getViewer() // no arguments
+```
+
+## Queries and mutations
+
+To keep queries and mutations apart, use the `queries` and `mutations` keys instead of `operations`. Each client uses one shape or the other, and TypeScript refuses both together.
+
+```ts
+const graphql = createGraphQL({
+  endpoint: 'https://api.example.com/graphql',
+  queries: {
+    getCategory: new Operation<{ id: string }, Category>({ operation: GET_CATEGORY }),
+  },
+  mutations: {
+    updateCategory: new Operation<{ id: string; name: string }, Category>({
+      operation: gql`
+        mutation UpdateCategory($id: String!, $name: String!) {
+          updateCategory(id: $id, name: $name) { id name status }
+        }
+      `,
+    }),
+  },
+})
+
+graphql.query.getCategory({ id: '123' })
+graphql.mutation.updateCategory({ id: '123', name: 'New Name' })
+```
+
+## GraphQL errors
+
+A 2xx response with `{ errors: [...] }` is an error. It has `kind: 'http'`, the response's own `status`, and the `GraphQLError[]` in `error.body`. The same `if (error)` check covers GraphQL errors, HTTP errors and network errors.
+
+GraphQL allows partial success, where one field fails and the rest of the query resolves. That data is kept in `error.partialData`. `result.data` stays `null` whenever `error` is set, so `Result` keeps its two clean branches.
+
+```ts
+const { error } = await graphql.getCategory({ id: '123' })
+if (error) {
+  console.log(error.body)        // GraphQLError[]
+  console.log(error.partialData) // the data the server sent with the errors, or undefined
+}
+```
+
+- **A 2xx with neither `data` nor `errors` is a `'parse'` error**, the same rule as an empty body on REST. That covers an empty body, `{}`, `{"data": null}` and a JSON root that isn't an object. `error.body` holds the raw response text, such as `''` or `'{}'`.
+- **`{"data": null, "errors": [...]}` is still `kind: 'http'`**, because the errors are checked first. Any partial result is in `error.partialData`.
+
+## Same as REST, and different
+
+Most of what the guide says about `createApi` holds for `createGraphQL`.
+
+**The same as REST**
+
+- **Every call returns a `Result`**, `{ data, error, response, retry }`, and `error.kind` names the failure.
+- **`middleware`** runs on the client, the `Operation` and the call, in the same order. The context has the same shape, so the [built-in middleware](/guide/retries-caching-and-logging/) and yours work unchanged.
+- **`headers`** go on the client, the `Operation` and the call, and merge by the [three levels](/start/how-it-fits-together/#three-levels-of-settings).
+- **`onError`** goes on `createGraphQL` and works as in [Reporting errors with onError](/guide/handling-errors/#reporting-errors-with-onerror).
+- **`retry()`** is on every `Result`.
+- **`dedupe`** goes on the `Operation`, as in [Drop stale calls with dedupe](/guide/cancelling-deadlines-and-stale-requests/#drop-stale-calls-with-dedupe).
+- **`share`** goes on the `Operation`, as in [Sharing identical requests](/guide/sharing-identical-requests/). Variables must match exactly, key order included. On a mutation, the note there about writes applies.
+- **`timeout`** goes on `createGraphQL`, the `Operation` or the call, and the most specific one wins. It is one deadline for the whole call, retries included ([Set a deadline with timeout](/guide/cancelling-deadlines-and-stale-requests/#set-a-deadline-with-timeout)).
+- **`log`** goes on `createGraphQL`, as in [Log every call](/guide/retries-caching-and-logging/#log-every-call). Each line names the operation, as in `[liaise] → POST getCategory https://api.example.com/graphql`.
+- **`getHeaders()`** is on every operation ([getHeaders()](/reference/getheaders/)).
+- **`schema`** goes on the `Operation` and validates the response's `data`. The response type stays explicit ([Validating responses](/guide/validating-responses/)).
+- **`signal` and `skipMiddleware`** go on the call.
+
+**Different from REST**
+
+- **`endpoint`** is the full URL of the GraphQL endpoint. It takes the place of `baseUrl`.
+- **Variables always go in the JSON body.** There are no path params, no query strings and no `bodyAs`.
+- **Every operation is a `POST`**, with `Content-Type: application/json` unless you set your own.
+- **There is no `responseType`.** The response is always read as JSON.

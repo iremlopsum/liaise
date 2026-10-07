@@ -1,0 +1,123 @@
+---
+title: "Retries, caching and logging"
+order: 8
+---
+Some failures go away when you try again. Some reads repeat often enough to keep. And while you build, you want to see every call. Retries and caching are middleware, imported from a separate entry point:
+
+```ts
+import { retryMiddleware, cacheMiddleware } from 'liaise/middleware'
+```
+
+Logging is the client's `log` option ([Log every call](/guide/retries-caching-and-logging/#log-every-call)).
+
+## Retry failed calls
+
+`retryMiddleware(2)` retries a failed call up to two more times, three attempts in all. By default it retries only 5xx responses. Any 4xx, including a 429, comes back as it is, and so does a network error. To retry 429s and network errors too, pass `retryOn`:
+
+```ts
+import { createApi, defineRequest } from 'liaise'
+import { retryMiddleware } from 'liaise/middleware'
+
+type Item = { id: string }
+
+const getItems = defineRequest<Item[]>()({ method: 'GET', path: '/items' })
+
+const api = createApi({
+  baseUrl: 'https://api.example.com',
+  requests: { getItems },
+  middleware: [retryMiddleware(2)], // 5xx only
+})
+
+// Also retry 429 and network errors. An abort has status 0 too, so check kind.
+const retryMore = retryMiddleware({
+  retryOn: (r) =>
+    (r.error?.status ?? 0) >= 500 || r.error?.status === 429 || r.error?.kind === 'network',
+})
+```
+
+Pass an object to tune the waits between attempts:
+
+```ts
+const retry = retryMiddleware({
+  max: 5,               // up to 5 retries after the first attempt
+  delay: 'exponential', // 250 ms, 500 ms, 1 s, ... before jitter
+  onRetry: ({ attempt, max, delay }) => console.log(`retry ${attempt}/${max} in ${delay}ms`),
+})
+```
+
+- By default the waits grow exponentially with random jitter, and a `Retry-After` header from the server is honoured. Every option is in [RetryOptions](/reference/built-in-middleware-options/#retryoptions).
+- **A cancel or a deadline during a wait ends the call with that error.** If your `timeout`, your signal or a newer `dedupe` call fires between attempts, you get `kind: 'timeout'` or `'abort'`. The 503 that caused the retry is dropped.
+
+## Cache repeated reads
+
+`cacheMiddleware()` keeps successful responses in memory, so a repeated read within the time-to-live skips the network. Each `cacheMiddleware()` call makes its own store. Give it to the endpoints you want cached:
+
+```ts
+import { createApi, defineRequest } from 'liaise'
+import { cacheMiddleware } from 'liaise/middleware'
+
+type User = { id: string; name: string }
+
+const getUserCache = cacheMiddleware({ ttl: 5 * 60_000, maxSize: 100 })
+
+const getUser = defineRequest<User>()({
+  method: 'GET',
+  path: '/users/:id',
+  middleware: [getUserCache],
+})
+
+const api = createApi({ baseUrl: 'https://api.example.com', requests: { getUser } })
+
+// On logout, clear every cached entry:
+getUserCache.clear()
+
+// Skip the cache for one call:
+const { data } = await api.getUser({ id: '42' }, { skipMiddleware: [getUserCache] })
+```
+
+- **Only successes are cached.** An error always goes to the network again.
+- **The key includes the URL, the params and the headers.** When your auth header is set before the cache runs, one user never sees another user's entry. [Cache key](/reference/behaviour-in-detail/#cache-key) has the details.
+- **Put a middleware that adds a unique header to each call after `cacheMiddleware`.** A request ID added before it makes every call look new, and nothing is ever cached. Client middleware always runs before endpoint middleware, so either list the request-ID middleware on the endpoint after the cache, or put the cache on the client before it.
+- The options are `ttl`, `maxSize` and `debug` ([Cache options](/reference/built-in-middleware-options/#cache-options)).
+
+## Log every call
+
+`log: true` on the client prints each call's start and end to the console, with its duration. Logging is off by default.
+
+```ts
+import { createApi, defineRequest } from 'liaise'
+
+const getItems = defineRequest<{ id: string }[]>()({ method: 'GET', path: '/items' })
+
+const api = createApi({
+  baseUrl: '/api',
+  requests: { getItems },
+  log: import.meta.env.DEV, // on in development only (Vite); in Node: process.env.NODE_ENV !== 'production'
+})
+```
+
+```text
+[liaise] → GET getItems /api/items
+[liaise] ← getItems OK (142ms)
+
+[liaise] → POST createUser /api/users
+[liaise] ← createUser ERROR 422 (89ms)
+```
+
+- **Each call logs once, with its final outcome.** The logger runs outside all your middleware, so a call that `retryMiddleware` retries still logs one pair of lines. A call held past its `timeout` by a stuck middleware logs its end at the deadline, when the [timeout backstop](/reference/behaviour-in-detail/#timeout-backstop) ends it. A call whose setup fails, such as one with a path param liaise refuses before sending, logs nothing.
+- **`log: { data: true }` also prints each call's data, or its `error.body` on failure** ([Log options](/reference/built-in-middleware-options/#log-options)). `data` is off by default, because responses often hold personal data and tokens, and a long list makes the console slow.
+- **A call that joined a [shared](/guide/sharing-identical-requests/) request ends with `, shared`**, as in `[liaise] ← getUser OK (138ms, shared)`. Its answer came from a request another call sent.
+- **To log one endpoint or one call, use `logMiddleware`** in that level's `middleware`. It takes the same options ([Log options](/reference/built-in-middleware-options/#log-options)):
+
+  ```ts
+  import { defineRequest } from 'liaise'
+  import { logMiddleware } from 'liaise/middleware'
+
+  const getItems = defineRequest<{ id: string }[]>()({
+    method: 'GET',
+    path: '/items',
+    middleware: [logMiddleware({ data: true })], // or just [logMiddleware]
+  })
+  ```
+
+Logging is meant for development. In production, [write a middleware](/guide/writing-middleware/) that sends the same facts to your monitoring.
