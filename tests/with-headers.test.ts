@@ -1,4 +1,4 @@
-import { describe, it, expect, afterEach } from 'vitest'
+import { describe, it, expect, afterEach, vi } from 'vitest'
 import { createApi, defineRequest, paginate, withHeaders } from '../src/index.js'
 import { cacheMiddleware } from '../src/built-in-middleware.js'
 import { mockFetch, jsonResponse } from '../src/testing.js'
@@ -332,5 +332,57 @@ describe('withHeaders: share and cache stay safe', () => {
     expect((await withHeaders(api, { cookie: 's=bob' }).me()).data?.cookie).toBe('s=bob')
     expect((await withHeaders(api, { cookie: 's=alice' }).me()).data?.cookie).toBe('s=alice')
     expect(mock.callCount('GET /me')).toBe(2)
+  })
+})
+
+describe("withHeaders: everything else is the client's", () => {
+  const setup = () => {
+    const own = mockFetch({ 'GET /me': () => jsonResponse({ cookie: null }), 'GET /slow': () => new Promise<Response>(() => {}) })
+    const onError = vi.fn()
+    const spy = vi.spyOn(console, 'log').mockImplementation(() => {})
+    const api = createApi({
+      baseUrl: 'https://api.test',
+      fetch: own.fetch,
+      fetchOptions: { credentials: 'include' },
+      timeout: 20,
+      onError,
+      log: true,
+      requests: {
+        me: defineRequest<Me>()({ method: 'GET', path: '/me' }),
+        slow: defineRequest<Me>()({ method: 'GET', path: '/slow' }),
+      },
+    })
+    return { own, onError, spy, user: withHeaders(api, { cookie: 's=1' }) }
+  }
+  afterEach(() => vi.restoreAllMocks())
+
+  it("sends through the client's own fetch, with its fetchOptions, and the global fetch is untouched", async () => {
+    const { own, user } = setup()
+    const global = vi.fn(async () => { throw new TypeError('the global fetch was used') })
+    vi.stubGlobal('fetch', global)
+    try {
+      const { error } = await user.me()
+      expect(error).toBeNull()
+      expect(own.calls).toHaveLength(1)
+      expect(own.calls[0].headers.get('cookie')).toBe('s=1')
+      expect(own.calls[0].init.credentials).toBe('include')
+      expect(global).not.toHaveBeenCalled()
+    } finally { vi.unstubAllGlobals() }
+  })
+
+  it("applies the client's timeout and reports through its onError", async () => {
+    const { onError, user } = setup()
+    const { error } = await user.slow()
+    expect(error?.kind).toBe('timeout')
+    expect(onError).toHaveBeenCalledTimes(1)
+    expect(onError.mock.calls[0][0].kind).toBe('timeout')
+  })
+
+  it("logs the copy's call with the client's log", async () => {
+    const { spy, user } = setup()
+    await user.me()
+    expect(spy).toHaveBeenCalledTimes(2)
+    expect(spy.mock.calls[0][0]).toBe('[liaise] → GET me https://api.test/me')
+    expect(spy.mock.calls[1][0]).toMatch(/^\[liaise\] ← me OK/)
   })
 })
