@@ -7,15 +7,17 @@ const link = (key: string) =>
   key === active
     ? 'text-gray-950 dark:text-white font-medium'
     : 'text-gray-600 hover:text-gray-950 dark:text-gray-400 dark:hover:text-white'
+// Marks the section the page is in: "true" rather than "page", since a docs page isn't the link's own target.
+const current = (key: string) => (key === active ? 'true' : undefined)
 ---
 <header class="sticky top-0 z-40 border-b border-gray-950/5 bg-white/85 backdrop-blur-md dark:border-white/10 dark:bg-gray-950/80">
   <div class="mx-auto flex h-14 max-w-[90rem] items-center gap-4 px-4 sm:px-6 lg:px-8">
     <Logo />
     <span class="rounded-full bg-gray-950/[0.04] px-2 py-0.5 font-mono text-[11px] font-medium text-gray-600 ring-1 ring-gray-950/5 ring-inset dark:bg-white/5 dark:text-gray-400 dark:ring-white/10">v{pkg.version}</span>
     <nav class="ml-4 hidden items-center gap-6 text-sm md:flex">
-      <a href={url('/start/quick-start/')} class={link('docs')}>Docs</a>
-      <a href={url('/playground/')} class={link('playground')}>Playground</a>
-      <a href={url('/choosing/how-it-compares/')} class={link('compare')}>Compare</a>
+      <a href={url('/start/quick-start/')} class={link('docs')} aria-current={current('docs')}>Docs</a>
+      <a href={url('/playground/')} class={link('playground')} aria-current={current('playground')}>Playground</a>
+      <a href={url('/compare/')} class={link('compare')} aria-current={current('compare')}>Compare</a>
     </nav>
     <div class="ml-auto flex items-center gap-1.5">
       <button data-search-open class="hidden h-8 w-64 items-center gap-2 rounded-full bg-gray-950/[0.03] px-3 text-left text-[13px] text-gray-500 ring-1 ring-gray-950/10 ring-inset transition hover:ring-gray-950/20 sm:flex dark:bg-white/5 dark:text-gray-400 dark:ring-white/10 dark:hover:ring-white/20">

@@ -1,0 +1,269 @@
+---
+import Base from '../layouts/Base.astro'
+import CompareMatrix from '../components/CompareMatrix.astro'
+import { url } from '../url'
+import pkg from '../../../package.json'
+import {
+  NAMES, data, measured, KINDS, VARIANTS, MODES, sizeRows, sizePlace, rpsCell, overheadMethod, overheadSentence,
+  losses, ky, cell, list, outcome, guideFor, type Kind,
+} from '../compare'
+
+const REPO = 'https://github.com/iremlopsum/liaise'
+const libraries = NAMES.filter((n) => n !== 'fetch').map((n) => `${n} ${measured.versions[n]}`)
+// The axios README for the version measured: "Make XMLHttpRequests from the browser", and the
+// fetch adapter section's "by default ['xhr', 'http', 'fetch']".
+const axiosAdapters = `https://github.com/axios/axios/blob/v${measured.versions.axios}/README.md#fetch-adapter`
+const kyReadme = `https://github.com/sindresorhus/ky/blob/v${measured.versions.ky}/readme.md`
+const h2 = 'scroll-mt-24 text-xl font-semibold tracking-tight text-gray-950 dark:text-white'
+const th = 'px-4 py-2.5 text-[12px] font-medium text-gray-500 dark:text-gray-400'
+const td = 'px-4 py-2.5 tabular-nums'
+const a = 'font-medium text-gray-950 underline decoration-accent underline-offset-[3px] hover:decoration-2 dark:text-white'
+const code = 'rounded-md bg-gray-950/[0.04] px-1.5 py-0.5 font-mono text-[0.85em] font-medium text-gray-950 ring-1 ring-gray-950/[0.06] ring-inset dark:bg-white/[0.06] dark:text-white dark:ring-white/10'
+const q = (s: string) => `“${s}”`
+---
+<Base title="Compare" description={`${list(NAMES)} through ${data.scenarios.length} failure scenarios, with bundle size and request overhead. Every number comes from the comparison harness's last run.`} active="compare">
+  <main class="mx-auto max-w-[90rem] px-4 pt-10 pb-24 sm:px-6 lg:px-8" data-pagefind-body data-pagefind-meta="group:Compare">
+    <header class="max-w-3xl">
+      <p class="text-[13px] font-semibold text-accent" data-pagefind-ignore>Compare</p>
+      <h1 class="mt-2 text-3xl font-semibold tracking-tight text-balance text-gray-950 sm:text-[2.5rem] sm:leading-[1.15] dark:text-white" data-pagefind-meta="title">How liaise compares</h1>
+      <p class="mt-5 text-[15px] leading-7 text-gray-600 dark:text-gray-400">
+        A harness in the liaise repo runs {list(NAMES)} through {data.scenarios.length} failure scenarios against a local server,
+        and records what the calling code gets back. Each library runs every scenario twice: set up the way its own docs describe,
+        and out of the box. The harness also measures bundle size and request overhead.{' '}
+        <a href={url('/choosing/how-it-compares/')} class={a}>How it compares</a> has the rules that keep it fair.
+      </p>
+    </header>
+
+    <!-- When, where and against what. -->
+    <div class="mt-8 max-w-3xl rounded-xl bg-gray-950/[0.025] p-4 text-[13px] leading-6 text-gray-600 ring-1 ring-gray-950/[0.06] ring-inset sm:p-5 dark:bg-white/[0.03] dark:text-gray-400 dark:ring-white/10">
+      <p>
+        <span class="font-medium text-gray-950 dark:text-white">Measured on <time datetime={measured.date}>{measured.readableDate}</time></span>{' '}
+        in Node {measured.node} on {measured.platform}, against {list(libraries)}. fetch is Node's own.
+      </p>
+      {measured.versions.liaise !== pkg.version && (
+        <p data-fact="liaise-version">This run measured liaise {measured.versions.liaise}; the current release is {pkg.version}.</p>
+      )}
+      <p class="mt-2">
+        Other libraries change, so this is a dated snapshot. Every scenario runs in Node. In browsers axios uses XHR
+        (<a href={axiosAdapters} class={a}>its adapters</a>), so its results there can differ.
+      </p>
+      <p class="mt-2">Rerun it from the repo root:</p>
+      <pre class="mt-1.5 overflow-x-auto rounded-lg bg-[var(--code-bg)] px-3.5 py-2.5 font-mono text-[12.5px] leading-6 text-gray-200"><code>npm run build && cd compare && npm install && npm run compare</code></pre>
+      <p class="mt-2">
+        If you maintain one of these libraries and think its setup is unfair, a pull request is welcome:
+        each library's setup is one file in <a href={`${REPO}/tree/main/compare/contenders`} class={a}>compare/contenders</a>.
+      </p>
+    </div>
+
+    <!-- The ten scenarios, in either setup. -->
+    <section class="mt-14" aria-labelledby="scenarios">
+      <h2 id="scenarios" class={h2}>The scenarios</h2>
+      <div class="mt-4 flex flex-wrap items-center gap-x-6 gap-y-4">
+        <div role="group" aria-label="Setup shown" data-variant-switch class="inline-flex rounded-full bg-gray-950/[0.04] p-1 ring-1 ring-gray-950/[0.06] ring-inset dark:bg-white/[0.06] dark:ring-white/10">
+          {(['configured', 'default'] as const).map((v) => (
+            <button type="button" data-show-variant={v} aria-pressed={v === 'configured' ? 'true' : 'false'} aria-controls={`cmp-${v}`}
+              class="rounded-full px-3.5 py-1.5 text-[13px] font-medium text-gray-600 transition-colors hover:text-gray-950 aria-pressed:bg-white aria-pressed:text-gray-950 aria-pressed:shadow-sm aria-pressed:ring-1 aria-pressed:ring-gray-950/[0.08] dark:text-gray-400 dark:hover:text-white dark:aria-pressed:bg-gray-800 dark:aria-pressed:text-white dark:aria-pressed:ring-white/10">
+              {VARIANTS[v].short}
+            </button>
+          ))}
+        </div>
+        <ul class="flex flex-wrap gap-x-5 gap-y-2 text-[12.5px] text-gray-600 dark:text-gray-400" aria-label="Markers">
+          {(Object.keys(KINDS) as Kind[]).map((k) => (
+            <li class="flex items-center gap-2"><span class="cmp-mark" data-mark={k}>{KINDS[k].label}</span>{KINDS[k].help}</li>
+          ))}
+        </ul>
+      </div>
+      <p class="mt-3 text-[13px] text-gray-500 dark:text-gray-400">
+        Select a cell to see how that library was set up, with links to the docs each option comes from. A scenario's name links to the page on how liaise handles it.
+        Every note and the code behind it: <a href={`${REPO}/blob/main/compare/results.md#notes`} class={a}>compare/results.md</a>.
+      </p>
+
+      <div class="mt-6">
+        <CompareMatrix variant="configured" />
+        <CompareMatrix variant="default" hidden />
+      </div>
+      <noscript><style is:inline>[data-variant][hidden] { display: block !important; margin-top: 2.5rem } [data-variant-switch] { display: none !important }</style></noscript>
+      <script is:inline>
+        // The switch shows one setup. The choice is remembered when storage works; the page is the same without it.
+        ;(() => {
+          const KEY = 'compare-variant'
+          const sections = document.querySelectorAll('section[data-variant]')
+          const buttons = document.querySelectorAll('[data-show-variant]')
+          const show = (v) => {
+            for (const s of sections) s.hidden = s.dataset.variant !== v
+            for (const b of buttons) b.setAttribute('aria-pressed', String(b.dataset.showVariant === v))
+          }
+          let saved = null
+          try { saved = localStorage.getItem(KEY) } catch {}
+          if (saved === 'configured' || saved === 'default') show(saved)
+          for (const b of buttons) b.addEventListener('click', () => {
+            show(b.dataset.showVariant)
+            try { localStorage.setItem(KEY, b.dataset.showVariant) } catch {}
+          })
+        })()
+      </script>
+    </section>
+
+    <!-- Size and request overhead. -->
+    <div class="mt-16 grid grid-cols-1 gap-14 lg:grid-cols-2 lg:gap-12">
+      <section aria-labelledby="size">
+        <h2 id="size" class={h2}>Size</h2>
+        <p data-fact="size-method" class="mt-3 text-[14px] leading-6 text-gray-600 dark:text-gray-400">One JSON GET per library, as a minified ES2020 ESM bundle for a browser, gzip and brotli compressed.</p>
+        <div class="mt-4 overflow-x-auto rounded-xl ring-1 ring-gray-950/[0.08] dark:ring-white/10">
+          <table class="w-full text-left text-[13px]">
+            <thead class="bg-gray-50 dark:bg-gray-900"><tr><th scope="col" class={th}>Library</th><th scope="col" class={`${th} text-right`}>gzip (kB)</th><th scope="col" class={`${th} text-right`}>brotli (kB)</th></tr></thead>
+            <tbody class="divide-y divide-gray-950/[0.06] dark:divide-white/[0.08]">
+              {sizeRows.map((r) => (
+                <tr data-size={r.name}><th scope="row" class={`${td} font-medium text-gray-950 dark:text-white`}>{r.name}</th><td class={`${td} text-right`}>{r.gzip}</td><td class={`${td} text-right`}>{r.brotli}</td></tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        <div class="mt-4 space-y-2 text-[14px] leading-6 text-gray-600 dark:text-gray-400">
+          <p>fetch is built into the runtime; its row is the call site only, the floor rather than a library.</p>
+          <p data-fact="size-place">{sizePlace}</p>
+        </div>
+      </section>
+
+      <section aria-labelledby="requests-per-second">
+        <h2 id="requests-per-second" class={h2}>Requests per second</h2>
+        <p data-fact="overhead-method" class="mt-3 text-[14px] leading-6 text-gray-600 dark:text-gray-400">{overheadMethod}</p>
+        <div class="mt-4 overflow-x-auto rounded-xl ring-1 ring-gray-950/[0.08] dark:ring-white/10">
+          <table class="w-full text-left text-[13px]">
+            <thead class="bg-gray-50 dark:bg-gray-900"><tr><th scope="col" class={th}>Library</th>{MODES.map((m) => <th scope="col" class={`${th} text-right`}>{m.label}</th>)}</tr></thead>
+            <tbody class="divide-y divide-gray-950/[0.06] dark:divide-white/[0.08]">
+              {NAMES.map((n) => (
+                <tr data-rps={n}><th scope="row" class={`${td} font-medium text-gray-950 dark:text-white`}>{n}</th>{MODES.map((m) => { const c = rpsCell(n, m.id); return <td class={`${td} text-right`}><span class="whitespace-nowrap">{c.median}</span> <span class="block whitespace-nowrap text-[12px] text-gray-500 sm:inline sm:text-[13px] dark:text-gray-400">{c.range}</span></td> })}</tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        <div class="mt-4 space-y-2 text-[14px] leading-6 text-gray-600 dark:text-gray-400">
+          {MODES.map((m) => <p data-fact={`overhead-${m.id}`}>{overheadSentence(m.id)}</p>)}
+        </div>
+      </section>
+    </div>
+
+    <div class="mt-16 max-w-3xl space-y-14 text-[15px] leading-7 text-gray-700 dark:text-gray-300">
+      <section aria-labelledby="where-liaise-loses">
+        <h2 id="where-liaise-loses" class={h2}>Where liaise loses</h2>
+        <ul class="mt-4 space-y-4">
+          {losses.timeout && (
+            <li data-fact="loses-timeout">
+              <strong class="font-semibold text-gray-950 dark:text-white">No default timeout.</strong>{' '}
+              Out of the box, a liaise call to a server that never answers is {losses.timeout.waiting}. {losses.timeout.who}{' '}
+              Set <a href={url('/guide/cancelling-deadlines-and-stale-requests/#set-a-deadline-with-timeout')} class={a}><code class={code}>timeout</code></a> and
+              the call ends with {q(losses.timeout.configured)}, as in the documented setup.
+            </li>
+          )}
+          {losses.empty204 && (
+            <li data-fact="loses-204">
+              <strong class="font-semibold text-gray-950 dark:text-white">A 204 on a JSON call is {losses.empty204.parse ? 'a parse error' : 'an error'}.</strong>{' '}
+              Out of the box, liaise gives {q(losses.empty204.own)} for a 204 with no body on a JSON call; {losses.empty204.others}.
+              An endpoint that answers 204 needs <a href={url('/guide/reading-responses/#endpoints-that-send-no-body')} class={a}><code class={code}>responseType: 'none'</code></a>.
+            </li>
+          )}
+          {losses.jsonOrEmpty && (
+            <li data-fact="loses-json-or-empty">
+              <strong class="font-semibold text-gray-950 dark:text-white">One endpoint, JSON or an empty body.</strong>{' '}
+              {losses.jsonOrEmpty.href ? <a href={losses.jsonOrEmpty.href} class={a}>{losses.jsonOrEmpty.text}</a> : losses.jsonOrEmpty.text}, as the harness notes.{' '}
+              {losses.jsonOrEmpty.ky && <>In ky's documented setup, {losses.jsonOrEmpty.kyHref ? <a href={losses.jsonOrEmpty.kyHref} class={a}>{losses.jsonOrEmpty.ky}</a> : losses.jsonOrEmpty.ky}.</>}
+            </li>
+          )}
+          {losses.retries && (
+            <li data-fact="loses-retries">
+              <strong class="font-semibold text-gray-950 dark:text-white">No retries out of the box.</strong>{' '}
+              {losses.retries.text} liaise retries with <a href={url('/guide/retries-caching-and-logging/#retry-failed-calls')} class={a}><code class={code}>retryMiddleware</code></a>.
+            </li>
+          )}
+          {losses.size && (
+            <li data-fact="loses-size">
+              <strong class="font-semibold text-gray-950 dark:text-white">Larger than {list(losses.size.smaller)}.</strong>{' '}
+              {losses.size.text}
+            </li>
+          )}
+          {losses.overhead.map((o) => (
+            <li data-fact={`loses-overhead-${o.id}`}>
+              <strong class="font-semibold text-gray-950 dark:text-white">Fewer requests per second than {list(o.ahead)}.</strong>{' '}
+              {o.text}
+            </li>
+          ))}
+        </ul>
+      </section>
+
+      <section aria-labelledby="closest-alternative-ky">
+        <h2 id="closest-alternative-ky" class={h2}>Closest alternative: ky</h2>
+        <p data-fact="ky-rows" class="mt-4">{ky.rowsText}</p>
+        <div class="mt-4 overflow-x-auto rounded-xl ring-1 ring-gray-950/[0.08] dark:ring-white/10">
+          <table class="w-full text-left text-[13px] leading-5">
+            <thead class="bg-gray-50 dark:bg-gray-900"><tr><th scope="col" class={th}>Scenario</th><th scope="col" class={th}>ky</th><th scope="col" class={th}>liaise</th></tr></thead>
+            <tbody class="divide-y divide-gray-950/[0.06] dark:divide-white/[0.08]">
+              {ky.rows.map((s) => (
+                <tr data-ky-row={s.id}>
+                  <th scope="row" class="px-4 py-2.5 align-top font-normal"><a href={url(guideFor(s.id))} class={a}>{s.title}</a></th>
+                  {(['ky', 'liaise'] as const).map((n) => { const c = cell(s, n, 'configured'); return (
+                    <td class="px-4 py-2.5 align-top text-gray-800 dark:text-gray-200"><span class="block">{c.text}</span><span class="cmp-mark mt-1" data-mark={c.kind}>{KINDS[c.kind].label}</span></td>
+                  ) })}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        <p data-fact="ky-defaults" class="mt-4">{ky.defaults}</p>
+        <p data-fact="ky-size" class="mt-2">{ky.size}</p>
+      </section>
+
+      <section aria-labelledby="pick-something-else-when">
+        <h2 id="pick-something-else-when" class={h2}>Pick something else when…</h2>
+        <ul class="mt-4 space-y-4">
+          <li>
+            <strong class="font-semibold text-gray-950 dark:text-white">You need a normalized GraphQL cache, optimistic updates or subscriptions.</strong>{' '}
+            Use Apollo Client or urql. Apollo's <a href="https://www.apollographql.com/docs/react/caching/overview" class={a}>caching overview</a> and
+            urql's <a href="https://nearform.com/open-source/urql/docs/graphcache/" class={a}>Graphcache docs</a> explain how each one caches.
+          </li>
+          <li>
+            <strong class="font-semibold text-gray-950 dark:text-white">You want failed calls to throw.</strong>{' '}
+            ky throws an <code class={code}>HTTPError</code> for a response outside 2xx unless you turn{' '}
+            <a href={`${kyReadme}#throwhttperrors`} class={a}><code class={code}>throwHttpErrors</code></a> off.
+          </li>
+          <li>
+            <strong class="font-semibold text-gray-950 dark:text-white">You want caching and refetching in your UI.</strong>{' '}
+            Use TanStack Query, with liaise underneath: a query function can be any function that returns a promise.
+            The <a href={url('/recipes/use-with-tanstack-query/')} class={a}>TanStack Query recipe</a> shows the two together.
+          </li>
+          <li>
+            <strong class="font-semibold text-gray-950 dark:text-white">You make two or three calls.</strong>{' '}
+            Plain <code class={code}>fetch</code> is fine.
+          </li>
+        </ul>
+        <p class="mt-5"><a href={url('/choosing/when-it-fits-and-when-it-doesnt/')} class={a}>When it fits, and when it doesn't</a> has the longer version.</p>
+      </section>
+    </div>
+  </main>
+
+  <script is:inline>
+    // Place an open setup note next to the cell that opened it. Without this the browser centres it.
+    ;(() => {
+      let from = null
+      document.addEventListener('click', (e) => { const b = e.target.closest?.('[data-cell]'); if (b) from = b }, true)
+      const place = (pop) => {
+        if (!from || !from.isConnected) return
+        const r = from.getBoundingClientRect(), gap = 6, edge = 16
+        const w = pop.offsetWidth || 352, h = pop.offsetHeight || 0
+        let top = r.bottom + gap
+        if (h && top + h > innerHeight - edge && r.top - gap - h > edge) top = r.top - gap - h
+        Object.assign(pop.style, {
+          inset: 'auto', margin: '0',
+          left: `${Math.max(edge, Math.min(r.left, innerWidth - w - edge))}px`,
+          top: `${Math.max(edge, Math.min(top, innerHeight - h - edge))}px`,
+        })
+      }
+      const open = () => { try { return document.querySelector('.cmp-pop:popover-open') } catch { return null } }
+      for (const pop of document.querySelectorAll('.cmp-pop')) {
+        pop.addEventListener('beforetoggle', (e) => { if (e.newState === 'open') place(pop) })
+        pop.addEventListener('toggle', (e) => { if (e.newState === 'open') place(pop) })
+      }
+      for (const ev of ['scroll', 'resize']) addEventListener(ev, () => { const p = open(); if (p) place(p) }, { passive: true, capture: true })
+    })()
+  </script>
+</Base>

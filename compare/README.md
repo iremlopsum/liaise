@@ -35,5 +35,9 @@ tables into the README between `<!-- compare:start -->` and `<!-- compare:end --
 `contenders/*.mjs` (one per library), `run.mjs`, `sizes.mjs`, `overhead.mjs`, `report.mjs`.
 `results.json` is the dated record and `results.md` the generated report.
 
+`cells.mjs` is the outcome cell that `report.mjs` prints. The docs site's comparison page
+(`site/src/pages/compare.astro`) renders `results.json` through the same file, so it imports
+nothing: the site loads it without `compare/node_modules`.
+
 If you maintain one of these libraries and think its file is unfair, a pull request is very
 welcome.
