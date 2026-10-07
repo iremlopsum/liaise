@@ -211,6 +211,37 @@ jobs:
           [ "$LATEST" = "true" ] || latest="--latest=false"
           gh release create "v$VERSION" --verify-tag --title "v$VERSION" --notes-file "$RUNNER_TEMP/notes.md" "$latest"
 
-  # The docs-site spec adds a `docs` job with `needs: release`. It has to
-  # live in this workflow: a Release created with GITHUB_TOKEN does not trigger
-  # other workflows.
+  # Docs go live with the version they describe. Must live here: a Release created with
+  # GITHUB_TOKEN does not trigger other workflows. Only after `release` succeeded, so a
+  # dry run (release skipped) or a failed publish never deploys.
+  docs:
+    needs: [check, release]
+    if: ${{ !cancelled() && needs.check.outputs.dry_run != 'true' && needs.release.result == 'success' }}
+    # Shares the group with docs.yml: the two never deploy at once.
+    concurrency:
+      group: pages
+      cancel-in-progress: false
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.check.outputs.target }}
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+      - run: npm ci && npm run build
+      - run: npm ci --prefix site && npm --prefix site run build
+      - uses: actions/configure-pages@45bfe0192ca1faeb007ade9deae92b16b8254a0d # v6.0.0
+      - uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
+        with:
+          path: site/dist
+      - id: deploy
+        uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346 # v5.0.1
