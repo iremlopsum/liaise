@@ -1,0 +1,187 @@
+name: Release
+
+# Publishes liaise to npm when a version bump lands on main, after the owner
+# approves the `npm` environment; then tags, creates the GitHub Release and
+# smoke-tests what npm serves. Publishing uses npm trusted publishing (OIDC):
+# no npm token exists anywhere, and npm accepts only this file, in this repo,
+# running in the `npm` environment.
+# Design: the 2026-10-07 release-pipeline spec (local docs/superpowers/specs).
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: Run the checks, the gate and the approval, but only simulate the publish
+        type: boolean
+        default: true
+
+# Nothing by default; each job asks for exactly what it uses.
+permissions: {}
+
+# Two releases never interleave, and a queued one is not dropped.
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      version: ${{ steps.decide.outputs.version }}
+      publish: ${{ steps.decide.outputs.publish }}
+      release: ${{ steps.decide.outputs.release }}
+      create_tag: ${{ steps.decide.outputs.create_tag }}
+      latest: ${{ steps.decide.outputs.latest }}
+      target: ${{ steps.decide.outputs.target }}
+      dry_run: ${{ steps.decide.outputs.dry_run }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # The repair path looks up the commit that introduced the version.
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+      - id: decide
+        env:
+          GH_TOKEN: ${{ github.token }}
+          MODE: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run && 'dry-run' || 'push' }}
+        run: node scripts/release-check.mjs --mode "$MODE" >> "$GITHUB_OUTPUT"
+
+  # The full suite, once, before the owner is asked: approval means "ship this
+  # green build". CI already ran the Node 20/22/24 matrix on the PR and the push.
+  gate:
+    needs: check
+    if: needs.check.outputs.publish == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm run test:types
+      - run: npm run test:run
+      - run: npm run test:integration
+      - run: npm run docs:check
+      - run: npm run build
+      - run: npm run size
+
+  publish:
+    needs: [check, gate]
+    if: needs.check.outputs.publish == 'true'
+    runs-on: ubuntu-latest
+    # GitHub holds this job until the owner approves it.
+    environment: npm
+    permissions:
+      contents: read
+      # npm exchanges this OIDC token for a one-time publish credential.
+      id-token: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # No `cache:` here: nothing restored from a cache may reach the tarball.
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+      - name: Require npm 11.5.1 or newer (trusted publishing)
+        run: |
+          if ! node -e 'const [a,b,c]=process.argv[1].split(".").map(Number); process.exit(a>11||(a===11&&(b>5||(b===5&&c>=1)))?0:1)' "$(npm --version)"; then
+            npm install -g npm@^11.5.1
+          fi
+          npm --version
+      - run: npm ci
+      - name: Publish
+        env:
+          DRY_RUN: ${{ needs.check.outputs.dry_run }}
+        # prepublishOnly runs the full suite again inside the publish, on purpose:
+        # the tarball is built and tested in the job that ships it. A dry run
+        # packs instead — npm refuses `publish --dry-run` for a version it
+        # already has, and the gate job has run the suite.
+        run: |
+          if [ "$DRY_RUN" = "true" ]; then
+            npm run build && npm pack --dry-run
+          else
+            npm publish
+          fi
+
+  release:
+    needs: [check, publish]
+    # Runs after a successful publish, or on the repair path (npm already has the
+    # version, so publish was skipped). Never after a failed gate or publish.
+    if: ${{ !cancelled() && needs.check.outputs.release == 'true' && (needs.publish.result == 'success' || needs.check.outputs.publish == 'false') }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.check.outputs.target }}
+          fetch-depth: 0
+      - name: Tag
+        if: needs.check.outputs.create_tag == 'true'
+        env:
+          VERSION: ${{ needs.check.outputs.version }}
+          TARGET: ${{ needs.check.outputs.target }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -a "v$VERSION" -m "v$VERSION" "$TARGET"
+          git push origin "v$VERSION"
+      - name: GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.check.outputs.version }}
+          LATEST: ${{ needs.check.outputs.latest }}
+        run: |
+          node scripts/release-notes.mjs "$VERSION" > "$RUNNER_TEMP/notes.md"
+          latest="--latest"
+          [ "$LATEST" = "true" ] || latest="--latest=false"
+          gh release create "v$VERSION" --verify-tag --title "v$VERSION" --notes-file "$RUNNER_TEMP/notes.md" "$latest"
+
+  # The docs-site spec adds a `docs` job here with `needs: release`. It has to
+  # live in this workflow: a Release created with GITHUB_TOKEN does not trigger
+  # other workflows.
+
+  verify:
+    needs: [check, publish]
+    if: needs.publish.result == 'success' && needs.check.outputs.dry_run != 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+      - name: Install from npm and smoke-test
+        env:
+          VERSION: ${{ needs.check.outputs.version }}
+        # Copied out of the repo first: inside it, import('liaise') would load
+        # the repo itself, not what npm serves. The registry can lag a publish,
+        # so the install retries for up to ten minutes.
+        run: |
+          dir="$RUNNER_TEMP/smoke"
+          mkdir -p "$dir" && cp scripts/smoke-installed.mjs "$dir/" && cd "$dir"
+          npm init -y > /dev/null
+          for i in $(seq 1 20); do
+            if npm install --no-audit --no-fund "liaise@$VERSION"; then break; fi
+            if [ "$i" = 20 ]; then echo "::error::liaise@$VERSION was not installable after 10 minutes"; exit 1; fi
+            sleep 30
+          done
+          node smoke-installed.mjs "$VERSION"
