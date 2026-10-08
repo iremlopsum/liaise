@@ -1,0 +1,106 @@
+---
+// The front page and /intro/: a static start screen, complete without JavaScript, and the host the
+// intro mounts into. React, Remotion and the slides load when Start is pressed (or when the browser
+// is idle, so Start plays at once); Monaco only at step 10. index.astro adds the redirect.
+import LogoMark from './LogoMark.astro'
+import { whatsNew } from '../data/whats-new'
+import { introLength } from '../intro/length'
+import { SLIDES } from '../intro/engine/slides'
+
+// null when the CHANGELOG has no section for the released version: then there is no pill.
+const news = whatsNew()
+const steps = SLIDES.length + 1
+---
+<div class="intro-root" data-intro>
+  <section class="start" data-start aria-labelledby="intro-title">
+    {news && (
+      <a href={news.href} class="news">
+        <span class="news-version">{news.version}</span>
+        {news.text}
+        <span aria-hidden="true">→</span>
+      </a>
+    )}
+    <p class="brand"><LogoMark class="brand-mark" /><span>liaise</span></p>
+    <h1 id="intro-title">Your API calls, minus the surprises.</h1>
+    <p class="lede">Watch an API client get written, one line at a time.</p>
+    <div class="actions">
+      <button type="button" class="start-btn" data-intro-start>Start</button>
+      <span class="meta">{steps} steps, about {introLength()}. Enter works too.</span>
+    </div>
+    <button type="button" data-copy-install class="install">
+      <span><span class="prompt">$ </span><span data-copy-text>npm install liaise</span></span>
+      <span data-label class="install-label">Copy</span>
+    </button>
+  </section>
+  <div data-intro-host hidden></div>
+</div>
+
+<style is:global>
+  /* is:global with an .intro-root prefix: scoped styles would add data-astro-cid attributes, and the
+     What's new pill's markup is matched exactly by its tests. */
+  .intro-root { min-height: calc(100svh - 3.5rem); background: #000; color: #f5f5f7; }
+  .intro-root .start { max-width: 72rem; margin: 0 auto; padding: clamp(48px, 10vh, 120px) clamp(16px, 5vw, 64px) 64px; display: grid; gap: 24px; justify-items: start; }
+  .intro-root .news { display: inline-flex; align-items: center; gap: 8px; border-radius: 999px; padding: 4px 12px 4px 4px; font-size: 13px; color: #98989d; text-decoration: none; box-shadow: inset 0 0 0 1px rgb(255 255 255 / 0.12); }
+  .intro-root .news:hover { color: #f5f5f7; box-shadow: inset 0 0 0 1px rgb(255 255 255 / 0.24); }
+  .intro-root .news-version { border-radius: 999px; padding: 2px 8px; background: rgb(129 140 248 / 0.14); color: #a5b4fc; font-size: 12px; font-weight: 600; }
+  .intro-root .brand { display: flex; align-items: center; gap: 0.25em; margin: 16px 0 0; font-size: clamp(40px, 7vw, 72px); font-weight: 600; letter-spacing: -0.04em; line-height: 1; }
+  .intro-root .brand-mark { width: 1.15em; height: 1.15em; }
+  .intro-root h1 { margin: 0; max-width: 16ch; font-size: clamp(36px, 6.4vw, 84px); line-height: 1.02; font-weight: 600; letter-spacing: -0.04em; text-wrap: balance; }
+  .intro-root .lede { margin: 0; max-width: 34ch; font-size: clamp(19px, 1.8vw, 24px); line-height: 1.45; color: #98989d; }
+  .intro-root .actions { display: flex; flex-wrap: wrap; align-items: center; gap: 12px 18px; margin-top: 8px; }
+  .intro-root .start-btn { height: 52px; padding: 0 34px; border: 0; border-radius: 999px; background: #f5f5f7; color: #000; font: 600 17px/1 var(--font-sans); cursor: pointer; }
+  .intro-root .start-btn:hover { background: #fff; }
+  .intro-root .meta { font: 500 13px/1.4 var(--font-mono); color: #6e6e73; }
+  .intro-root .install { display: inline-flex; align-items: center; gap: 12px; border: 0; border-radius: 999px; padding: 10px 16px; background: transparent; color: #d1d1d6; font: 13px/1 var(--font-mono); cursor: pointer; box-shadow: inset 0 0 0 1px rgb(255 255 255 / 0.12); }
+  .intro-root .install:hover { box-shadow: inset 0 0 0 1px rgb(255 255 255 / 0.24); }
+  .intro-root .prompt { color: #6e6e73; user-select: none; }
+  .intro-root .install-label { font: 12px/1 var(--font-sans); color: #98989d; }
+  .intro-root :focus-visible { outline: 2px solid #a5b4fc; outline-offset: 3px; }
+  @media (prefers-reduced-motion: no-preference) {
+    .intro-root .start > * { animation: intro-start-rise 0.8s cubic-bezier(0.16, 1, 0.3, 1) both; }
+    .intro-root .start > :nth-child(2) { animation-delay: 60ms; }
+    .intro-root .start > :nth-child(3) { animation-delay: 120ms; }
+    .intro-root .start > :nth-child(4) { animation-delay: 180ms; }
+    .intro-root .start > :nth-child(5) { animation-delay: 240ms; }
+    .intro-root .start > :nth-child(6) { animation-delay: 300ms; }
+  }
+  @keyframes intro-start-rise { from { opacity: 0; transform: translateY(10px); filter: blur(6px); } }
+</style>
+
+<script>
+  import { rememberIntro } from '../intro/flag'
+
+  const root = document.querySelector<HTMLElement>('[data-intro]')!
+  const BASE = import.meta.env.BASE_URL
+  const load = () => import('../intro/mount')
+
+  // Fetch the intro while the reader looks at the start screen, so Start plays at once.
+  const later = (f: () => void) => ('requestIdleCallback' in window ? requestIdleCallback(f, { timeout: 3000 }) : setTimeout(f, 1500))
+  later(() => { void load().catch(() => {}) })
+
+  let started = false
+  async function start() {
+    if (started) return
+    started = true
+    try {
+      const { mountIntro } = await load()
+      const host = root.querySelector<HTMLElement>('[data-intro-host]')!
+      root.querySelector<HTMLElement>('[data-start]')!.hidden = true
+      host.hidden = false
+      mountIntro(host, { base: BASE, docsHref: `${BASE}start/quick-start/`, onComplete: () => rememberIntro('done') })
+      window.scrollTo({ top: 0 })
+    } catch {
+      started = false // offline, or the chunk didn't load: the start screen stays, and Start works again
+    }
+  }
+  root.querySelector('[data-intro-start]')!.addEventListener('click', () => { void start() })
+  // Enter starts it, unless focus is on something Enter already means something for.
+  window.addEventListener('keydown', (e) => {
+    if (started || e.key !== 'Enter' || e.metaKey || e.ctrlKey || e.altKey) return
+    if ((e.target as Element | null)?.closest?.('a, button, input, textarea, select, dialog')) return
+    e.preventDefault()
+    void start()
+  })
+  // Skip to docs (both routes) and, on the front page, the header's Docs links: seen it, skipped.
+  for (const a of document.querySelectorAll('[data-skip-intro]')) a.addEventListener('click', () => rememberIntro('skipped'))
+</script>

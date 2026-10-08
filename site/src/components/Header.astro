@@ -3,7 +3,9 @@ import Logo from './Logo.astro'
 import { url } from '../url'
 import pkg from '../../../package.json'
 // No default: a page that is in no section (the front page) marks none.
-const { active } = Astro.props
+const { active, intro } = Astro.props as { active?: string; intro?: 'front' | 'page' }
+// On the front page the Docs link counts as skipping the intro (Intro.astro's script reads the mark).
+const skips = (key: string) => (intro === 'front' && key === 'docs' ? '' : undefined)
 const link = (key: string) =>
   key === active
     ? 'text-gray-950 dark:text-white font-medium'
@@ -12,12 +14,12 @@ const link = (key: string) =>
 const current = (key: string) => (key === active ? 'true' : undefined)
 const sections = [['docs', 'Docs', '/start/quick-start/'], ['playground', 'Playground', '/playground/'], ['compare', 'Compare', '/compare/']] as const
 ---
-<header class="sticky top-0 z-40 border-b border-gray-950/5 bg-white/85 backdrop-blur-md dark:border-white/10 dark:bg-gray-950/80">
+<header class={intro ? 'sticky top-0 z-40 border-b border-white/10 bg-black/80 backdrop-blur-md' : 'sticky top-0 z-40 border-b border-gray-950/5 bg-white/85 backdrop-blur-md dark:border-white/10 dark:bg-gray-950/80'}>
   <div class="mx-auto flex h-14 max-w-[90rem] items-center gap-4 px-4 sm:px-6 lg:px-8">
     <Logo />
     <span class="rounded-full bg-gray-950/[0.04] px-2 py-0.5 font-mono text-[11px] font-medium text-gray-600 ring-1 ring-gray-950/5 ring-inset dark:bg-white/5 dark:text-gray-400 dark:ring-white/10">v{pkg.version}</span>
     <nav class="ml-4 hidden items-center gap-6 text-sm md:flex">
-      {sections.map(([key, label, path]) => <a href={url(path)} class={link(key)} aria-current={current(key)}>{label}</a>)}
+      {sections.map(([key, label, path]) => <a href={url(path)} class={link(key)} aria-current={current(key)} data-skip-intro={skips(key)}>{label}</a>)}
     </nav>
     <div class="ml-auto flex items-center gap-1.5">
       <button data-search-open class="hidden h-8 w-64 items-center gap-2 rounded-full bg-gray-950/[0.03] px-3 text-left text-[13px] text-gray-500 ring-1 ring-gray-950/10 ring-inset transition hover:ring-gray-950/20 sm:flex dark:bg-white/5 dark:text-gray-400 dark:ring-white/10 dark:hover:ring-white/20">
@@ -31,10 +33,15 @@ const sections = [['docs', 'Docs', '/start/quick-start/'], ['playground', 'Playg
       <a href="https://github.com/iremlopsum/liaise" class="hidden size-8 place-items-center rounded-full text-gray-600 hover:text-gray-950 md:grid dark:text-gray-400 dark:hover:text-white" aria-label="GitHub">
         <svg viewBox="0 0 16 16" class="size-[18px] fill-current"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>
       </a>
-      <button data-theme-toggle class="grid size-8 place-items-center rounded-full text-gray-600 hover:text-gray-950 dark:text-gray-400 dark:hover:text-white" aria-label="Toggle dark mode">
-        <svg viewBox="0 0 20 20" class="size-[18px] fill-current dark:hidden"><path d="M10 2a.75.75 0 0 1 .75.75v1.5a.75.75 0 0 1-1.5 0v-1.5A.75.75 0 0 1 10 2Zm0 13a.75.75 0 0 1 .75.75v1.5a.75.75 0 0 1-1.5 0v-1.5A.75.75 0 0 1 10 15Zm0-8a3 3 0 1 0 0 6 3 3 0 0 0 0-6Zm5.657-1.596a.75.75 0 1 0-1.06-1.06l-1.061 1.06a.75.75 0 0 0 1.06 1.06l1.06-1.06Zm-9.193 9.192a.75.75 0 1 0-1.06-1.06l-1.06 1.06a.75.75 0 0 0 1.06 1.06l1.06-1.06ZM18 10a.75.75 0 0 1-.75.75h-1.5a.75.75 0 0 1 0-1.5h1.5A.75.75 0 0 1 18 10ZM5 10a.75.75 0 0 1-.75.75h-1.5a.75.75 0 0 1 0-1.5h1.5A.75.75 0 0 1 5 10Zm9.596 5.657a.75.75 0 0 0 1.06-1.06l-1.06-1.061a.75.75 0 1 0-1.06 1.06l1.06 1.06ZM5.404 6.464a.75.75 0 0 0 1.06-1.06l-1.06-1.06a.75.75 0 1 0-1.061 1.06l1.06 1.06Z"/></svg>
-        <svg viewBox="0 0 20 20" class="hidden size-[18px] fill-current dark:block"><path fill-rule="evenodd" d="M7.455 2.004a.75.75 0 0 1 .26.77 7 7 0 0 0 9.958 7.967.75.75 0 0 1 1.067.853A8.5 8.5 0 1 1 6.647 1.921a.75.75 0 0 1 .808.083Z"/></svg>
-      </button>
+      {!intro && (
+        <button data-theme-toggle class="grid size-8 place-items-center rounded-full text-gray-600 hover:text-gray-950 dark:text-gray-400 dark:hover:text-white" aria-label="Toggle dark mode">
+          <svg viewBox="0 0 20 20" class="size-[18px] fill-current dark:hidden"><path d="M10 2a.75.75 0 0 1 .75.75v1.5a.75.75 0 0 1-1.5 0v-1.5A.75.75 0 0 1 10 2Zm0 13a.75.75 0 0 1 .75.75v1.5a.75.75 0 0 1-1.5 0v-1.5A.75.75 0 0 1 10 15Zm0-8a3 3 0 1 0 0 6 3 3 0 0 0 0-6Zm5.657-1.596a.75.75 0 1 0-1.06-1.06l-1.061 1.06a.75.75 0 0 0 1.06 1.06l1.06-1.06Zm-9.193 9.192a.75.75 0 1 0-1.06-1.06l-1.06 1.06a.75.75 0 0 0 1.06 1.06l1.06-1.06ZM18 10a.75.75 0 0 1-.75.75h-1.5a.75.75 0 0 1 0-1.5h1.5A.75.75 0 0 1 18 10ZM5 10a.75.75 0 0 1-.75.75h-1.5a.75.75 0 0 1 0-1.5h1.5A.75.75 0 0 1 5 10Zm9.596 5.657a.75.75 0 0 0 1.06-1.06l-1.06-1.061a.75.75 0 1 0-1.06 1.06l1.06 1.06ZM5.404 6.464a.75.75 0 0 0 1.06-1.06l-1.06-1.06a.75.75 0 1 0-1.061 1.06l1.06 1.06Z"/></svg>
+          <svg viewBox="0 0 20 20" class="hidden size-[18px] fill-current dark:block"><path fill-rule="evenodd" d="M7.455 2.004a.75.75 0 0 1 .26.77 7 7 0 0 0 9.958 7.967.75.75 0 0 1 1.067.853A8.5 8.5 0 1 1 6.647 1.921a.75.75 0 0 1 .808.083Z"/></svg>
+        </button>
+      )}
+      {intro && (
+        <a href={url('/start/quick-start/')} data-skip-intro class="rounded-full px-2.5 py-1.5 text-[13px] font-medium whitespace-nowrap text-gray-300 hover:text-white">Skip to docs <span aria-hidden="true">→</span></a>
+      )}
       <!-- Below md the section links and GitHub are hidden (the row must fit 320 px): this opens them. -->
       <button type="button" popovertarget="site-menu" class="grid size-8 place-items-center rounded-full text-gray-600 hover:text-gray-950 md:hidden dark:text-gray-400 dark:hover:text-white" aria-label="Site menu">
         <svg viewBox="0 0 20 20" class="size-[18px] fill-current" aria-hidden="true"><path d="M10 3a1.5 1.5 0 1 1 0 3 1.5 1.5 0 0 1 0-3ZM10 8.5a1.5 1.5 0 1 1 0 3 1.5 1.5 0 0 1 0-3ZM11.5 15.5a1.5 1.5 0 1 0-3 0 1.5 1.5 0 0 0 3 0Z"/></svg>
@@ -43,7 +50,7 @@ const sections = [['docs', 'Docs', '/start/quick-start/'], ['playground', 'Playg
   </div>
   <!-- A popover: closes on Escape or a click outside. No display class here, or it would show while closed. -->
   <nav id="site-menu" popover="auto" aria-label="Site" class="inset-auto top-16 right-4 m-0 w-48 rounded-xl bg-white p-1.5 text-sm text-gray-950 shadow-xl ring-1 ring-gray-950/10 sm:right-6 md:hidden dark:bg-gray-900 dark:text-white dark:ring-white/10">
-    {sections.map(([key, label, path]) => <a href={url(path)} class={`block rounded-lg px-3 py-2 hover:bg-gray-950/[0.03] dark:hover:bg-white/5 ${link(key)}`} aria-current={current(key)}>{label}</a>)}
+    {sections.map(([key, label, path]) => <a href={url(path)} class={`block rounded-lg px-3 py-2 hover:bg-gray-950/[0.03] dark:hover:bg-white/5 ${link(key)}`} aria-current={current(key)} data-skip-intro={skips(key)}>{label}</a>)}
     <div class="mx-3 my-1.5 border-t border-gray-950/5 dark:border-white/10"></div>
     <a href="https://github.com/iremlopsum/liaise" class="block rounded-lg px-3 py-2 text-gray-600 hover:bg-gray-950/[0.03] hover:text-gray-950 dark:text-gray-400 dark:hover:bg-white/5 dark:hover:text-white">GitHub</a>
   </nav>

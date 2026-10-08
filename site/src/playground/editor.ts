@@ -73,8 +73,12 @@ monaco.editor.defineTheme('liaise', {
 
 export async function mountEditor(host: HTMLElement, opts: MountOptions): Promise<MountedEditor> {
   await loadTypes(opts.base)
-  const models = new Map(Object.entries(opts.sources).map(([id, code]) =>
-    [id, monaco.editor.createModel(code, 'typescript', monaco.Uri.parse(`file:///${id}.ts`))]))
+  const models = new Map(Object.entries(opts.sources).map(([id, code]) => {
+    const uri = monaco.Uri.parse(`file:///${id}.ts`)
+    // A mount that started before the last one was disposed (step 10 left and entered during load) left a model here.
+    monaco.editor.getModel(uri)?.dispose()
+    return [id, monaco.editor.createModel(code, 'typescript', uri)] as const
+  }))
   let current = opts.current
   const codeFont = getComputedStyle(document.documentElement).getPropertyValue('--font-code').trim() + ', ui-monospace, Menlo, monospace'
   const editor = monaco.editor.create(host, {

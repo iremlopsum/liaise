@@ -1,0 +1,9 @@
+---
+// The mark alone: two linked rings, one in the text colour and one in the accent.
+interface Props { class?: string }
+const { class: cls = 'size-6' } = Astro.props
+---
+<svg viewBox="0 0 28 28" class={cls} fill="none" aria-hidden="true">
+  <rect x="1.5" y="7" width="13" height="14" rx="7" class="stroke-current" stroke-width="2.25" />
+  <rect x="13.5" y="7" width="13" height="14" rx="7" class="stroke-accent" stroke-width="2.25" />
+</svg>
