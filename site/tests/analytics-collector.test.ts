@@ -109,6 +109,16 @@ describe('page and browser facts', () => {
     expect(tagsOf('?ref=readme&utm_source=News&gclid=x')).toEqual({ ref: 'readme', utm_source: 'news' })
     expect(randomId()).toMatch(/^[a-z0-9]{12}$/)
   })
+  it('after the front page\'s redirect, takes the source from its marker, never from the front page', () => {
+    const front = 'https://iremlopsum.github.io/liaise/', origin = 'https://iremlopsum.github.io'
+    expect(fromOf(front, origin, '/liaise/', '?via=front&r=https%3A%2F%2Fgithub.com')).toBe('https://github.com')
+    expect(fromOf(front, origin, '/liaise/', '?via=front&r=http%3A%2F%2Flocalhost%3A4321')).toBe('http://localhost:4321')
+    expect(fromOf(front, origin, '/liaise/', '?via=front')).toBe('')
+    expect(fromOf(front, origin, '/liaise/', '?via=front&r=%2Fcompare%2F')).toBe('')
+    expect(fromOf(front, origin, '/liaise/', '?via=front&r=https%3A%2F%2Fgithub.com%2Fx')).toBe('')
+    expect(fromOf(front, origin, '/liaise/', '?via=front&r=null')).toBe('')
+    expect(fromOf(front, origin, '/liaise/', '?r=https%3A%2F%2Fgithub.com')).toBe('/') // no marker: the referrer as usual
+  })
   it('a fetch that throws, or rejects, never escapes post()', async () => {
     expect(() => post('x', '{}', (() => { throw new Error('no') }) as never)).not.toThrow()
     expect(() => post('x', '{}', (() => Promise.reject(new Error('offline'))) as never)).not.toThrow()

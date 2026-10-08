@@ -5,8 +5,11 @@ export function pagePath(pathname: string, base: string): string {
   const rest = pathname.startsWith(base) ? pathname.slice(base.length) : pathname.replace(/^\//, '')
   return '/' + rest
 }
-/** Another site: only its origin (that's all browsers send anyway). This site: the previous path. */
-export function fromOf(referrer: string, origin: string, base: string): string {
+/** Another site: only its origin (that's all browsers send anyway). This site: the previous path.
+ *  Sent on by the front page's redirect (`?via=front`): the origin it carried in `r`, or direct. */
+export function fromOf(referrer: string, origin: string, base: string, search = ''): string {
+  const q = new URLSearchParams(search), r = q.get('r') || ''
+  if (q.get('via') === 'front') return /^https?:\/\/[a-z0-9.-]+(:\d+)?$/.test(r) ? r : ''
   if (!referrer) return ''
   try {
     const u = new URL(referrer)

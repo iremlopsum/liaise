@@ -2,7 +2,7 @@
 // the page does, and sends it when the tab is hidden or closed. Other modules call `analytics.*`;
 // when the collector is off (another host, GPC, an automated or bot browser), every call is a no-op.
 // It never touches cookies or browser storage, and nothing here may throw into the page.
-import { FIREBASE, COLLECT_HOSTS } from './config'
+import { PROJECT_ID, API_KEY, COLLECT_HOSTS } from './config'
 import { createRecorder, type Recorder } from './recorder'
 import { createEngagement } from './engaged'
 import { createFlusher } from './flush'
@@ -14,7 +14,7 @@ export { pagePath }
 
 /** 'host:port' of a local Firestore emulator. Set only for the browser checks' builds. */
 const EMULATOR = import.meta.env.PUBLIC_ANALYTICS_EMULATOR as string | undefined
-const PROJECT = EMULATOR ? 'demo-liaise-analytics' : FIREBASE.projectId
+const PROJECT = EMULATOR ? 'demo-liaise-analytics' : PROJECT_ID
 const BASE = import.meta.env.BASE_URL
 
 type Methods = Omit<Recorder, 'dirty' | 'snapshot' | 'visibility'>
@@ -38,12 +38,12 @@ function safe<T extends object>(target: T): T {
 const guard = <A extends unknown[]>(fn: (...a: A) => void) => (...a: A) => { try { fn(...a) } catch { /* ignore */ } }
 
 function start(): Analytics {
-  const url = commitUrl(PROJECT, FIREBASE.apiKey, EMULATOR ? `http://${EMULATOR}` : undefined)
+  const url = commitUrl(PROJECT, API_KEY, EMULATOR ? `http://${EMULATOR}` : undefined)
   const now = () => Date.now()
   const ua = navigator.userAgent
   const facts = () => ({
     pv: randomId(), path: pagePath(location.pathname, BASE), tags: tagsOf(location.search),
-    from: fromOf(document.referrer, location.origin, BASE), tz: Intl.DateTimeFormat().resolvedOptions().timeZone ?? '',
+    from: fromOf(document.referrer, location.origin, BASE, location.search), tz: Intl.DateTimeFormat().resolvedOptions().timeZone ?? '',
     lang: (navigator.language || '').toLowerCase(), browser: browserOf(ua), os: osOf(ua),
     device: deviceOf(innerWidth, ua, matchMedia('(pointer: coarse)').matches),
   })
@@ -61,9 +61,9 @@ function start(): Analytics {
   document.addEventListener('visibilitychange', guard(() => {
     const shown = document.visibilityState === 'visible'
     eng.setVisible(shown); rec.visibility(shown)
-    if (!shown) { settle(); flusher.hidden() }
+    if (!shown) { settle(true); flusher.hidden() }
   }))
-  addEventListener('pagehide', guard(() => { settle(); flusher.pagehide() }))
+  addEventListener('pagehide', guard(() => { settle(true); flusher.pagehide() }))
   // A page restored from the back/forward cache is a new page view.
   addEventListener('pageshow', guard((e: Event) => {
     if ((e as PageTransitionEvent).persisted) { rec = createRecorder(facts(), now, seen()); eng = createEngagement(now, seen()); flusher = makeFlusher(); pending = settled = '' }
@@ -84,27 +84,38 @@ function start(): Analytics {
   }), { capture: true })
 
   // Search (the dialog in Base.astro): a query counts once the reader stops typing for 1 s, or picks
-  // a result, or closes the dialog or the page.
-  let pending = '', settled = '', timer: ReturnType<typeof setTimeout> | undefined
-  const results = () => document.querySelectorAll('#search-results > li > a').length
-  function settle() { clearTimeout(timer); const q = pending.trim(); if (q && q !== settled) { settled = q; rec.search(q, results(), null) } }
+  // a result, or closes the dialog or the page. Its results show only once Pagefind has loaded and
+  // searched, which can take seconds: the list's data-q (Base.astro) says which query it shows. Until
+  // it shows this one, settle looks again every 500 ms for 5 s; a hide or a close of the page before
+  // then records nothing, rather than a search that found nothing.
+  let pending = '', settled = '', tries = 0, timer: ReturnType<typeof setTimeout> | undefined
+  const list = () => document.querySelector<HTMLElement>('#search-results')
+  function settle(last?: boolean) {
+    const q = pending.trim()
+    if (!q || q === settled) return
+    clearTimeout(timer)
+    if (list()?.dataset.q === q) { settled = q; rec.search(q, document.querySelectorAll('#search-results > li > a').length, null) }
+    else if (!last && tries++ < 10) timer = setTimeout(guard(() => settle()), 500)
+  }
+  // A picked result belongs to the query the list shows, which may be behind what was typed since.
   const pick = (a: Element | null | undefined) => {
     if (!a) return
+    pending = list()?.dataset.q || pending
     settle()
     rec.searchClick(pending.trim(), [...document.querySelectorAll('#search-results a')].indexOf(a) + 1)
     rec.internalLink()
   }
   document.addEventListener('input', guard((e: Event) => {
     if ((e.target as Element | null)?.id !== 'search-input') return
-    pending = (e.target as HTMLInputElement).value
-    clearTimeout(timer); timer = setTimeout(guard(settle), 1000)
+    pending = (e.target as HTMLInputElement).value; tries = 0
+    clearTimeout(timer); timer = setTimeout(guard(() => settle()), 1000)
   }))
   document.addEventListener('click', guard((e: Event) => pick((e.target as Element | null)?.closest?.('#search-results a'))), { capture: true })
   // Enter picks the highlighted result (Base.astro navigates with location.href, no click).
   document.getElementById('search-input')?.addEventListener('keydown', guard((e: Event) => {
     if ((e as KeyboardEvent).key === 'Enter') pick(document.querySelector('#search-results a[data-active="true"]'))
   }), { capture: true })
-  document.getElementById('search')?.addEventListener('close', guard(settle))
+  document.getElementById('search')?.addEventListener('close', guard(() => settle()))
 
   const api = { input: () => eng.input() } as Analytics
   for (const k of Object.keys(rec) as Array<keyof Recorder>) {
@@ -117,4 +128,10 @@ function start(): Analytics {
 const NOOP = new Proxy({}, { get: () => () => {} }) as Analytics
 let instance: Analytics = NOOP
 try { if (enabled()) instance = safe(start()) } catch { instance = NOOP }
+// The front page's redirect marks where the visit came from (page.ts reads it above); the address
+// bar drops the marker, whether or not the collector runs, and keeps the rest.
+try {
+  const q = new URLSearchParams(location.search)
+  if (q.get('via') === 'front') { q.delete('via'); q.delete('r'); history.replaceState(history.state, '', location.pathname + (String(q) ? '?' + q : '') + location.hash) }
+} catch { /* never into the page */ }
 export const analytics: Analytics = instance
