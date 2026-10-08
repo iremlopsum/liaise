@@ -44,6 +44,26 @@ describe('analytics schema', () => {
     expect(w.ru.split(',')).toHaveLength(CAPS.runs)
   })
 
+  it('pads short slide and check lists, and drops an out-of-range skip step', () => {
+    const r = base()
+    r.intro = emptyIntro()
+    r.intro.slides = r.intro.slides.slice(0, 3)
+    r.intro.step10 = { ...emptyStep10(), attempts: [{ pass: [true, false, true], reason: null }] }
+    const w = encodeRecord(r)
+    expect(w.it!.sl).toMatch(re('slides'))
+    expect(w.it!.t!.at).toMatch(re('attempts'))
+    expect(decodeWire(w)).not.toBeNull()
+  })
+
+  it.each([0, 11, NaN, 2.5])('drops skipFrom %s instead of sending it', (skip) => {
+    const r = base()
+    r.intro = emptyIntro()
+    r.intro.skipFrom = skip as number
+    const w = encodeRecord(r)
+    expect(w.it!.sk).toBe('')
+    expect(decodeWire(w)).not.toBeNull()
+  })
+
   it('every string field it produces matches its regex, at the caps', () => {
     const r = base()
     r.path = '/' + 'a'.repeat(200)

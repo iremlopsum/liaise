@@ -110,14 +110,14 @@ export function encodeRecord(r: PageRecord): Wire {
     const n3 = (x: number) => clamp(x, 0, 999)
     w.it = {
       st: i.start ? `${i.start.method}:${clamp(i.start.ms, 0, 9_999_999)}:${bit(i.start.prefetched)}` : '',
-      sl: i.slides.slice(0, 9).map((s) => [bit(s.reached), bit(s.ended), clamp(s.ms, 0, 9_999_999), n3(s.pauses), n3(s.replays), n3(s.seeks), n3(s.back), n3(s.jumps), n3(s.copies), n3(s.copyFails)].join(':')).join(','),
-      fu: clamp(i.furthest, 0, 10), sk: i.skipFrom === '' ? '' : String(i.skipFrom),
+      sl: Array.from({ length: 9 }, (_, k) => i.slides[k] ?? emptySlide()).map((s) => [bit(s.reached), bit(s.ended), clamp(s.ms, 0, 9_999_999), n3(s.pauses), n3(s.replays), n3(s.seeks), n3(s.back), n3(s.jumps), n3(s.copies), n3(s.copyFails)].join(':')).join(','),
+      fu: clamp(i.furthest, 0, 10), sk: i.skipFrom === '' ? '' : i.skipFrom === 'start' ? 'start' : Number.isInteger(i.skipFrom) && i.skipFrom >= 1 && i.skipFrom <= 10 ? String(i.skipFrom) : '',
     }
     if (i.step10) {
       const t = i.step10
       w.it.t = {
         ed: t.editor, lm: clamp(t.loadMs, 0, 600_000), rh: n3(t.runs.healthy), rd: n3(t.runs.down), rs: n3(t.runs.slow),
-        at: t.attempts.slice(0, CAPS.attempts).map((a) => `${a.pass.slice(0, 5).map((p) => (p ? 'p' : 'f')).join('')}:${a.reason ?? ''}`).join(','),
+        at: t.attempts.slice(0, CAPS.attempts).map((a) => `${Array.from({ length: 5 }, (_, k) => (a.pass[k] ? 'p' : 'f')).join('')}:${a.reason ?? ''}`).join(','),
         so: t.solution, ov: t.startOver, dr: t.drawer, pm: clamp(t.passMs, 0, 86_400_000), oc: t.outcome,
       }
     }
