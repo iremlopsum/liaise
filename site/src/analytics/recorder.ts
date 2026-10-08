@@ -4,12 +4,12 @@ import { CAPS, emptyIntro, emptyStep10, type PageRecord, type Run, type Reason }
 type Init = Pick<PageRecord, 'pv' | 'path' | 'tags' | 'from' | 'tz' | 'lang' | 'browser' | 'os' | 'device'>
 export type Recorder = ReturnType<typeof createRecorder>
 
-export function createRecorder(init: Init, now: () => number) {
+export function createRecorder(init: Init, now: () => number, visible = true) {
   const r: PageRecord = { v: 1, seq: 0, exit: true, engagedMs: 0, searches: [], copies: [], out: { github: 0, npm: 0, compare: 0 }, tabs: [], runs: [], editorFailed: false, intro: null, ...init }
   let dirty = true
   let current = 0                 // 0 = the start screen, 1–9 the slides, 10 step 10
   let timing: { i: number; since: number } | null = null
-  let shownSlide = -1, visible = true
+  let shownSlide = -1
   let firstEditAt: number | null = null
   const touch = () => { dirty = true }
   const intro = () => (r.intro ??= emptyIntro())
@@ -45,6 +45,7 @@ export function createRecorder(init: Init, now: () => number) {
     start(method: 'click' | 'enter', ms: number, prefetched: boolean) { intro().start ??= { method, ms, prefetched }; touch() },
     skip() { intro().skipFrom = current === 0 ? 'start' : current; touch() },
     slideShown(i: number) {
+      if (!Number.isInteger(i) || i < 0 || i >= 9) return
       stopTiming(); shownSlide = i; reach(i + 1)
       slide(i).reached = true; startTiming(); touch()
     },

@@ -2,8 +2,8 @@
 // Measured lazily from timestamps, so no timer runs.
 export const IDLE_MS = 15_000
 
-export function createEngagement(now: () => number) {
-  let lastInput = now(), visible = true, last = now(), total = 0
+export function createEngagement(now: () => number, visible = true) {
+  let lastInput = now(), last = now(), total = 0
   function tick() {
     const t = now()
     if (visible) { const to = Math.min(t, lastInput + IDLE_MS); if (to > last) total += to - last }

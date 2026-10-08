@@ -125,3 +125,21 @@ describe('never breaks the page', () => {
     vi.unstubAllGlobals()
   })
 })
+
+describe('slideShown bounds', () => {
+  it('ignores an index that is not a slide, so a later hide cannot throw', () => {
+    const r = createRecorder(init, () => 0)
+    for (const bad of [9, 12, -1, 1.5, NaN]) r.slideShown(bad)
+    expect(() => r.visibility(false)).not.toThrow()
+    expect(r.snapshot(1, 0).intro).toBeNull()
+  })
+  it('starts from the real visibility, so a page opened in a background tab is not timed', () => {
+    const c = clock()
+    const r = createRecorder(init, c.now, false)
+    r.slideShown(0); c.t += 5_000
+    expect(r.snapshot(1, 0).intro!.slides[0].ms).toBe(0)
+    const e = createEngagement(c.now, false)
+    c.t += 5_000; e.input(); c.t += 5_000
+    expect(e.ms).toBe(0)
+  })
+})
