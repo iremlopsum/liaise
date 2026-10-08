@@ -162,7 +162,11 @@ function Workbench({ base, docsHref, onComplete, onReplay, onFail }: ChallengePr
     },
     onSettle: ({ id, outcome, ms }) => setRows((prev) => prev.map((r) => (r.id === id ? { ...r, outcome, ms } : r))),
   }), [push])
-  useEffect(() => () => runner.stop(), [runner])
+  // Leaving step 10 stops the run in flight. run() and check() see `goneRef` after each await and stop
+  // there: a check that went on would start its next run with no view to show it, swapping fetch
+  // and the console under a page that has moved on.
+  const goneRef = useRef(false)
+  useEffect(() => { goneRef.current = false; return () => { goneRef.current = true; runner.stop() } }, [runner])
 
   // The reader's file, loaded for one run as /playground/ loads an example: liaise is the site's
   // build (public/liaise), and every client the file makes carries the run's gate.
@@ -188,7 +192,7 @@ function Workbench({ base, docsHref, onComplete, onReplay, onFail }: ChallengePr
         onRun: () => runRef.current(),
         onChange: (value) => {
           window.clearTimeout(save)
-          save = window.setTimeout(() => writeSaved(value), 400)
+          save = window.setTimeout(() => { save = undefined; writeSaved(value) }, 400)
           if (checkedRef.current !== null) setStale(value !== checkedRef.current)
           setPristine(value === SCAFFOLD)
         },
@@ -202,7 +206,14 @@ function Workbench({ base, docsHref, onComplete, onReplay, onFail }: ChallengePr
         setReady(true)
       })
       .catch((e) => { console.warn('intro: the editor did not load.', e); if (!gone) onFail() })
-    return () => { gone = true; window.clearTimeout(save); mounted?.dispose(); ed.current = null }
+    return () => {
+      gone = true
+      window.clearTimeout(save)
+      // Left with a save still waiting (Back, a segment, Watch again): keep the newest keystrokes now.
+      if (mounted && save !== undefined) writeSaved(mounted.value())
+      mounted?.dispose()
+      ed.current = null
+    }
   }, [base]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const report = (r: ChallengeRun, limitS: number) => {
@@ -224,9 +235,12 @@ function Workbench({ base, docsHref, onComplete, onReplay, onFail }: ChallengePr
     setTab('console')
     try {
       const { js, diagnostics } = await editor.compile()
+      if (goneRef.current) return
       push('divider', `Run · server ${MODE_LABEL[mode]}`)
       if (diagnostics.length) push('warn', `${diagnostics.length} type error${diagnostics.length === 1 ? '' : 's'}, running it anyway. Line ${diagnostics[0].line}: ${diagnostics[0].message}`)
-      report(await runner.run(loadJs(js), { mode, timeoutMs: 15_000 }), 15)
+      const r = await runner.run(loadJs(js), { mode, timeoutMs: 15_000 })
+      if (goneRef.current) return
+      report(r, 15)
     } catch (e) {
       push('error', `The editor couldn't compile the file: ${describeThrown(e)}`)
     } finally {
@@ -247,14 +261,18 @@ function Workbench({ base, docsHref, onComplete, onReplay, onFail }: ChallengePr
     const source = editor.value()
     try {
       const { js, diagnostics } = await editor.compile()
+      if (goneRef.current) return
       setTab('console')
       push('divider', 'Check 1 of 2 · server Healthy')
       const a = await runner.run(loadJs(js), { mode: 'healthy', timeoutMs: TIMEOUT_S * 1000 })
+      if (goneRef.current) return
       report(a, TIMEOUT_S)
       await tick('liaise', checkLiaise(a))
       await tick('healthy', checkHealthy(a))
+      if (goneRef.current) return
       push('divider', 'Check 2 of 2 · server Down')
       const b = await runner.run(loadJs(js), { mode: 'down', timeoutMs: TIMEOUT_S * 1000 })
+      if (goneRef.current) return
       report(b, TIMEOUT_S)
       const results: Record<CheckId, CheckState> = {
         liaise: checkLiaise(a), healthy: checkHealthy(a), down: checkDown(b, source), throws: checkThrows(a, b), types: checkTypes(diagnostics),
@@ -262,11 +280,12 @@ function Workbench({ base, docsHref, onComplete, onReplay, onFail }: ChallengePr
       await tick('down', results.down)
       await tick('throws', results.throws)
       await tick('types', results.types)
+      if (goneRef.current) return
       setCheckedCode(source)
       setStale(editor.value() !== source)
       const passed = CHECKS.filter((c) => results[c.id].status === 'pass').length
       push(passed === CHECKS.length ? 'result' : 'note', `${passed} of ${CHECKS.length} checks pass.`)
-      if (passed === CHECKS.length) { await sleep(800); setSolved(true) }
+      if (passed === CHECKS.length) { await sleep(800); if (!goneRef.current) setSolved(true) }
     } catch (e) {
       push('error', `The check couldn't run: ${describeThrown(e)}`)
       setChecks(IDLE)
@@ -307,7 +326,10 @@ function Workbench({ base, docsHref, onComplete, onReplay, onFail }: ChallengePr
               <div className="toolbar">
                 <span className="file"><span className="file-dot" aria-hidden="true" />{FILE_NAME}</span>
                 <ServerSwitch mode={mode} onMode={setMode} disabled={busy === 'check'} />
-                <button type="button" className={`run${busy === 'run' ? ' stop' : ''}`} onClick={() => void run()} disabled={!ready || busy === 'check'} title={`Run (${RUN_KEYS})`}>
+                <button
+                  type="button" className={`run${busy === 'run' ? ' stop' : ''}`} onClick={() => void run()} title={`Run (${RUN_KEYS})`}
+                  disabled={!ready} aria-disabled={busy === 'check' ? true : undefined}
+                >
                   {busy === 'run' ? <><StopIcon /> Stop</> : <><PlayIcon /> Run <kbd>{RUN_KEYS}</kbd></>}
                 </button>
               </div>
@@ -352,7 +374,9 @@ function Workbench({ base, docsHref, onComplete, onReplay, onFail }: ChallengePr
 
             <section className={`checks${stale ? ' stale' : ''}`} aria-labelledby="checks-title">
               <div className="check-actions">
-                <button type="button" className="pill" onClick={() => void check()} disabled={!ready || busy !== null}>
+                {/* Busy, it stays focusable (aria-disabled, and check() ignores it): disabled, it would drop
+                    focus to the page, and ← would then leave step 10 mid-check. */}
+                <button type="button" className="pill" onClick={() => void check()} disabled={!ready} aria-disabled={busy !== null ? true : undefined}>
                   {busy === 'check' ? 'Checking…' : 'Check my code'}
                 </button>
                 {!confirming && <button type="button" className="text-btn" onClick={() => setConfirming(true)} disabled={!ready || busy !== null}>Show a solution</button>}

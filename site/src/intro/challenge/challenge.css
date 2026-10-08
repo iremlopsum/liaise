@@ -49,8 +49,9 @@
 .intro-app .step10 .seg-opt.down.on .dot { background: #ea580c; }
 .intro-app .step10 .seg-opt.slow.on .dot { background: #ca8a04; }
 .intro-app .step10 .run { height: 34px; padding: 0 12px 0 13px; border: 0; border-radius: 999px; background: rgba(129, 140, 248, 0.2); color: #e0e4ff; font-size: 13px; font-weight: 600; display: inline-flex; align-items: center; gap: 8px; cursor: pointer; white-space: nowrap; transition: background 0.2s; }
-.intro-app .step10 .run:hover:not(:disabled) { background: rgba(129, 140, 248, 0.3); }
-.intro-app .step10 .run:disabled { opacity: 0.4; cursor: default; }
+.intro-app .step10 .run:hover:not(:disabled):not([aria-disabled="true"]) { background: rgba(129, 140, 248, 0.3); }
+/* Busy, Run and Check my code are aria-disabled rather than disabled, so they keep focus (Challenge.tsx). */
+.intro-app .step10 .run:disabled, .intro-app .step10 .run[aria-disabled="true"] { opacity: 0.4; cursor: default; }
 .intro-app .step10 .run kbd { background: rgba(255, 255, 255, 0.1); color: #c7d2fe; }
 .intro-app .step10 .run.stop { background: rgba(253, 186, 116, 0.16); color: var(--err); }
 .intro-app .step10 .monaco-host { position: relative; flex: 1; min-height: 0; border-radius: 0 0 18px 18px; overflow: hidden; }
@@ -125,9 +126,9 @@
     height: 44px; min-width: 150px; padding: 0 22px; border: 0; border-radius: 999px;
     background: var(--fg); color: #000; font-size: 15px; font-weight: 600; letter-spacing: -0.01em;
     text-decoration: none; cursor: pointer; white-space: nowrap; transition: background 0.2s, scale 0.2s, opacity 0.2s; }
-.intro-app .step10 .pill:hover:not(:disabled) { background: #fff; }
-.intro-app .step10 .pill:active:not(:disabled) { scale: 0.97; }
-.intro-app .step10 .pill:disabled { opacity: 0.45; cursor: default; }
+.intro-app .step10 .pill:hover:not(:disabled):not([aria-disabled="true"]) { background: #fff; }
+.intro-app .step10 .pill:active:not(:disabled):not([aria-disabled="true"]) { scale: 0.97; }
+.intro-app .step10 .pill:disabled, .intro-app .step10 .pill[aria-disabled="true"] { opacity: 0.45; cursor: default; }
 .intro-app .step10 .pill.small { height: 36px; min-width: 0; padding: 0 16px; font-size: 14px; }
 .intro-app .step10 .pill.big { height: 54px; min-width: 0; padding: 0 30px; font-size: 17px; }
 .intro-app .step10 .link-btn { display: inline-flex; align-items: center; height: 44px; padding: 0 18px; border-radius: 999px; color: var(--fg); font-size: 15px; font-weight: 500; text-decoration: none; transition: background 0.2s; }
