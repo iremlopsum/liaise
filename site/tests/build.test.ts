@@ -282,8 +282,18 @@ describe('remembering the intro, and the way back', () => {
     }
     expect(run('https://github.com/iremlopsum/liaise', '?utm_source=newsletter&utm_campaign=Launch%20Week&gclid=x'))
       .toHaveBeenCalledWith('/liaise/start/quick-start/?via=front&r=https%3A%2F%2Fgithub.com&utm_source=newsletter&utm_campaign=Launch%20Week')
-    expect(run('https://iremlopsum.github.io/liaise/compare/', '?ref=readme')).toHaveBeenCalledWith('/liaise/start/quick-start/?via=front&ref=readme')
+    expect(run('', '?ref=readme')).toHaveBeenCalledWith('/liaise/start/quick-start/?via=front&ref=readme')
     expect(run('not a url', '')).toHaveBeenCalledWith('/liaise/start/quick-start/?via=front')
+  })
+  it('carries nothing on a click from this site, so the header\'s logo and the 404 page are not counted as entries', () => {
+    const script = redirect(page('index.html'))!
+    const run = (referrer: string) => {
+      const location = { replace: vi.fn(), origin: 'https://iremlopsum.github.io', search: '' }
+      new Function('localStorage', 'location', 'performance', 'document', script)({ getItem: () => 'done' }, location, {}, { referrer })
+      return location.replace
+    }
+    expect(run('https://iremlopsum.github.io/liaise/compare/')).toHaveBeenCalledWith('/liaise/start/quick-start/')
+    expect(run('https://iremlopsum.github.io/liaise/404.html')).toHaveBeenCalledWith('/liaise/start/quick-start/')
   })
   it('never redirects /intro/', () => {
     expect(redirect(page('intro/index.html'))).toBeUndefined()
