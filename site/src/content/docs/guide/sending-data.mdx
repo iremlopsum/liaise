@@ -39,7 +39,7 @@ liaise serializes the body from what you pass, and sets `Content-Type` for you u
 - **A path param fills the path and is left out of the body.** `id` goes into `/users/7`, so the body is only `{"name":"Grace"}`. If your API also wants `id` in the body, give the body field a different name from the path param.
 - **Nested objects and arrays go in the body as JSON.** Only the query string refuses them.
 - **An array as the params is the whole body.** It is sent as a JSON array. An array has no named fields, so it can't fill path params or a query string, and a call that needs either is refused before anything is sent.
-- **A fixed query string can go in the path**, as `?dryRun=false` does here. Every param you pass goes either in the body or in the query string, never in both. For a query value that changes from call to call on a body request, add it to `ctx.request.url` in a [middleware](/guide/writing-middleware/).
+- **A fixed query string can go in the path**, as `?dryRun=false` does here. Every param you pass goes either in the body or in the query string, never in both. For a query value that changes from call to call on a body request, see [Send a query param with a JSON body](/recipes/send-a-query-param-with-a-json-body/).
 
 | You pass | Body sent | Content-Type |
 | -------- | --------- | ------------ |

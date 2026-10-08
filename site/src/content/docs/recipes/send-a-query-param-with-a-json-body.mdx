@@ -1,0 +1,22 @@
+---
+title: "Send a query param with a JSON body"
+description: "A small endpoint middleware moves the params you name from the JSON body to the query string, for APIs like Google's updateMask."
+order: 11
+---
+Use this when an API wants some values in the query string and the rest in a JSON body on the same request, such as `PATCH /users/7?updateMask=name` with the user's new fields in the body. liaise sends every param that isn't a path param either in the query string or in the body, never split between them ([Query string or body](/guide/defining-endpoints/#query-string-or-body)). A fixed value can go in the path, as in `path: '/items/bulk?dryRun=false'`. A value that changes from call to call needs this middleware.
+
+Put the middleware on the endpoint, and name the params it should move:
+
+<Example name="query-with-body" />
+
+`updateMask` goes in the query string, and `name` stays in the body. Everything else works as usual: the path param fills the path, and `Content-Type` stays `application/json`.
+
+## Why it works
+
+- **liaise reads `ctx.request.url` and `ctx.request.body` when it calls `fetch`**, so a middleware that changes them changes what is sent ([`MiddlewareContext`](/reference/middlewarecontext/)). The body is already the JSON string by then, so the middleware parses it, takes the named fields out, and writes the rest back.
+- **The params stay typed.** `updateMask` is in the endpoint's params type like any other field, so the call is checked as usual and you still pass one params object.
+- **An array becomes repeated keys** (`updateMask=name&updateMask=email`), the format liaise uses for arrays in a query string ([Query strings](/guide/sending-data/#query-strings)). Change the inner loop if your API wants `name,email` instead.
+- **A retry doesn't add the param twice.** `retryMiddleware` sends every attempt with the same `ctx`, so this middleware runs again on a body it has already changed. The named fields are gone from the body by then, so it leaves the URL alone.
+- **It only reads a JSON body.** A `FormData` or a string body isn't sent as `application/json`, so it passes through. A JSON array body has no named fields, so it is sent as it is.
+
+**Next:** That's the recipes. [When it fits, and when it doesn't](/choosing/when-it-fits-and-when-it-doesnt/) helps you decide whether liaise suits your project.
