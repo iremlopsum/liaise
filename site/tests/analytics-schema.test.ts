@@ -88,6 +88,14 @@ describe('analytics schema', () => {
     expect(cleanTag('News Letter!')).toBe('news-letter-')
   })
 
+  it('never keeps a query with an @ in it, so a pasted email address is not recorded', () => {
+    expect(cleanQuery('Ada@Example.com')).toBe('')
+    expect(cleanQuery('contact me@x.io please')).toBe('')
+    const r = base()
+    r.searches = [{ q: 'ada@example.com', n: 0, pos: null }, { q: 'dedupe', n: 3, pos: 1 }]
+    expect(encodeRecord(r).se).toBe('dedupe:3:1')
+  })
+
   it('decodes only what the rules would accept', () => {
     const w = encodeRecord(base()) as unknown as Record<string, unknown>
     expect(decodeWire({ ...w, v: 2 })).toBeNull()

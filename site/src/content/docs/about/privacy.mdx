@@ -12,7 +12,7 @@ The site itself remembers a few choices in your browser, so they survive a reloa
 - The page, any `ref`, `utm_source`, `utm_medium` or `utm_campaign` tag in its address, and where you came from: the site that linked to it (only that site's address, as browsers send it), or the page of this site you were on.
 - Your timezone, used to guess a country; your browser's language; and your browser, operating system and device as categories (for example "Safari", "macOS", "desktop").
 - How long the page was in front of you and in use, and whether you left the site from it.
-- On the docs: what you searched for, how many results there were and which position you picked, which Copy buttons worked, and clicks on links to GitHub, npm and Compare.
+- On the docs: what you searched for, how many results there were and which position you picked, which Copy buttons worked, and clicks on links to GitHub, npm and Compare. A search with an @ in it is never recorded, so a pasted email address isn't kept.
 - In the playground and the intro: which example you ran, how far the intro got, and how the challenge's checks went.
 
 ## What it never records
@@ -25,4 +25,8 @@ If your browser sends Global Privacy Control, nothing is recorded. Automated bro
 
 ## Where it goes, and for how long
 
-Records go to Google's Firebase, stored in the EU. Records are deleted once they are older than 30 days, the next time the daily totals are built, and only the daily totals remain. Only the site's owner can read them.
+Records go to Google's Firebase, stored in the EU. Only the site's owner can read them.
+
+Records older than 30 days are deleted the next time the owner opens the analytics. So a record can stay longer than 30 days if the owner hasn't looked in a while.
+
+What remains is a set of daily totals, kept for good. They include the most common searches and the searches that found nothing, as typed.

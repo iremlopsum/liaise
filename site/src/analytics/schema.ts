@@ -1,7 +1,8 @@
 // One analytics record per page view (docs/superpowers/specs/2026-10-08-cookieless-analytics-design.md
 // §3). The collector builds a PageRecord, sends its Wire form, and the dashboard decodes the Wire
 // back. firestore.rules checks the Wire with the same regexes (RX). Change a cap or a pattern here,
-// and dashboard/tests/emu/rules.test.ts says whether the rules still agree.
+// and the private repo iremlopsum/liaise-dashboard's tests/emu/rules.test.ts says whether the rules
+// still agree.
 //
 // Lists travel as one compact string each (entries joined by ",", fields by ":"), because Firestore
 // rules can't loop over a list: one regex bounds a whole list, item by item.
@@ -79,7 +80,8 @@ export const emptyIntro = (): Intro => ({ start: null, slides: Array.from({ leng
 
 const clamp = (n: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, Math.round(Number.isFinite(n) ? n : 0)))
 const bit = (b: boolean) => (b ? '1' : '0')
-export const cleanQuery = (q: string) => q.toLowerCase().replace(/[^a-z0-9 ._@/+#-]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, CAPS.query).trim()
+/** A query with an @ in it is never kept ('' drops it): it may be a pasted email address. */
+export const cleanQuery = (q: string) => q.includes('@') ? '' : q.toLowerCase().replace(/[^a-z0-9 ._@/+#-]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, CAPS.query).trim()
 export const cleanPath = (p: string) => ('/' + p.toLowerCase().replace(/^\/+/, '').replace(/[^a-z0-9/._~-]/g, '-')).slice(0, CAPS.path + 1)
 export const cleanTag = (v: string) => v.toLowerCase().replace(/[^a-z0-9._-]/g, '-').slice(0, CAPS.tag)
 const cleanTab = (t: string) => t.toLowerCase().replace(/[^a-z-]/g, '-').slice(0, 24) || 'other'
