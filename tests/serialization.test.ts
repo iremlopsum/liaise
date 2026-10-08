@@ -242,6 +242,17 @@ describe('an array as params', () => {
     expect(fetchMock).not.toHaveBeenCalled()
     expect(result.error?.kind).toBe('network')
     expect((result.error?.body as Error).message).toMatch(/Cannot send an array as params .* query string/)
+    expect((result.error?.body as Error).message).toContain('{ ids: [...] }')
+  })
+
+  it('is refused on a POST with bodyAs: \'query\'', async () => {
+    const fetchMock = vi.fn(async () => okResponse())
+    vi.stubGlobal('fetch', fetchMock)
+    const call = new Request<any, unknown>({ method: 'POST', path: '/items', bodyAs: 'query' })
+    const api = createApi({ baseUrl: 'https://x.test', requests: { call } })
+    const { error } = await api.call(['a'])
+    expect(fetchMock).not.toHaveBeenCalled()
+    expect((error?.body as Error).message).toMatch(/Cannot send an array as params .* query string/)
   })
 
   it('is refused on a body request whose path has params, since it cannot fill them', async () => {

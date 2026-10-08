@@ -5,6 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [5.3.1] — 2026-10-08
+
+Fixes an array passed as params, which was sent as an object with index keys. An array on a request whose params go in the query string is now refused; see [MIGRATION.md](./MIGRATION.md#upgrading-to-531).
+
+### Fixed
+
+- **An array as params was sent as an object with index keys.** `defineRequest<Result, Item[]>()` compiles, but `api.createItems([{ name: 'a' }, { name: 'b' }])` sent the body `{"0":{"name":"a"},"1":{"name":"b"}}`, and an empty array sent no body at all. An array is now sent as a JSON array body, `[{"name":"a"},{"name":"b"}]`, with `Content-Type: application/json`, and `[]` is sent as `[]`.
+- **An array as params on a `GET` or `DELETE` built `?0=a&1=b`.** It is now refused with a `'network'` error whose `TypeError` says to put the array in an object, such as `{ ids: [...] }`, and nothing is sent. The same goes for any request whose params go in the query string (`bodyAs: 'query'`). An array can't fill path params either, so a call to a path with params is refused, as it was before.
+
+### Documentation
+
+- Sending data has a tested example of request bodies: a `PATCH` whose path param is left out of the body, a nested JSON body, and an array body sent to a path with a fixed query string. It says how to send a query value that changes per call alongside a body (a middleware that changes `ctx.request.url`).
+
+Sizes, gzipped, are unchanged: a REST-only import is 7.0 kB, and 9.4 kB with `poll` and `pollUntil`. The core entry is 11.3 kB, and 12.6 kB with all the middleware.
+
 ## [5.3.0] — 2026-10-07
 
 Adds `withHeaders()`: a copy of a client that also sends some headers, such as a user's cookie on a server.
@@ -1244,6 +1259,7 @@ Initial release of the rewritten client. Reconstructed from the release commit
   `ArrayBuffer` and strings
 - Response parsing as `json`, `text`, `blob`, `arrayBuffer` or `formData`
 
+[5.3.1]: https://github.com/iremlopsum/liaise/compare/v5.3.0...v5.3.1
 [5.3.0]: https://github.com/iremlopsum/liaise/compare/v5.2.1...v5.3.0
 [5.2.1]: https://github.com/iremlopsum/liaise/compare/v5.2.0...v5.2.1
 [5.2.0]: https://github.com/iremlopsum/liaise/compare/v5.1.2...v5.2.0

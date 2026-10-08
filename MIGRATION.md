@@ -8,6 +8,23 @@ For the full record of what changed in each release, see [CHANGELOG.md](./CHANGE
 
 ---
 
+## Upgrading to 5.3.1
+
+No action needed, unless you pass an array as a call's params. On a `POST`, `PUT` or `PATCH` it is now sent as a JSON
+array, which is what you wrote; before, the server received an object with index keys, `{"0":…,"1":…}`. On a
+`GET`, `DELETE` or `bodyAs: 'query'` request it is now refused: the call returns a `'network'` error, and nothing is
+sent. Before, it sent `?0=a&1=b`. If your server read those keys, put the array in an object instead:
+
+```ts
+// Before: GET /items?0=a&1=b. Now refused.
+await api.listItems(['a', 'b'])
+
+// After: GET /items?ids=a&ids=b
+await api.listItems({ ids: ['a', 'b'] })
+```
+
+---
+
 ## Upgrading to 5.3.0
 
 No action needed. 5.3.0 adds `withHeaders()`; nothing existing changes.
