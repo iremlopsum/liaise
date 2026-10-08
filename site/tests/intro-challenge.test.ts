@@ -50,7 +50,7 @@ describe('the challenge', () => {
     const { results } = await check(SCAFFOLD)
     expect(results.liaise).toEqual({ status: 'fail', reason: 'No request reached /notifications/unread. Define it with defineRequest, add it to createApi, and call it in unreadLabel().' })
     expect(results.healthy).toEqual({ status: 'fail', reason: "It returned ''. Expected '3 unread'." })
-    expect(results.down).toEqual({ status: 'fail', reason: "It returned ''. Expected 'Notifications are unavailable (http)'." })
+    expect(results.down).toEqual({ status: 'fail', reason: "It returned ''. Expected 'Notifications are unavailable (http)'.", code: 'other' })
     expect(results.throws).toEqual({ status: 'pass' })
   })
 
@@ -70,6 +70,15 @@ describe('the challenge', () => {
     expect(results.liaise).toEqual({ status: 'fail', reason: '/notifications/unread was called with fetch directly. Call it through a client from createApi instead.' })
     expect(results.healthy.status).toBe('pass')
     expect(results.down.reason).toMatch(/typed by hand/)
+    expect(results.down.code).toBe('http')
+  })
+
+  it('names why check 3 failed, for the dashboard', async () => {
+    const careless = SOLUTION.split('\n').filter((l) => !l.includes('if (error)')).join('\n')
+    expect((await check(careless)).results.down.code).toBe('threw')
+    const healthyWhileDown = SOLUTION.replace('if (error) return `Notifications are unavailable (${error.kind})`', 'if (error) return \'3 unread\'')
+    expect((await check(healthyWhileDown)).results.down.code).toBe('healthy')
+    expect((await check(SOLUTION)).results.down.code).toBeUndefined()
   })
 
   it('fails "never throws" when the code reads data without checking error', async () => {

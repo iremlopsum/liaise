@@ -4,10 +4,11 @@ import { describeThrown, inspect } from './format'
 import { DOWN, ENDPOINT, HEALTHY } from './files'
 import type { ChallengeRun } from './harness'
 import type { Diagnostic } from '../../playground/editor'
+import type { Reason } from '../../analytics/schema'
 
 export type CheckId = 'liaise' | 'healthy' | 'down' | 'throws' | 'types'
 export type CheckStatus = 'idle' | 'running' | 'pass' | 'fail'
-export interface CheckState { status: CheckStatus; reason?: string }
+export interface CheckState { status: CheckStatus; reason?: string; code?: Reason }
 
 export const CHECKS: Array<{ id: CheckId; label: string }> = [
   { id: 'liaise', label: 'Calls GET /notifications/unread through liaise' },
@@ -18,7 +19,7 @@ export const CHECKS: Array<{ id: CheckId; label: string }> = [
 ]
 
 const pass = (reason?: string): CheckState => ({ status: 'pass', reason })
-const fail = (reason: string): CheckState => ({ status: 'fail', reason })
+const fail = (reason: string, code?: Reason): CheckState => (code ? { status: 'fail', reason, code } : { status: 'fail', reason })
 
 /** Why a run produced no value, in a sentence; undefined when it did. */
 function noValue(r: ChallengeRun, server: string): string | undefined {
@@ -64,17 +65,17 @@ const code = (source: string) => source.replace(/\/\*[\s\S]*?\*\//g, '').replace
 
 /** 3. The down run returned exactly DOWN, built from error.kind. */
 export function checkDown(r: ChallengeRun, source: string): CheckState {
-  if (r.loadError === undefined && r.ended === 'done' && r.exported && r.threw !== undefined) return fail('It threw instead of returning the text. See check 4.')
+  if (r.loadError === undefined && r.ended === 'done' && r.exported && r.threw !== undefined) return fail('It threw instead of returning the text. See check 4.', 'threw')
   const why = noValue(r, 'down')
-  if (why) return fail(why)
+  if (why) return fail(why, 'other')
   const v = r.returned!.value
   if (v === DOWN) {
-    if (!/\bkind\b/.test(code(source))) return fail(`The text is right, but 'http' is typed by hand. Read it from error.kind, so a timeout or an offline user reads right too.`)
+    if (!/\bkind\b/.test(code(source))) return fail(`The text is right, but 'http' is typed by hand. Read it from error.kind, so a timeout or an offline user reads right too.`, 'http')
     return pass()
   }
-  if (v === HEALTHY) return fail(`It returned '${HEALTHY}' while the server was down. Check error before you use data.`)
-  if (typeof v === 'string' && v.includes('(undefined)')) return fail(`It returned ${inspect(v)}: the kind was undefined. Read it from the error of the same call.`)
-  return fail(`It returned ${inspect(v)}. Expected '${DOWN}'.`)
+  if (v === HEALTHY) return fail(`It returned '${HEALTHY}' while the server was down. Check error before you use data.`, 'healthy')
+  if (typeof v === 'string' && v.includes('(undefined)')) return fail(`It returned ${inspect(v)}: the kind was undefined. Read it from the error of the same call.`, 'undefined')
+  return fail(`It returned ${inspect(v)}. Expected '${DOWN}'.`, 'other')
 }
 
 /** 4. Neither run threw (loading the file, or calling unreadLabel()). */
