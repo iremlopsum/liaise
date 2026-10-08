@@ -49,8 +49,19 @@ export function classifyParams(params: unknown, asQuery: boolean): ClassifiedPar
     return { kind: 'whole', value: params }
   }
 
-  // Primitives and arrays keep their pre-5.0.1 behaviour (out of scope).
-  if (typeof params !== 'object' || Array.isArray(params)) {
+  // An array is a JSON array body. It has no names to put in a query string or
+  // fill a path with, and decomposing it sent {"0":…,"1":…} (or ?0=…&1=…).
+  if (Array.isArray(params)) {
+    if (asQuery) {
+      throw new TypeError(
+        'Cannot send an array as params for a request whose params go in the query string. ' +
+        'Put it in an object, e.g. { ids: [...] }, or send it with POST, PUT or PATCH.'
+      )
+    }
+    return { kind: 'whole', value: params }
+  }
+  // Primitives keep their pre-5.0.1 behaviour (out of scope).
+  if (typeof params !== 'object') {
     return { kind: 'fields', fields: params as Record<string, unknown> }
   }
 

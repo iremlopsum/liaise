@@ -140,7 +140,7 @@ class WithFields { constructor(public name = 'x') {} }
 class OnlyToJSON { #n = 3; toJSON() { return { n: this.#n } } }
 class OnlyGetters { #n = 3; get n() { return this.#n } }
 
-async function send(method: 'GET' | 'POST', path: string, params: unknown) {
+async function send(method: 'GET' | 'POST' | 'PUT', path: string, params: unknown) {
   const fetchMock = vi.fn(async () => okResponse())
   vi.stubGlobal('fetch', fetchMock)
   const call = new Request<any, unknown>({ method, path })
@@ -222,5 +222,43 @@ describe('params that used to send nothing', () => {
     expect((m.result.error?.body as Error).message).toMatch(/a Money/)
     const o = await send('POST', '/items', Object.create({ inherited: 1 }, {}) as object)
     expect((o.result.error?.body as Error).message).toMatch(/an Object/)
+  })
+})
+
+describe('an array as params', () => {
+  it('is sent as a JSON array body, not an index map', async () => {
+    const { init } = await send('POST', '/items', [{ name: 'a' }, { name: 'b' }])
+    expect(init?.body).toBe('[{"name":"a"},{"name":"b"}]')
+    expect(new Headers(init?.headers).get('content-type')).toBe('application/json')
+  })
+
+  it('sends an empty array as [] instead of no body', async () => {
+    const { init } = await send('PUT', '/items', [])
+    expect(init?.body).toBe('[]')
+  })
+
+  it('is refused on a GET instead of becoming ?0=…&1=…', async () => {
+    const { result, fetchMock } = await send('GET', '/items', ['a', 'b'])
+    expect(fetchMock).not.toHaveBeenCalled()
+    expect(result.error?.kind).toBe('network')
+    expect((result.error?.body as Error).message).toMatch(/Cannot send an array as params .* query string/)
+    expect((result.error?.body as Error).message).toContain('{ ids: [...] }')
+  })
+
+  it('is refused on a POST with bodyAs: \'query\'', async () => {
+    const fetchMock = vi.fn(async () => okResponse())
+    vi.stubGlobal('fetch', fetchMock)
+    const call = new Request<any, unknown>({ method: 'POST', path: '/items', bodyAs: 'query' })
+    const api = createApi({ baseUrl: 'https://x.test', requests: { call } })
+    const { error } = await api.call(['a'])
+    expect(fetchMock).not.toHaveBeenCalled()
+    expect((error?.body as Error).message).toMatch(/Cannot send an array as params .* query string/)
+  })
+
+  it('is refused on a body request whose path has params, since it cannot fill them', async () => {
+    const { result, fetchMock } = await send('POST', '/orgs/:org/items', [{ name: 'a' }])
+    expect(fetchMock).not.toHaveBeenCalled()
+    expect(result.error?.kind).toBe('network')
+    expect((result.error?.body as Error).message).toMatch(/:org/)
   })
 })

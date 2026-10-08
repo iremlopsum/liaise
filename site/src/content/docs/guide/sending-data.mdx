@@ -34,6 +34,13 @@ A `baseUrl` can carry a query string of its own, such as a fixed `api-version`. 
 
 liaise serializes the body from what you pass, and sets `Content-Type` for you unless you set one yourself.
 
+<Example name="request-bodies" />
+
+- **A path param fills the path and is left out of the body.** `id` goes into `/users/7`, so the body is only `{"name":"Grace"}`. If your API also wants `id` in the body, give the body field a different name from the path param.
+- **Nested objects and arrays go in the body as JSON.** Only the query string refuses them.
+- **An array as the params is the whole body.** It is sent as a JSON array. An array has no named fields, so it can't fill path params or a query string, and a call that needs either is refused before anything is sent.
+- **A fixed query string can go in the path**, as `?dryRun=false` does here. Every param you pass goes either in the body or in the query string, never in both. For a query value that changes from call to call on a body request, add it to `ctx.request.url` in a [middleware](/guide/writing-middleware/).
+
 | You pass | Body sent | Content-Type |
 | -------- | --------- | ------------ |
 | `null`/`undefined` | `null` | _(none)_ |
@@ -44,7 +51,7 @@ liaise serializes the body from what you pass, and sets `Content-Type` for you u
 | `ArrayBuffer` | as-is | `application/octet-stream` |
 | Typed array, `DataView`, `Buffer` | as-is (sent as binary) | `application/octet-stream` |
 | `ReadableStream` | as-is (a streaming upload; `duplex: 'half'` is set for you) | `application/octet-stream` |
-| Plain object | `JSON.stringify()` | `application/json` |
+| Plain object or array | `JSON.stringify()` | `application/json` |
 
 A `ReadableStream` body can be sent only once. A retry, from middleware or from `result.retry()`, returns an error telling you to read the stream into a `Blob` or `ArrayBuffer` first ([details](/reference/behaviour-in-detail/#stream-bodies)). [Upload and download files](/recipes/upload-and-download-files/) shows a `FormData` upload.
 
@@ -56,6 +63,7 @@ A `ReadableStream` body can be sent only once. A retry, from middleware or from 
 | `Map` with string keys | Same as the object it spells |
 | Class instance with fields | Same as a plain object (split by those fields even if the class also defines `toJSON()`; `toJSON()` is used only when there are no own fields) |
 | Class instance with only `toJSON()` | Sent as its JSON (body only; refused on a request whose params go in the query string) |
+| Array | Sent as a JSON array body, such as `[{"name":"a"}]`. Refused on a request whose params go in the query string, or whose path has params, since an array has no named fields to fill them |
 | Typed array, `DataView`, `Buffer`, `ReadableStream` | Sent as the body, as in the table above (refused on a request whose params go in the query string) |
 | `Set`, a bare `Date`, a `Map` with non-string keys, a class with no fields | Refused: an error `Result` (`kind: 'network'`) naming the type. Nothing is sent. |
 
