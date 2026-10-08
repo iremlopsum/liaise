@@ -12,7 +12,8 @@ const news = whatsNew()
 const steps = SLIDES.length + 1
 ---
 <div class="intro-root" data-intro>
-  <section class="start" data-start aria-labelledby="intro-title">
+  {/* The start screen is the page's main landmark until Start hides it; the intro brings its own. */}
+  <main class="start" data-start aria-labelledby="intro-title">
     {news && (
       <a href={news.href} class="news">
         <span class="news-version">{news.version}</span>
@@ -31,7 +32,7 @@ const steps = SLIDES.length + 1
       <span><span class="prompt">$ </span><span data-copy-text>npm install liaise</span></span>
       <span data-label class="install-label">Copy</span>
     </button>
-  </section>
+  </main>
   <div data-intro-host hidden></div>
 </div>
 
@@ -79,10 +80,16 @@ const steps = SLIDES.length + 1
   const later = (f: () => void) => ('requestIdleCallback' in window ? requestIdleCallback(f, { timeout: 3000 }) : setTimeout(f, 1500))
   later(() => { void load().catch(() => {}) })
 
+  const startBtn = root.querySelector<HTMLButtonElement>('[data-intro-start]')!
+  // While the bundle loads (a slow network, or Start pressed before the idle prefetch finished), Start
+  // says so. If the load fails, it's Start again.
+  const busy = (on: boolean) => { startBtn.setAttribute('aria-busy', String(on)); startBtn.textContent = on ? 'Loading…' : 'Start' }
+
   let started = false
   async function start() {
     if (started) return
     started = true
+    busy(true)
     try {
       const { mountIntro } = await load()
       const host = root.querySelector<HTMLElement>('[data-intro-host]')!
@@ -92,9 +99,10 @@ const steps = SLIDES.length + 1
       window.scrollTo({ top: 0 })
     } catch {
       started = false // offline, or the chunk didn't load: the start screen stays, and Start works again
+      busy(false)
     }
   }
-  root.querySelector('[data-intro-start]')!.addEventListener('click', () => { void start() })
+  startBtn.addEventListener('click', () => { void start() })
   // Enter starts it, unless focus is on something Enter already means something for.
   window.addEventListener('keydown', (e) => {
     if (started || e.key !== 'Enter' || e.metaKey || e.ctrlKey || e.altKey) return

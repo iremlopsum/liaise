@@ -154,14 +154,21 @@ describe('front page', () => {
     expect(h).toContain(`${SLIDES.length + 1} steps, about ${introLength()}. Enter works too.`)
     expect(h).toContain('<span data-copy-text>npm install liaise</span>')
   })
-  // Remotion's own code links its docs in its messages: a marker that survives minification. The
-  // second expectation below fails if no chunk carries it, so the marker can't silently match
-  // nothing. If it does fail, grep the chunk mount.tsx imports for a string only Remotion has, and use that.
+  // Remotion's own code links its docs in its messages, and React marks its elements with
+  // Symbol.for('react.transitional.element'): markers that survive minification. The last two
+  // expectations below fail if no chunk carries one, so a marker can't silently match nothing. If one
+  // does fail, grep the chunks mount.tsx imports for a string only that library has, and use that.
   const remotion = (text: string) => text.includes('remotion.dev')
+  const react = (text: string) => text.includes('react.transitional.element')
   it('loads React, Remotion and the slides only on demand', () => {
     for (const page of ['index.html', 'intro/index.html'])
-      for (const [f, text] of loadedUpFront(page)) expect(remotion(text), `${page} loads ${f} up front`).toBe(false)
-    expect(distFiles(/^_astro\/.*\.js$/).some((f) => remotion(readFileSync(dist(f), 'utf8')))).toBe(true)
+      for (const [f, text] of loadedUpFront(page)) {
+        expect(remotion(text), `${page} loads Remotion up front, in ${f}`).toBe(false)
+        expect(react(text), `${page} loads React up front, in ${f}`).toBe(false)
+      }
+    const chunks = distFiles(/^_astro\/.*\.js$/).map((f) => readFileSync(dist(f), 'utf8'))
+    expect(chunks.some(remotion), 'a chunk carries Remotion').toBe(true)
+    expect(chunks.some(react), 'a chunk carries React').toBe(true)
   })
   it('keeps Monaco out of the intro until step 10: no chunk carries both', () => {
     for (const f of distFiles(/^_astro\/.*\.js$/)) {
@@ -246,14 +253,23 @@ describe('remembering the intro, and the way back', () => {
     const script = redirect(html)!
     expect(script).toBeDefined()
     expect(html.indexOf(script)).toBeLessThan(html.indexOf('</head>'))
-    const run = (storage: { getItem(key: string): string | null }) => {
+    // performance: how the browser came to the page (Navigation Timing), as the script reads it.
+    const came = (type: string) => ({ getEntriesByType: (t: string) => (t === 'navigation' ? [{ type }] : []) })
+    const run = (storage: { getItem(key: string): string | null }, performance: unknown = came('navigate')) => {
       const location = { replace: vi.fn() }
-      new Function('localStorage', 'location', script)(storage, location)
+      new Function('localStorage', 'location', 'performance', script)(storage, location, performance)
       return location.replace
     }
-    expect(run({ getItem: (k) => (k === INTRO_KEY ? 'skipped' : null) })).toHaveBeenCalledWith('/liaise/start/quick-start/')
+    const seen = { getItem: (k: string) => (k === INTRO_KEY ? 'skipped' : null) }
+    expect(run(seen)).toHaveBeenCalledWith('/liaise/start/quick-start/')
     expect(run({ getItem: () => null })).not.toHaveBeenCalled()
     expect(run({ getItem: () => { throw new DOMException('blocked', 'SecurityError') } })).not.toHaveBeenCalled()
+    // Back from Quick start: the page wasn't kept by the back/forward cache, so the script runs again.
+    // Redirecting then would undo the Back.
+    expect(run(seen, came('back_forward'))).not.toHaveBeenCalled()
+    expect(run(seen, came('reload'))).toHaveBeenCalledWith('/liaise/start/quick-start/')
+    // A browser without Navigation Timing still redirects.
+    expect(run(seen, {})).toHaveBeenCalledWith('/liaise/start/quick-start/')
   })
   it('never redirects /intro/', () => {
     expect(redirect(page('intro/index.html'))).toBeUndefined()
