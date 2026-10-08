@@ -3,6 +3,7 @@ import { AsyncLocalStorage } from 'node:async_hooks'
 import { createApi, createGraphQL, defineRequest, Operation, gql, poll, withHeaders } from '../src/index.js'
 import { mockFetch, jsonResponse, successResult } from '../src/testing.js'
 import { pollIdOf } from '../src/utils/copy.js'
+import { wasJoined } from '../src/utils/share.js'
 import type { CallOptions, Middleware, Result } from '../src/index.js'
 
 type Stats = { n: number }
@@ -1115,6 +1116,138 @@ describe('poll: copies from withHeaders', () => {
     const stopB = poll(viaSide, {}, () => {}, { every: 1000 })
     await flush()
     expect(mock.calls).toHaveLength(1)
+    stopA(); stopB()
+  })
+})
+
+describe('poll with share: true on the endpoint', () => {
+  /** GET /stats with share: true, answering { n } after 100 ms, so overlapping requests can join. */
+  function sharedClient() {
+    served = 0
+    mock = mockFetch({ 'GET /stats': () => new Promise(r => setTimeout(() => r(jsonResponse({ n: ++served })), 100)) })
+    mock.install()
+    const getStats = defineRequest<Stats, { a?: number }>()({ method: 'GET', path: '/stats', share: true })
+    return createApi({ baseUrl: 'https://api.test', requests: { getStats } })
+  }
+
+  it('callers with the same key are one poll: share has nothing to join, and both get the same Result', async () => {
+    shareable()
+    const api = sharedClient()
+    const a: Result<Stats>[] = []
+    const b: Result<Stats>[] = []
+    const stopA = poll(api.getStats, {}, r => a.push(r), { every: 1000 })
+    const stopB = poll(api.getStats, {}, r => b.push(r), { every: 1000 })
+    await vi.advanceTimersByTimeAsync(100)
+    expect(mock.calls).toHaveLength(1)
+    expect(b[0]).toBe(a[0])
+    expect(wasJoined(a[0])).toBe(false)
+    stopA(); stopB()
+  })
+
+  it('two polls kept apart by their options send one request per tick, and stay in step', async () => {
+    shareable()
+    const api = sharedClient()
+    const a: Result<Stats>[] = []
+    const b: Result<Stats>[] = []
+    // `timeout` is part of the poll key but not of what is sent: two loops, identical requests.
+    const stopA = poll(api.getStats, {}, r => a.push(r), { every: 1000, timeout: 5000 })
+    const stopB = poll(api.getStats, {}, r => b.push(r), { every: 1000, timeout: 6000 })
+    await vi.advanceTimersByTimeAsync(100 + 3 * 1100)
+    expect(mock.calls).toHaveLength(4)
+    expect(ns(a)).toEqual([1, 2, 3, 4])
+    expect(ns(b)).toEqual([1, 2, 3, 4])
+    // Each loop gets its own Result; one of each pair joined the other's request.
+    for (let i = 0; i < 4; i++) {
+      expect(b[i]).not.toBe(a[i])
+      expect([wasJoined(a[i]), wasJoined(b[i])].sort()).toEqual([false, true])
+    }
+    stopA(); stopB()
+  })
+
+  it("one poll stopping mid-request doesn't abort the request the other poll shares", async () => {
+    shareable()
+    const api = sharedClient()
+    const b: Result<Stats>[] = []
+    const stopA = poll(api.getStats, {}, () => {}, { every: 1000, timeout: 5000 })
+    const stopB = poll(api.getStats, {}, r => b.push(r), { every: 1000, timeout: 6000 })
+    await vi.advanceTimersByTimeAsync(50)
+    stopA()
+    await vi.advanceTimersByTimeAsync(50)
+    expect(mock.calls).toHaveLength(1)
+    expect(b).toHaveLength(1)
+    expect(b[0].error).toBeNull()
+    expect(ns(b)).toEqual([1])
+    stopB()
+  })
+
+  it("a direct call while the poll's request is in flight joins it", async () => {
+    shareable()
+    const api = sharedClient()
+    const seen: Result<Stats>[] = []
+    const stop = poll(api.getStats, {}, r => seen.push(r), { every: 1000 })
+    await vi.advanceTimersByTimeAsync(50)
+    const direct = api.getStats({})
+    // Long enough for a request of its own to answer too, so a call that didn't join fails the count, not the clock.
+    await vi.advanceTimersByTimeAsync(100)
+    const result = await direct
+    expect(mock.calls).toHaveLength(1)
+    expect(result.data).toEqual({ n: 1 })
+    expect(ns(seen)).toEqual([1])
+    stop()
+  })
+
+  /** As sharedClient, but the first request fails with a 500. */
+  function failingFirst() {
+    const api = sharedClient()
+    mock.restore()
+    served = 0
+    mock = mockFetch({ 'GET /stats': () => new Promise(r => setTimeout(() => r(++served === 1 ? jsonResponse({}, { status: 500 }) : jsonResponse({ n: served })), 100)) })
+    mock.install()
+    return api
+  }
+
+  it('after a failure, two polls whose backoffs land apart stop sharing', async () => {
+    shareable()
+    const api = failingFirst()
+    // Backoff after one failure is every + random × every: 1000 ms for one loop, 1900 ms for the other.
+    vi.spyOn(Math, 'random').mockReturnValueOnce(0).mockReturnValueOnce(0.9)
+    const stopA = poll(api.getStats, {}, () => {}, { every: 1000, timeout: 5000 })
+    const stopB = poll(api.getStats, {}, () => {}, { every: 1000, timeout: 6000 })
+    await vi.advanceTimersByTimeAsync(3200)
+    // 0 ms (shared, failed), then each loop on its own: 1100, 2000, 2200, 3100.
+    expect(mock.calls).toHaveLength(5)
+    stopA(); stopB()
+  })
+
+  it('after a failure, two polls whose next requests overlap share again, and stay in step', async () => {
+    shareable()
+    const api = failingFirst()
+    // 1000 ms and 1050 ms: the second request starts while the first is in flight, and joins it.
+    vi.spyOn(Math, 'random').mockReturnValueOnce(0).mockReturnValueOnce(0.05)
+    const stopA = poll(api.getStats, {}, () => {}, { every: 1000, timeout: 5000 })
+    const stopB = poll(api.getStats, {}, () => {}, { every: 1000, timeout: 6000 })
+    await vi.advanceTimersByTimeAsync(3400)
+    // 0 ms (shared, failed), 1100 (B joins at 1150), 2200, 3300: one request each time.
+    expect(mock.calls).toHaveLength(4)
+    stopA(); stopB()
+  })
+
+  it('on a server each poll is its own loop, but share joins their identical requests', async () => {
+    const api = sharedClient()
+    const stopA = poll(api.getStats, {}, () => {}, { every: 1000 })
+    const stopB = poll(api.getStats, {}, () => {}, { every: 1000 })
+    await vi.advanceTimersByTimeAsync(100 + 1100)
+    expect(mock.calls).toHaveLength(2)
+    stopA(); stopB()
+  })
+
+  it("on a server, polls sending different users' headers never share", async () => {
+    const api = sharedClient()
+    const stopA = poll(api.getStats, {}, () => {}, { every: 1000, headers: { authorization: 'Bearer a' } })
+    const stopB = poll(api.getStats, {}, () => {}, { every: 1000, headers: { authorization: 'Bearer b' } })
+    await vi.advanceTimersByTimeAsync(100)
+    expect(mock.calls).toHaveLength(2)
+    expect(mock.calls.map(c => c.headers.get('authorization')).sort()).toEqual(['Bearer a', 'Bearer b'])
     stopA(); stopB()
   })
 })
