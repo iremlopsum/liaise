@@ -182,7 +182,8 @@ function Workbench({ base, docsHref, onComplete, onReplay, onFail }: ChallengePr
     let gone = false
     let save: number | undefined
     import('../../playground/editor')
-      .then(({ mountEditor }) => mountEditor(host.current!, {
+      // Left step 10 before the editor's code arrived: the host is gone, so there is nothing to mount.
+      .then(({ mountEditor }) => (gone ? null : mountEditor(host.current!, {
         sources: { unread: readSaved() ?? SCAFFOLD }, current: 'unread', base,
         onRun: () => runRef.current(),
         onChange: (value) => {
@@ -191,8 +192,9 @@ function Workbench({ base, docsHref, onComplete, onReplay, onFail }: ChallengePr
           if (checkedRef.current !== null) setStale(value !== checkedRef.current)
           setPristine(value === SCAFFOLD)
         },
-      }))
+      })))
       .then((editor) => {
+        if (!editor) return
         if (gone) { editor.dispose(); return }
         mounted = editor
         ed.current = editor

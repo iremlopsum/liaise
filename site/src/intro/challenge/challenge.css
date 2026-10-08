@@ -22,8 +22,9 @@
 .intro-app .step10 ::selection { background: rgba(129, 140, 248, 0.45); color: #fff; }
 .intro-app .step10 kbd { font: 500 11px var(--mono); padding: 1px 6px; border-radius: 5px; background: rgba(255, 255, 255, 0.1); color: var(--fg); }
 .intro-app .step10 .n { font: 500 12px var(--mono); color: var(--dim); letter-spacing: 0.04em; }
+/* The window below the site header (3.5rem and its 1px border) and the intro's bar (--bar, from keynote.css). */
 .intro-app .step10 .work { box-sizing: border-box; flex: none; width: 100%; max-width: 1680px; margin: 0 auto;
-    height: calc(100vh - 64px); height: calc(100svh - 64px); min-height: 600px;
+    height: calc(100vh - 3.5rem - 1px - var(--bar, 64px)); height: calc(100svh - 3.5rem - 1px - var(--bar, 64px)); min-height: 600px;
     display: grid; grid-template-columns: minmax(0, 1fr) clamp(340px, 29vw, 440px); grid-template-rows: minmax(0, 1fr); gap: clamp(28px, 3.4vw, 64px);
     padding: 4px var(--gutter) 24px; }
 .intro-app .step10 .col-left { position: relative; min-width: 0; min-height: 0; display: flex; flex-direction: column; gap: 14px; }
@@ -133,7 +134,8 @@
 .intro-app .step10 .link-btn:hover { background: rgba(255, 255, 255, 0.09); }
 .intro-app .step10 .icon-btn { width: 36px; height: 36px; border: 0; border-radius: 999px; background: transparent; color: var(--grey); display: grid; place-items: center; cursor: pointer; transition: color 0.2s, background 0.2s; }
 .intro-app .step10 .icon-btn:hover { color: var(--fg); background: rgba(255, 255, 255, 0.08); }
-.intro-app .step10 .drawer-wrap { position: fixed; inset: 0; z-index: 30; visibility: hidden; pointer-events: none; transition: visibility 0s linear 0.45s; }
+/* Above the site header (z-40): the drawer and its scrim cover the whole window, as in the prototype. */
+.intro-app .step10 .drawer-wrap { position: fixed; inset: 0; z-index: 50; visibility: hidden; pointer-events: none; transition: visibility 0s linear 0.45s; }
 .intro-app .step10 .drawer-wrap.open { visibility: visible; pointer-events: auto; transition: none; }
 .intro-app .step10 .scrim { position: absolute; inset: 0; background: rgba(0, 0, 0, 0.62); opacity: 0; transition: opacity 0.35s ease; }
 .intro-app .step10 .drawer-wrap.open .scrim { opacity: 1; }

@@ -38,7 +38,8 @@ const steps = SLIDES.length + 1
 <style is:global>
   /* is:global with an .intro-root prefix: scoped styles would add data-astro-cid attributes, and the
      What's new pill's markup is matched exactly by its tests. */
-  .intro-root { min-height: calc(100svh - 3.5rem); background: #000; color: #f5f5f7; }
+  /* The window below the site header: 3.5rem and its 1px border. */
+  .intro-root { min-height: calc(100svh - 3.5rem - 1px); background: #000; color: #f5f5f7; }
   .intro-root .start { max-width: 72rem; margin: 0 auto; padding: clamp(48px, 10vh, 120px) clamp(16px, 5vw, 64px) 64px; display: grid; gap: 24px; justify-items: start; }
   .intro-root .news { display: inline-flex; align-items: center; gap: 8px; border-radius: 999px; padding: 4px 12px 4px 4px; font-size: 13px; color: #98989d; text-decoration: none; box-shadow: inset 0 0 0 1px rgb(255 255 255 / 0.12); }
   .intro-root .news:hover { color: #f5f5f7; box-shadow: inset 0 0 0 1px rgb(255 255 255 / 0.24); }

@@ -5,7 +5,8 @@
 
 /* One world: a black stage, white type, indigo used for the cursor, keywords and the
    running progress segment only. Every colour is set here, so the host theme doesn't matter.
-   The light spills past the editor; clip it to the page so it never adds a scrollbar. */
+   The light spills past the editor; clip it to the page so it never adds a scrollbar. It fills
+   the window below the site header, which is 3.5rem and a 1px border. */
 .intro-app {
   --bg: #000;
   --fg: #f5f5f7;
@@ -23,7 +24,7 @@
   color: var(--fg);
   font-family: var(--sans);
   -webkit-font-smoothing: antialiased;
-  min-height: calc(100svh - 3.5rem); display: flex; flex-direction: column; overflow: hidden; overflow: clip;
+  min-height: calc(100svh - 3.5rem - 1px); display: flex; flex-direction: column; overflow: hidden; overflow: clip;
 }
 .intro-app button { font: inherit; color: inherit; }
 .intro-app a { color: inherit; }
@@ -129,6 +130,8 @@
 /* Stacked: headline above, editor below. */
 @media (max-width: 960px) {
   .intro-app .bar { grid-template-columns: 1fr auto; grid-template-areas: 'all transport' 'progress progress'; height: auto; row-gap: 2px; padding-top: 10px; padding-bottom: 4px; }
+  /* The bar's height in two rows (10 + 36 + 2 + 24 + 4), for step 10's editor, which fills the window below it. */
+  .intro-app { --bar: 76px; }
   .intro-app .transport { grid-area: transport; } .intro-app .progress { grid-area: progress; }
   .intro-app .main { grid-template-columns: minmax(0, 1fr); align-content: start; gap: 20px; padding-top: 16px; }
   .intro-app .captions { padding: 0; }
@@ -152,5 +155,5 @@
   .intro-app .player, .intro-app .endrow, .intro-app .endrow.on, .intro-app .main.cut .stage, .intro-app .track { transition: none !important; }
 }
 
-.intro-app .step10 { min-height: calc(100svh - 3.5rem - 64px); }
+.intro-app .step10 { min-height: calc(100svh - 3.5rem - 1px - var(--bar, 64px)); }
 .intro-app .loading { margin: 0; padding: 96px var(--gutter); font: 500 13px/1.4 var(--mono); color: var(--dim); }

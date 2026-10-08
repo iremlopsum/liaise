@@ -13,21 +13,27 @@ const link = (key: string) =>
 // Marks the section the page is in: "true" rather than "page", since a docs page isn't the link's own target.
 const current = (key: string) => (key === active ? 'true' : undefined)
 const sections = [['docs', 'Docs', '/start/quick-start/'], ['playground', 'Playground', '/playground/'], ['compare', 'Compare', '/compare/']] as const
+// The search box shows from sm up, and the icon below it. In the intro the row also holds Skip to docs, which is
+// wider than the theme toggle it replaces, and the row overflows at 768-847 px with the box: there the box waits for lg.
+const searchBox = `hidden h-8 w-64 items-center gap-2 rounded-full bg-gray-950/[0.03] px-3 text-left text-[13px] text-gray-500 ring-1 ring-gray-950/10 ring-inset transition hover:ring-gray-950/20 ${intro ? 'lg:flex' : 'sm:flex'} dark:bg-white/5 dark:text-gray-400 dark:ring-white/10 dark:hover:ring-white/20`
+const searchIcon = `grid size-8 place-items-center rounded-full text-gray-600 ${intro ? 'lg:hidden' : 'sm:hidden'} dark:text-gray-400`
 ---
 <header class={intro ? 'sticky top-0 z-40 border-b border-white/10 bg-black/80 backdrop-blur-md' : 'sticky top-0 z-40 border-b border-gray-950/5 bg-white/85 backdrop-blur-md dark:border-white/10 dark:bg-gray-950/80'}>
   <div class="mx-auto flex h-14 max-w-[90rem] items-center gap-4 px-4 sm:px-6 lg:px-8">
     <Logo />
-    <span class="rounded-full bg-gray-950/[0.04] px-2 py-0.5 font-mono text-[11px] font-medium text-gray-600 ring-1 ring-gray-950/5 ring-inset dark:bg-white/5 dark:text-gray-400 dark:ring-white/10">v{pkg.version}</span>
+    {/* In the intro the row also holds Skip to docs, which fits beside the version from 390 px; below that the version
+        gives way (the intro's start screen names it in What's new), or the row would overflow a 320-375 px phone. */}
+    <span class:list={['rounded-full bg-gray-950/[0.04] px-2 py-0.5 font-mono text-[11px] font-medium text-gray-600 ring-1 ring-gray-950/5 ring-inset dark:bg-white/5 dark:text-gray-400 dark:ring-white/10', intro && 'max-[389px]:hidden']}>v{pkg.version}</span>
     <nav class="ml-4 hidden items-center gap-6 text-sm md:flex">
       {sections.map(([key, label, path]) => <a href={url(path)} class={link(key)} aria-current={current(key)} data-skip-intro={skips(key)}>{label}</a>)}
     </nav>
     <div class="ml-auto flex items-center gap-1.5">
-      <button data-search-open class="hidden h-8 w-64 items-center gap-2 rounded-full bg-gray-950/[0.03] px-3 text-left text-[13px] text-gray-500 ring-1 ring-gray-950/10 ring-inset transition hover:ring-gray-950/20 sm:flex dark:bg-white/5 dark:text-gray-400 dark:ring-white/10 dark:hover:ring-white/20">
+      <button data-search-open class={searchBox}>
         <svg viewBox="0 0 16 16" class="size-3.5 fill-current" aria-hidden="true"><path fill-rule="evenodd" d="M7 2a5 5 0 1 0 2.95 9.04l2.5 2.5a.75.75 0 1 0 1.06-1.06l-2.5-2.5A5 5 0 0 0 7 2ZM3.5 7a3.5 3.5 0 1 1 7 0 3.5 3.5 0 0 1-7 0Z"/></svg>
         Search docs
         <kbd class="ml-auto font-sans text-[11px] text-gray-400 dark:text-gray-500">⌘K</kbd>
       </button>
-      <button data-search-open class="grid size-8 place-items-center rounded-full text-gray-600 sm:hidden dark:text-gray-400" aria-label="Search">
+      <button data-search-open class={searchIcon} aria-label="Search">
         <svg viewBox="0 0 16 16" class="size-4 fill-current"><path fill-rule="evenodd" d="M7 2a5 5 0 1 0 2.95 9.04l2.5 2.5a.75.75 0 1 0 1.06-1.06l-2.5-2.5A5 5 0 0 0 7 2ZM3.5 7a3.5 3.5 0 1 1 7 0 3.5 3.5 0 0 1-7 0Z"/></svg>
       </button>
       <a href="https://github.com/iremlopsum/liaise" class="hidden size-8 place-items-center rounded-full text-gray-600 hover:text-gray-950 md:grid dark:text-gray-400 dark:hover:text-white" aria-label="GitHub">
