@@ -1,0 +1,162 @@
+/* The intro's Keynote look, ported from the prototype's <style>
+   (docs/prototypes/intro-keynote-2026-10-08/dist/look-1.html). Every rule is scoped under .intro-app,
+   the root App.tsx renders, so none of it reaches the rest of the site; the keyframes carry an
+   intro- prefix for the same reason. */
+
+/* One world: a black stage, white type, indigo used for the cursor, keywords and the
+   running progress segment only. Every colour is set here, so the host theme doesn't matter.
+   The light spills past the editor; clip it to the page so it never adds a scrollbar. It fills
+   the window below the site header, which is 3.5rem and a 1px border. */
+.intro-app {
+  --bg: #000;
+  --fg: #f5f5f7;
+  --grey: #98989d;
+  --dim: #6e6e73;
+  --hair: rgba(255, 255, 255, 0.1);
+  --accent: #a5b4fc;
+  --gutter: clamp(16px, 4vw, 64px);
+  --endrow: 84px;
+  --ease: cubic-bezier(0.16, 1, 0.3, 1);
+  --sans: var(--font-sans);
+  --mono: var(--font-mono);
+  color-scheme: dark;
+  background: var(--bg);
+  color: var(--fg);
+  font-family: var(--sans);
+  -webkit-font-smoothing: antialiased;
+  min-height: calc(100svh - 3.5rem - 1px); display: flex; flex-direction: column; overflow: hidden; overflow: clip;
+}
+.intro-app button { font: inherit; color: inherit; }
+.intro-app a { color: inherit; }
+.intro-app :focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+.intro-app ::selection { background: rgba(129, 140, 248, 0.45); color: #fff; }
+
+/* Top bar: the segmented progress, the transport. */
+.intro-app .bar {
+  position: relative; z-index: 2; box-sizing: border-box;
+  display: grid; grid-template-columns: 1fr minmax(0, 560px) 1fr; align-items: center; gap: 24px;
+  height: 64px; padding: 0 var(--gutter);
+}
+.intro-app .progress { display: flex; align-items: center; gap: 14px; min-width: 0; }
+/* The site header is the bar's left column now: the progress sits in the middle one. */
+.intro-app .progress { grid-column: 2; }
+.intro-app .segs { flex: 1; display: flex; gap: 6px; }
+.intro-app .seg { flex: 1; height: 24px; padding: 0; border: 0; background: none; cursor: pointer; display: flex; align-items: center; border-radius: 4px; }
+.intro-app .track { position: relative; display: block; width: 100%; height: 3px; border-radius: 3px; background: rgba(255, 255, 255, 0.16); overflow: hidden; transition: background 0.2s; }
+.intro-app .seg:hover .track { background: rgba(255, 255, 255, 0.26); }
+.intro-app .fill { position: absolute; left: 0; top: 0; bottom: 0; width: 0; border-radius: inherit; background: var(--accent); }
+.intro-app .seg.done .fill { width: 100%; background: rgba(255, 255, 255, 0.62); }
+.intro-app .count { font: 500 12px/1 var(--mono); color: var(--fg); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.intro-app .count span { color: var(--dim); }
+.intro-app .transport { justify-self: end; display: flex; gap: 2px; }
+.intro-app .icon-btn { width: 36px; height: 36px; border: 0; border-radius: 999px; background: transparent; color: var(--grey); display: grid; place-items: center; cursor: pointer; transition: color 0.2s, background 0.2s; }
+.intro-app .icon-btn:hover:not(:disabled) { color: var(--fg); background: rgba(255, 255, 255, 0.08); }
+.intro-app .icon-btn:disabled { opacity: 0.28; cursor: default; }
+
+/* The stage: headline on the left third, the editor on the right two thirds. */
+.intro-app .main {
+  flex: 1; box-sizing: border-box; width: 100%; max-width: 1680px; margin: 0 auto;
+  display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 2fr); gap: clamp(32px, 4vw, 72px);
+  align-content: center; align-items: stretch;
+  padding: clamp(8px, 2vh, 32px) var(--gutter) clamp(16px, 3vh, 40px);
+}
+.intro-app.finished .main { display: none; }
+
+.intro-app .captions { min-width: 0; display: flex; flex-direction: column; padding: 18px 0 calc(var(--endrow) + 12px); }
+.intro-app .eyebrow { margin: 0 0 24px; display: flex; align-items: baseline; gap: 12px; font: 500 12px/1.2 var(--mono); color: var(--dim); letter-spacing: 0.04em; animation: intro-fade-up 0.8s var(--ease) both; }
+.intro-app .eyebrow span { font: 500 14px/1.2 var(--sans); letter-spacing: 0; color: var(--grey); }
+.intro-app .headline { position: relative; }
+.intro-app .cap-title { margin: 0; font-size: clamp(40px, 4.4vw, 68px); line-height: 1.04; font-weight: 600; letter-spacing: -0.035em; color: var(--fg); text-wrap: balance; }
+.intro-app .cap-title code { font-family: var(--mono); font-weight: 500; font-size: 0.84em; letter-spacing: -0.03em; }
+.intro-app .cap-body { margin: 24px 0 0; max-width: 24em; font-size: 20px; line-height: 1.45; color: var(--grey); text-wrap: pretty; animation: intro-fade-up 0.7s var(--ease) both; }
+.intro-app .cap-body code { font-family: var(--mono); font-size: 0.9em; color: #d1d1d6; }
+.intro-app .w { display: inline-block; animation: intro-word-in 0.75s var(--ease) both; }
+.intro-app .cap-layer.leaving { position: absolute; left: 0; top: 0; right: 0; pointer-events: none; animation: intro-cap-out 0.18s ease-in both; }
+@keyframes intro-word-in { from { opacity: 0; filter: blur(12px); transform: translateY(10px); } to { opacity: 1; filter: blur(0); transform: none; } }
+@keyframes intro-fade-up { from { opacity: 0; transform: translateY(6px); } }
+@keyframes intro-cap-out { to { opacity: 0; filter: blur(4px); } }
+
+.intro-app .cues { margin-top: auto; padding-top: 28px; display: flex; flex-wrap: wrap; gap: 4px; }
+.intro-app .cues button { position: relative; width: 26px; height: 20px; padding: 0; border: 0; background: none; cursor: pointer; border-radius: 3px; }
+.intro-app .cues button::before { content: ''; position: absolute; left: 2px; right: 2px; top: 9px; height: 2px; border-radius: 2px; background: rgba(255, 255, 255, 0.18); transition: background 0.3s; }
+.intro-app .cues button:hover::before { background: rgba(255, 255, 255, 0.5); }
+.intro-app .cues button.on::before { background: var(--fg); }
+
+.intro-app .stage { position: relative; min-width: 0; display: flex; flex-direction: column; align-items: center; }
+.intro-app .screen { position: relative; width: 100%; max-width: calc((100vh - 250px) * var(--ratio)); max-width: calc((100svh - 250px) * var(--ratio)); }
+/* One light behind the editor. */
+.intro-app .glow {
+  position: absolute; left: 50%; top: 46%; width: 150%; height: 190%; translate: -50% -50%; pointer-events: none;
+  background: radial-gradient(closest-side, rgba(176, 184, 255, 0.34), rgba(140, 150, 250, 0.2) 38%, rgba(129, 140, 248, 0.07) 64%, rgba(129, 140, 248, 0.015) 84%, rgba(129, 140, 248, 0) 100%);
+  animation: intro-glow-in 1.6s var(--ease) both;
+}
+@keyframes intro-glow-in { from { opacity: 0; scale: 0.85; } }
+.intro-app .player { position: relative; width: 100%; height: 100%; cursor: pointer; transition: filter 0.7s ease; }
+.intro-app .stage.ended .player { cursor: default; filter: brightness(0.62) saturate(0.85); }
+.intro-app .paused { position: absolute; inset: 0; display: grid; place-items: center; pointer-events: none; }
+.intro-app .paused svg { width: 26px; height: 26px; padding: 22px; border-radius: 999px; background: rgba(0, 0, 0, 0.6); color: var(--fg); box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.14); }
+
+/* The keynote cut: the stage fades to black and settles back a touch. */
+.intro-app .main.cut .stage { opacity: 0; scale: 0.975; transition: opacity 0.3s cubic-bezier(0.4, 0, 0.2, 1), scale 0.3s cubic-bezier(0.4, 0, 0.2, 1); }
+.intro-app .main.cut .eyebrow, .intro-app .main.cut .cues { opacity: 0; transition: opacity 0.2s; }
+
+/* End of a slide: Copy and Next, centred under the editor. */
+.intro-app .endrow {
+  height: var(--endrow); display: flex; align-items: center; justify-content: center; gap: 8px;
+  opacity: 0; translate: 0 8px; visibility: hidden;
+  transition: opacity 0.35s ease, translate 0.5s var(--ease), visibility 0s linear 0.35s;
+}
+.intro-app .endrow.on { opacity: 1; translate: 0 0; visibility: visible; transition: opacity 0.5s ease 0.2s, translate 0.7s var(--ease) 0.2s, visibility 0s; }
+
+.intro-app .pill {
+  display: inline-flex; align-items: center; justify-content: center; gap: 8px; box-sizing: border-box;
+  height: 44px; min-width: 128px; padding: 0 22px; border: 0; border-radius: 999px;
+  background: var(--fg); color: #000; font-size: 15px; font-weight: 600; letter-spacing: -0.01em;
+  text-decoration: none; cursor: pointer; transition: background 0.2s, scale 0.2s;
+}
+.intro-app .pill:hover { background: #fff; }
+.intro-app .pill:active { scale: 0.97; }
+.intro-app .pill.big { height: 52px; min-width: 132px; padding: 0 32px; font-size: 17px; }
+.intro-app .link-btn { height: 44px; padding: 0 18px; border: 0; border-radius: 999px; background: transparent; color: var(--fg); font-size: 15px; font-weight: 500; cursor: pointer; transition: background 0.2s; }
+.intro-app .link-btn:hover { background: rgba(255, 255, 255, 0.09); }
+
+/* Copy fallback: the code, selected, over the editor. */
+.intro-app .manual { position: absolute; inset: 0; z-index: 3; display: flex; flex-direction: column; overflow: hidden; border-radius: 14px; background: #09090b; box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.16); }
+.intro-app .manual-head { display: flex; align-items: center; gap: 12px; padding: 8px 8px 8px 18px; border-bottom: 1px solid var(--hair); }
+.intro-app .manual-head p { margin: 0; flex: 1; font-size: 14px; line-height: 1.4; color: var(--grey); }
+.intro-app kbd { font: 500 12px var(--mono); padding: 1px 6px; border-radius: 5px; background: rgba(255, 255, 255, 0.1); color: var(--fg); }
+.intro-app .manual pre { flex: 1; margin: 0; padding: 16px 18px; overflow: auto; outline: none; white-space: pre; font: 13px/1.6 var(--mono); color: #e5e5ea; }
+
+/* Stacked: headline above, editor below. */
+@media (max-width: 960px) {
+  .intro-app .bar { grid-template-columns: 1fr auto; grid-template-areas: 'all transport' 'progress progress'; height: auto; row-gap: 2px; padding-top: 10px; padding-bottom: 4px; }
+  /* The bar's height in two rows (10 + 36 + 2 + 24 + 4), for step 10's editor, which fills the window below it. */
+  .intro-app { --bar: 76px; }
+  .intro-app .transport { grid-area: transport; } .intro-app .progress { grid-area: progress; }
+  .intro-app .main { grid-template-columns: minmax(0, 1fr); align-content: start; gap: 20px; padding-top: 16px; }
+  .intro-app .captions { padding: 0; }
+  .intro-app .eyebrow { margin-bottom: 14px; }
+  .intro-app .headline { min-height: 172px; }
+  .intro-app .cap-title { font-size: clamp(32px, 6.2vw, 52px); }
+  .intro-app .cap-body { margin-top: 14px; font-size: 18px; }
+  .intro-app .cues { margin-top: 10px; padding-top: 0; }
+  .intro-app .screen { max-width: none; }
+}
+@media (max-width: 640px) {
+  .intro-app { --endrow: 72px; }
+  .intro-app .headline { min-height: 158px; }
+  .intro-app .cap-title { font-size: 32px; letter-spacing: -0.03em; }
+  .intro-app .cap-body { font-size: 17px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .intro-app .w, .intro-app .cap-body, .intro-app .eyebrow, .intro-app .glow { animation: none !important; }
+  .intro-app .cap-layer.leaving { display: none; }
+  .intro-app .player, .intro-app .endrow, .intro-app .endrow.on, .intro-app .main.cut .stage, .intro-app .track { transition: none !important; }
+}
+
+.intro-app .step10 { min-height: calc(100svh - 3.5rem - 1px - var(--bar, 64px)); }
+.intro-app .loading { margin: 0; padding: 96px var(--gutter); font: 500 13px/1.4 var(--mono); color: var(--dim); }
+/* Step 10's chunk didn't load (StepBoundary.tsx): the line above, and the ways on under it. */
+.intro-app .step-failed .loading { padding-bottom: 20px; }
+.intro-app .step-failed-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 0 var(--gutter); }

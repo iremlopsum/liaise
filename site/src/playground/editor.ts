@@ -21,15 +21,27 @@ export interface MountOptions {
   base: string
   /** ⌘↵ / Ctrl+↵ in the editor. */
   onRun: () => void
+  /** Called after every edit to the current model, with its text. */
+  onChange?: (value: string) => void
 }
+
+/** A type error, by line, as the TypeScript worker reports it. */
+export interface Diagnostic { line: number; message: string }
 
 export interface MountedEditor {
   /** Shows an example's model. */
   show(id: string): void
   /** True once the current model no longer matches the example as shipped. */
   edited(): boolean
-  /** The current model, compiled by the TypeScript worker, and how many type errors it has. */
-  compile(): Promise<{ js: string; errors: number }>
+  /** The current model's text. */
+  value(): string
+  /** Replaces the current model's text as one edit, so Undo brings the old text back. */
+  replace(code: string): void
+  focus(): void
+  /** Disposes the editor and every model it made, so the same ids can be mounted again. */
+  dispose(): void
+  /** The current model, compiled by the TypeScript worker, with its type errors. */
+  compile(): Promise<{ js: string; errors: number; diagnostics: Diagnostic[] }>
 }
 
 const ts = monaco.languages.typescript
@@ -61,8 +73,12 @@ monaco.editor.defineTheme('liaise', {
 
 export async function mountEditor(host: HTMLElement, opts: MountOptions): Promise<MountedEditor> {
   await loadTypes(opts.base)
-  const models = new Map(Object.entries(opts.sources).map(([id, code]) =>
-    [id, monaco.editor.createModel(code, 'typescript', monaco.Uri.parse(`file:///${id}.ts`))]))
+  const models = new Map(Object.entries(opts.sources).map(([id, code]) => {
+    const uri = monaco.Uri.parse(`file:///${id}.ts`)
+    // A mount that started before the last one was disposed (step 10 left and entered during load) left a model here.
+    monaco.editor.getModel(uri)?.dispose()
+    return [id, monaco.editor.createModel(code, 'typescript', uri)] as const
+  }))
   let current = opts.current
   const codeFont = getComputedStyle(document.documentElement).getPropertyValue('--font-code').trim() + ', ui-monospace, Menlo, monospace'
   const editor = monaco.editor.create(host, {
@@ -78,19 +94,33 @@ export async function mountEditor(host: HTMLElement, opts: MountOptions): Promis
   editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.Enter, opts.onRun)
   // Ctrl+Space is often taken by the OS or another app on a Mac; ⌘I is VS Code's other way in.
   editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyI, () => editor.trigger('keyboard', 'editor.action.triggerSuggest', {}))
+  editor.onDidChangeModelContent(() => opts.onChange?.(editor.getModel()!.getValue()))
 
   const model = () => models.get(current)!
   return {
     show(id) { current = id; editor.setModel(model()) },
     edited: () => model().getValue() !== opts.sources[current],
+    value: () => model().getValue(),
+    replace(code) {
+      editor.pushUndoStop()
+      editor.executeEdits('liaise', [{ range: model().getFullModelRange(), text: code }])
+      editor.pushUndoStop()
+    },
+    focus: () => editor.focus(),
+    dispose() { editor.dispose(); for (const m of models.values()) m.dispose() },
     async compile() {
-      const uri = model().uri
-      const worker = await (await ts.getTypeScriptWorker())(uri)
+      const m = model()
+      const worker = await (await ts.getTypeScriptWorker())(m.uri)
       const [semantic, syntactic, emit] = await Promise.all([
-        worker.getSemanticDiagnostics(uri.toString()), worker.getSyntacticDiagnostics(uri.toString()), worker.getEmitOutput(uri.toString()),
+        worker.getSemanticDiagnostics(m.uri.toString()), worker.getSyntacticDiagnostics(m.uri.toString()), worker.getEmitOutput(m.uri.toString()),
       ])
       const js = emit.outputFiles.find((f) => f.name.endsWith('.js'))?.text ?? ''
-      return { js, errors: semantic.length + syntactic.length }
+      const all = [...syntactic, ...semantic]
+      const diagnostics = all.map((d) => ({
+        line: d.start === undefined ? 1 : m.getPositionAt(d.start).lineNumber,
+        message: typeof d.messageText === 'string' ? d.messageText : d.messageText.messageText,
+      }))
+      return { js, errors: all.length, diagnostics }
     },
   }
 }

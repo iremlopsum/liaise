@@ -30,10 +30,12 @@ export interface RunnerOptions {
   passThrough?: (input: RequestInfo | URL) => boolean
   /** Prints a line of the example's console output. Lines from a run that has ended never get here. */
   print: (args: unknown[], tone: 'log' | 'error') => void
+  /** Each request a liaise client sends while its run is live, as the gate sees it (last of the client's middleware, so a retry is reported too). */
+  onLiaiseRequest?: (request: { method: string; url: string }) => void
 }
 
 /** A liaise middleware, typed structurally so this module needs no import from liaise. */
-export type Gate = (ctx: { request: { signal?: AbortSignal } }, next: () => Promise<unknown>) => Promise<unknown>
+export type Gate = (ctx: { request: { method: string; url: string; signal?: AbortSignal } }, next: () => Promise<unknown>) => Promise<unknown>
 
 /** What an example module sees of its run (through instrument()'s bridge). */
 export interface RunHandle {
@@ -72,9 +74,11 @@ export function combineSignals(own: AbortSignal | null | undefined, run: AbortSi
 
 const stopped = () => new DOMException('The run was stopped.', 'AbortError')
 // Only once the run has ended: then the call goes to fetch already cancelled, and nothing is sent.
-// While the run is live, ctx is untouched (an in-flight request is aborted by the run's fetch).
-const gateFor = (signal: AbortSignal): Gate => (ctx, next) => {
+// While the run is live, ctx is untouched (an in-flight request is aborted by the run's fetch), and
+// the request is reported to onLiaiseRequest.
+const gateFor = (signal: AbortSignal, onSend?: RunnerOptions['onLiaiseRequest']): Gate => (ctx, next) => {
   if (signal.aborted) ctx.request.signal = signal
+  else onSend?.({ method: ctx.request.method, url: ctx.request.url })
   return next()
 }
 const ended = new AbortController()
@@ -85,7 +89,7 @@ const DEAD: RunHandle = { id: 0, signal: ended.signal, console: { log() {}, erro
 /** The global the instrumented module reads its run from: globalThis[BRIDGE](id). */
 export const BRIDGE = Symbol.for('liaise.playground.run')
 
-export function createRunner({ scope, send, print, passThrough }: RunnerOptions): Runner {
+export function createRunner({ scope, send, print, passThrough, onLiaiseRequest }: RunnerOptions): Runner {
   let current: { handle: RunHandle; finish: (end: RunEnd) => void } | undefined
   let seq = 0
   Reflect.set(globalThis, BRIDGE, (id: number): RunHandle => (current?.handle.id === id ? current.handle : DEAD))
@@ -103,7 +107,7 @@ export function createRunner({ scope, send, print, passThrough }: RunnerOptions)
         log: (...a) => { if (live()) print(a, 'log') },
         error: (...a) => { if (live()) print(a, 'error') },
       },
-      gate: gateFor(controller.signal),
+      gate: gateFor(controller.signal, onLiaiseRequest),
     }
 
     return new Promise<RunEnd>((resolve) => {

@@ -1,5 +1,9 @@
 import { getCollection } from 'astro:content'
 import { url } from './url'
+import { introLength } from './intro/length'
+
+/** First under Getting started, outside the page order: no page's Previous or Next leads to it. */
+export const INTRO_LINK = { title: 'Intro', meta: introLength(), href: url('/intro/') }
 
 export const GROUPS = [
   { dir: 'start', label: 'Getting started' },

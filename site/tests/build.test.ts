@@ -1,8 +1,11 @@
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, vi } from 'vitest'
 import { readFileSync, existsSync, readdirSync } from 'node:fs'
 import { gunzipSync } from 'node:zlib'
 import { SCENARIOS } from '../src/playground/scenarios'
 import { whatsNewFor } from '../src/data/whats-new'
+import { introLength } from '../src/intro/length'
+import { SLIDES } from '../src/intro/engine/slides'
+import { INTRO_KEY } from '../src/intro/flag'
 
 const dist = (p: string) => new URL(`../dist/${p}`, import.meta.url)
 const pkg = JSON.parse(readFileSync(new URL('../../package.json', import.meta.url), 'utf8'))
@@ -14,7 +17,8 @@ const decode = (s: string) => s.replace(/&quot;/g, '"').replace(/&#39;/g, "'").r
 // what they import statically. A dynamic import() is not followed: it loads later, on demand.
 function loadedUpFront(page: string) {
   const files = new Map<string, string>()
-  const queue = [...readFileSync(dist(page), 'utf8').matchAll(/\/liaise\/(_astro\/[^"'`\s)]+\.(?:js|css))/g)].map(m => m[1])
+  // A path inside import(…) (a small script Astro inlined into the page) loads on demand, not up front.
+  const queue = [...readFileSync(dist(page), 'utf8').matchAll(/(import\(\s*)?["'`]?\/liaise\/(_astro\/[^"'`\s)]+\.(?:js|css))/g)].filter(m => !m[1]).map(m => m[2])
   for (let f = queue.pop(); f !== undefined; f = queue.pop()) {
     if (files.has(f)) continue
     const text = readFileSync(dist(f), 'utf8')
@@ -71,9 +75,15 @@ describe('built site', () => {
   })
   it('stores everything under a liaise: key, since iremlopsum.github.io is shared with other sites', () => {
     let calls = 0
-    for (const f of htmlPages()) for (const m of readFileSync(dist(f), 'utf8').matchAll(/localStorage\.(\w+)\(([^),]*)/g)) {
-      calls++
-      expect(m[2].trim(), `${f}: localStorage.${m[1]}(${m[2]}…)`).toMatch(/^(['"])liaise:[\w-]+\1$/)
+    for (const f of htmlPages()) {
+      const html = readFileSync(dist(f), 'utf8')
+      for (const m of html.matchAll(/localStorage\.(\w+)\(([^),]*)/g)) {
+        calls++
+        // A bare name is a define:vars constant Astro wrote into the same script: check what it holds.
+        const arg = m[2].trim()
+        const value = /^\w+$/.test(arg) ? html.match(new RegExp(`const ${arg} = ("[^"]*")`))?.[1] ?? arg : arg
+        expect(value, `${f}: localStorage.${m[1]}(${m[2]}…)`).toMatch(/^(['"])liaise:[\w-]+\1$/)
+      }
     }
     expect(calls).toBeGreaterThan(0)
   })
@@ -87,10 +97,10 @@ describe('built site', () => {
     expect(css).toMatch(/@media\s*\(hover:\s*none\)\s*\{[^{}]*\.code-copy\s*\{[^}]*opacity:\s*1\b/)
   })
   it('loads nothing from a CDN', () => {
-    for (const f of distFiles(/\.(html|js|css)$/)) expect(readFileSync(dist(f), 'utf8'), f).not.toContain('cdn.jsdelivr.net')
+    for (const f of distFiles(/\.(html|js|css)$/)) expect(readFileSync(dist(f), 'utf8'), f).not.toMatch(/cdn\.jsdelivr\.net|fonts\.googleapis\.com|fonts\.gstatic\.com/)
   })
   it('ships the editor and graphql-js to no docs page, and to the playground only on demand', () => {
-    for (const page of ['guide/handling-errors/index.html', 'playground/index.html']) {
+    for (const page of ['guide/handling-errors/index.html', 'playground/index.html', 'index.html', 'intro/index.html']) {
       const files = loadedUpFront(page)
       expect(files.size, page).toBeGreaterThan(0)
       for (const [f, text] of files) expect(onDemand(f, text), `${page} loads ${f} up front`).toBe(false)
@@ -122,18 +132,6 @@ describe('front page', () => {
     // No section for the released version: no pill, rather than another version's.
     expect(whatsNewFor(changelog, '5.2.0')).toBeNull()
   })
-  it('states the gzipped size from compare/results.json', () => {
-    const results = JSON.parse(readFileSync(new URL('../../compare/results.json', import.meta.url), 'utf8'))
-    expect(html()).toContain(`about ${Math.round(results.sizes.liaise.gzip / 1024)}&nbsp;kB gzipped for a REST client`)
-  })
-  it('has exactly five problem rows, each linking to a guide page that exists', () => {
-    const rows = [...html().matchAll(/<a href="(\/liaise\/guide\/[^"]+\/)"[^>]*data-problem/g)].map(m => m[1])
-    expect(rows).toHaveLength(5)
-    for (const r of rows) expect(existsSync(dist(`${r.replace('/liaise/', '')}index.html`)), r).toBe(true)
-  })
-  it('renders all six playground tabs', () => {
-    for (const s of SCENARIOS) expect(html()).toMatch(new RegExp(`<button[^>]*data-id="${s.id}"[^>]*>${s.label}</button>`))
-  })
   it('loads neither the editor nor graphql-js up front', () => {
     const files = loadedUpFront('index.html')
     expect(files.size).toBeGreaterThan(0)
@@ -145,6 +143,38 @@ describe('front page', () => {
     expect(urls.length).toBeGreaterThan(0)
     expect(urls).toContain('/guide/handling-errors/')
     expect(urls).not.toContain('/')
+    expect(urls).not.toContain('/intro/')
+  })
+  it('starts on the intro: logo, headline, Start with the steps and length the slides add up to, and the install command', () => {
+    const h = decode(html())
+    expect(h).toMatch(/<svg[^>]*class="brand-mark"[\s\S]*?stroke-current[\s\S]*?stroke-accent/)
+    expect(h).toContain('Your API calls, minus the surprises.')
+    expect(h).toContain('Watch an API client get written, one line at a time.')
+    expect(h).toMatch(/<button[^>]*data-intro-start[^>]*>Start<\/button>/)
+    expect(h).toContain(`${SLIDES.length + 1} steps, about ${introLength()}. Enter works too.`)
+    expect(h).toContain('<span data-copy-text>npm install liaise</span>')
+  })
+  // Remotion's own code links its docs in its messages, and React marks its elements with
+  // Symbol.for('react.transitional.element'): markers that survive minification. The last two
+  // expectations below fail if no chunk carries one, so a marker can't silently match nothing. If one
+  // does fail, grep the chunks mount.tsx imports for a string only that library has, and use that.
+  const remotion = (text: string) => text.includes('remotion.dev')
+  const react = (text: string) => text.includes('react.transitional.element')
+  it('loads React, Remotion and the slides only on demand', () => {
+    for (const page of ['index.html', 'intro/index.html'])
+      for (const [f, text] of loadedUpFront(page)) {
+        expect(remotion(text), `${page} loads Remotion up front, in ${f}`).toBe(false)
+        expect(react(text), `${page} loads React up front, in ${f}`).toBe(false)
+      }
+    const chunks = distFiles(/^_astro\/.*\.js$/).map((f) => readFileSync(dist(f), 'utf8'))
+    expect(chunks.some(remotion), 'a chunk carries Remotion').toBe(true)
+    expect(chunks.some(react), 'a chunk carries React').toBe(true)
+  })
+  it('keeps Monaco out of the intro until step 10: no chunk carries both', () => {
+    for (const f of distFiles(/^_astro\/.*\.js$/)) {
+      const text = readFileSync(dist(f), 'utf8')
+      expect(remotion(text) && text.includes('MonacoEnvironment'), f).toBe(false)
+    }
   })
   describe('meta', () => {
     const pages = () => distFiles(/\.html$/).filter(f => !f.startsWith('pagefind/'))
@@ -210,5 +240,59 @@ describe('header', () => {
       const github = html.match(/<a href="https:\/\/github\.com\/iremlopsum\/liaise"[^>]*aria-label="GitHub"[^>]*>/)?.[0] ?? ''
       expect(github.match(/\sclass="([^"]*)"/)?.[1].split(/\s+/), `${f}: the header's GitHub icon shows from md up`).toEqual(expect.arrayContaining(['hidden', 'md:grid']))
     }
+  })
+})
+
+describe('remembering the intro, and the way back', () => {
+  const page = (p: string) => readFileSync(dist(p), 'utf8')
+  // The inline head script index.astro writes, as built.
+  const redirect = (html: string) => [...html.matchAll(/<script>([\s\S]*?)<\/script>/g)].map((m) => m[1]).find((s) => s.includes('location.replace'))
+
+  it('sends a browser that has seen the intro to Quick start from the head, and shows the intro when storage throws', () => {
+    const html = page('index.html')
+    const script = redirect(html)!
+    expect(script).toBeDefined()
+    expect(html.indexOf(script)).toBeLessThan(html.indexOf('</head>'))
+    // performance: how the browser came to the page (Navigation Timing), as the script reads it.
+    const came = (type: string) => ({ getEntriesByType: (t: string) => (t === 'navigation' ? [{ type }] : []) })
+    const run = (storage: { getItem(key: string): string | null }, performance: unknown = came('navigate')) => {
+      const location = { replace: vi.fn() }
+      new Function('localStorage', 'location', 'performance', script)(storage, location, performance)
+      return location.replace
+    }
+    const seen = { getItem: (k: string) => (k === INTRO_KEY ? 'skipped' : null) }
+    expect(run(seen)).toHaveBeenCalledWith('/liaise/start/quick-start/')
+    expect(run({ getItem: () => null })).not.toHaveBeenCalled()
+    expect(run({ getItem: () => { throw new DOMException('blocked', 'SecurityError') } })).not.toHaveBeenCalled()
+    // Back from Quick start: the page wasn't kept by the back/forward cache, so the script runs again.
+    // Redirecting then would undo the Back.
+    expect(run(seen, came('back_forward'))).not.toHaveBeenCalled()
+    expect(run(seen, came('reload'))).toHaveBeenCalledWith('/liaise/start/quick-start/')
+    // A browser without Navigation Timing still redirects.
+    expect(run(seen, {})).toHaveBeenCalledWith('/liaise/start/quick-start/')
+  })
+  it('never redirects /intro/', () => {
+    expect(redirect(page('intro/index.html'))).toBeUndefined()
+    expect(page('intro/index.html')).toContain('data-intro-start')
+  })
+  it('marks Skip to docs as skipping on both routes, and the Docs link on the front page only', () => {
+    const marked = (html: string) => [...html.matchAll(/<a\b[^>]*\bdata-skip-intro\b[^>]*>([\s\S]*?)<\/a>/g)].map((m) => decode(m[1].replace(/<[^>]+>/g, '')).trim())
+    expect(marked(page('index.html'))).toEqual(expect.arrayContaining(['Docs', 'Skip to docs →']))
+    expect(marked(page('intro/index.html'))).toEqual(['Skip to docs →'])
+    expect(page('start/quick-start/index.html')).not.toContain('data-skip-intro')
+  })
+  it('hides the theme toggle on the intro, and only there', () => {
+    // The button, not the string: Base's inline script names [data-theme-toggle] on every page.
+    const toggle = /<button[^>]*data-theme-toggle/
+    expect(page('index.html')).not.toMatch(toggle)
+    expect(page('intro/index.html')).not.toMatch(toggle)
+    expect(page('start/quick-start/index.html')).toMatch(toggle)
+  })
+  it('links to /intro/ first under Getting started and from the top of Quick start, with the length the slides add up to', () => {
+    const html = page('start/quick-start/index.html')
+    const len = introLength()
+    expect(html).toMatch(new RegExp(`<a href="/liaise/intro/"[^>]*>Intro <span[^>]*>· ${len}</span></a>`))
+    expect(html.indexOf('href="/liaise/intro/"')).toBeLessThan(html.indexOf('href="/liaise/start/the-problem-it-solves/"'))
+    expect(decode(html)).toContain(`New here? <a href="/liaise/intro/">Watch the ${len.replace(/ minutes?$/, '-minute')} intro</a>.`)
   })
 })

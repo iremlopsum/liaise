@@ -2,8 +2,8 @@
 import '../styles/global.css'
 import Header from '../components/Header.astro'
 import { url } from '../url'
-interface Props { title?: string; description?: string; active?: 'docs' | 'playground' | 'compare'; noindex?: boolean }
-const { title, description, active, noindex } = Astro.props
+interface Props { title?: string; description?: string; active?: 'docs' | 'playground' | 'compare'; noindex?: boolean; intro?: 'front' | 'page' }
+const { title, description, active, noindex, intro } = Astro.props
 const desc = description ?? 'Type-safe REST and GraphQL on plain fetch. Never throws. Zero dependencies.'
 const fullTitle = title ? `${title} · liaise` : 'liaise — Your API calls, minus the surprises.'
 // Absolute, and under the base: Astro.url.pathname already carries /liaise.
@@ -11,10 +11,11 @@ const canonical = new URL(Astro.url.pathname, Astro.site).href
 const ogImage = new URL(`${import.meta.env.BASE_URL.replace(/\/?$/, '/')}og.png`, Astro.site).href
 ---
 <!doctype html>
-<html lang="en">
+<html lang="en" class={intro ? 'dark' : undefined}>
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <slot name="head" />
     <meta name="description" content={desc} />
     {noindex ? <meta name="robots" content="noindex" /> : <link rel="canonical" href={canonical} />}
     <link rel="icon" type="image/svg+xml" href={`${import.meta.env.BASE_URL.replace(/\/?$/, '/')}favicon.svg`} />
@@ -41,8 +42,8 @@ const ogImage = new URL(`${import.meta.env.BASE_URL.replace(/\/?$/, '/')}og.png`
       } catch {}
     </script>
   </head>
-  <body class="bg-white font-sans text-gray-950 dark:bg-gray-950 dark:text-white">
-    <Header active={active} />
+  <body class={intro ? 'bg-black font-sans text-white' : 'bg-white font-sans text-gray-950 dark:bg-gray-950 dark:text-white'}>
+    <Header active={active} intro={intro} />
     <slot />
     <p id="copy-status" class="sr-only" role="status" aria-live="polite"></p>
 

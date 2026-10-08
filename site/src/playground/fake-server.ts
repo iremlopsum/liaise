@@ -5,6 +5,7 @@
 //                     'offline' → network failure · 'slow' → never answers
 //                     'flaky' → 500, 500, then 200
 //   GET  /search?q=   answers short queries more slowly, to show the race
+//   GET  /notifications/unread   { unread: 3 } · the intro challenge's switch can make it 500 or slow
 //   POST /graphql     real GraphQL over the same people (fake-graphql.ts)
 import { executeGraphQL, operationName } from './fake-graphql'
 
@@ -13,6 +14,11 @@ export const FAKE_ORIGIN = 'https://api.example.com'
 
 /** What the network panel shows once a request is over: a status, or how it failed. */
 export type Outcome = number | 'offline' | 'cancelled' | 'timeout'
+
+/** How GET /notifications/unread answers: the intro challenge's server switch. */
+export type UnreadMode = 'healthy' | 'down' | 'slow'
+/** How long /notifications/unread takes to answer while the switch says slow. */
+export const SLOW_MS = 3000
 
 /** How an aborted request ended: its deadline passed ('timeout', as liaise reports it) or it was cancelled. */
 export const abortOutcome = (signal: AbortSignal | null | undefined): 'timeout' | 'cancelled' =>
@@ -25,6 +31,8 @@ export interface SettledRequest { id: number; outcome: Outcome; ms: number }
 export interface FakeServerOptions {
   onRequest?: (request: SentRequest) => void
   onSettle?: (settled: SettledRequest) => void
+  /** Read for each request to /notifications/unread. Without it, the route is healthy. */
+  unread?: () => UnreadMode
 }
 
 export interface FakeServer {
@@ -52,7 +60,7 @@ const aborted = (signal: AbortSignal): unknown =>
 const json = (status: number, body: unknown) =>
   new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } })
 
-export function createFakeServer({ onRequest = () => {}, onSettle = () => {} }: FakeServerOptions = {}): FakeServer {
+export function createFakeServer({ onRequest = () => {}, onSettle = () => {}, unread = () => 'healthy' }: FakeServerOptions = {}): FakeServer {
   let flaky = 0
   const jobPolls = new Map<string, number>()
   let seq = 0
@@ -86,6 +94,11 @@ export function createFakeServer({ onRequest = () => {}, onSettle = () => {} }: 
       }
       const p = people.find((p) => p.id === id) ?? people[0]
       return { kind: 'answer', status: 200, body: { id, name: p.name, email: p.email }, delay: 140 }
+    }
+    if (method === 'GET' && url.pathname === '/notifications/unread') {
+      const mode = unread()
+      if (mode === 'down') return { kind: 'answer', status: 500, body: { message: 'Server error' }, delay: 100 }
+      return { kind: 'answer', status: 200, body: { unread: 3 }, delay: mode === 'slow' ? SLOW_MS : 100 }
     }
     if (method === 'GET' && url.pathname === '/search') {
       const q = url.searchParams.get('q') ?? ''
