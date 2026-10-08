@@ -11,6 +11,7 @@ import { FPS } from '../length'
 import { SIZE, Stage, type Layout } from './Stage'
 import { Headline } from './Headline'
 import { useMedia } from './useMedia'
+import { analytics } from '../../analytics'
 import { StepBoundary } from './StepBoundary'
 import './keynote.css'
 
@@ -84,6 +85,14 @@ export function App({ base, docsHref, onComplete }: AppProps) {
   const onFinish = useCallback(() => { player.current?.pause(); setFinished(true) }, [])
   const deck = useDeck(onFinish)
   const [hasPlayer, setHasPlayer] = useState(false)
+
+  // Analytics: what the reader does, counted. Additions only; nothing here changes what renders.
+  useEffect(() => { if (finished) analytics.step10Shown(); else analytics.slideShown(deck.index) }, [deck.index, finished])
+  useEffect(() => { if (deck.ended && !finished) analytics.slideEnded(deck.index) }, [deck.ended, deck.index, finished])
+  // A playing slide counts as engagement.
+  useEffect(() => { if (!deck.playing) return; const t = window.setInterval(() => analytics.input(), 1000); return () => window.clearInterval(t) }, [deck.playing])
+  // Space is handled inside the deck and isn't counted: a known gap.
+  const togglePlay = () => { if (deck.playing) analytics.pause(deck.index); deck.togglePlay() }
   const setPlayer = useCallback((p: PlayerRef | null) => { player.current = p; deck.playerRef(p); if (p) setHasPlayer(true) }, [deck.playerRef])
 
   // Start was pressed on the static start screen: that press is the gesture browsers want before
@@ -113,7 +122,7 @@ export function App({ base, docsHref, onComplete }: AppProps) {
   }, [still])
 
   const goNext = () => { if (!finished) cut(deck.next) }
-  const goBack = () => { if (finished) cut(() => setFinished(false)); else if (deck.index > 0) cut(deck.back) }
+  const goBack = () => { if (finished) cut(() => setFinished(false)); else if (deck.index > 0) { analytics.back(deck.index); cut(deck.back) } }
   const goTo = (i: number) => cut(() => { setFinished(false); deck.go(i) })
   const restart = () => cut(() => { setFinished(false); if (deck.index === 0) replay(); else deck.go(0) })
 
@@ -143,6 +152,7 @@ export function App({ base, docsHref, onComplete }: AppProps) {
   useEffect(() => { setCopied(false); setManual(false) }, [deck.index])
   const onCopy = async () => {
     const ok = await deck.copy()
+    analytics.slideCopy(deck.index, ok)
     if (ok) {
       setCopied(true)
       window.clearTimeout(copiedTimer.current)
@@ -156,8 +166,9 @@ export function App({ base, docsHref, onComplete }: AppProps) {
   useEffect(() => { if (deck.ended && !finished) copyBtn.current?.focus({ preventScroll: true }) }, [deck.ended, finished])
 
   const onSegment = (e: React.MouseEvent<HTMLButtonElement>, i: number) => {
-    if (i !== deck.index || finished) { goTo(i); return }
+    if (i !== deck.index || finished) { analytics.jump(deck.index); goTo(i); return }
     const r = e.currentTarget.getBoundingClientRect()
+    analytics.seek(deck.index)
     seek(Math.round(Math.max(0, Math.min(1, (e.clientX - r.left) / r.width)) * (deck.duration - 1)))
   }
 
@@ -196,7 +207,7 @@ export function App({ base, docsHref, onComplete }: AppProps) {
               )
             })}
             <button
-              type="button" className={`seg${finished ? ' now' : ''}`} onClick={() => { if (!finished) toChallenge() }}
+              type="button" className={`seg${finished ? ' now' : ''}`} onClick={() => { if (!finished) { analytics.jump(deck.index); toChallenge() } }}
               aria-current={finished ? 'step' : undefined} aria-label={`Go to step ${STEPS}, Your turn`}
             >
               <span className="track"><span className="fill" style={finished ? { width: '100%' } : undefined} /></span>
@@ -206,8 +217,8 @@ export function App({ base, docsHref, onComplete }: AppProps) {
         </div>
         <div className="transport">
           <IconButton label="Back" onClick={goBack} disabled={!finished && deck.index === 0}><BackIcon /></IconButton>
-          <IconButton label={deck.playing ? 'Pause' : 'Play'} onClick={deck.togglePlay} disabled={finished}>{deck.playing ? <PauseIcon /> : <PlayIcon />}</IconButton>
-          <IconButton label="Replay this slide" onClick={replay} disabled={finished}><ReplayIcon /></IconButton>
+          <IconButton label={deck.playing ? 'Pause' : 'Play'} onClick={togglePlay} disabled={finished}>{deck.playing ? <PauseIcon /> : <PlayIcon />}</IconButton>
+          <IconButton label="Replay this slide" onClick={() => { analytics.replay(deck.index); replay() }} disabled={finished}><ReplayIcon /></IconButton>
           <IconButton label="Next" onClick={goNext} disabled={finished}><NextIcon /></IconButton>
         </div>
       </div>
@@ -221,7 +232,7 @@ export function App({ base, docsHref, onComplete }: AppProps) {
             {deck.captions.map(c => (
               <button
                 key={`${slideId}-${c.id}`} type="button" className={c.id === deck.cue?.id ? 'on' : ''}
-                onClick={() => seek(c.frame)} title={c.title} aria-label={`Jump to: ${c.title}`}
+                onClick={() => { analytics.seek(deck.index); seek(c.frame) }} title={c.title} aria-label={`Jump to: ${c.title}`}
               />
             ))}
           </nav>
@@ -230,7 +241,7 @@ export function App({ base, docsHref, onComplete }: AppProps) {
         <section className={`stage${deck.ended ? ' ended' : ''}`} aria-label="Editor">
           <div className="screen" style={{ aspectRatio: `${size.width} / ${size.height}`, ['--ratio' as string]: size.width / size.height }}>
             <div className="glow" key={`glow-${deck.index}`} aria-hidden="true" />
-            <div className="player" onClick={deck.ended ? undefined : deck.togglePlay}>
+            <div className="player" onClick={deck.ended ? undefined : togglePlay}>
               <Player
                 ref={setPlayer}
                 key={deck.index}

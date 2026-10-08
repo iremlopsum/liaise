@@ -90,6 +90,8 @@ const ogImage = new URL(`${import.meta.env.BASE_URL.replace(/\/?$/, '/')}og.png`
         if (!pagefind) {
           pagefind = await import(/* @vite-ignore */ `${dialog.dataset.base}pagefind/pagefind.js`).catch(() => null)
           await pagefind?.options({ baseUrl: dialog.dataset.base })
+          // What was typed while Pagefind loaded is searched now, not on the next keystroke.
+          if (pagefind && input.value.trim()) input.dispatchEvent(new Event('input'))
         }
       }
       for (const b of document.querySelectorAll('[data-search-open]')) b.addEventListener('click', open)
@@ -130,11 +132,14 @@ const ogImage = new URL(`${import.meta.env.BASE_URL.replace(/\/?$/, '/')}og.png`
             </a></li>`
           return row(p.url, p.meta.title, p.excerpt, false) + subs.map((s) => row(s.url, s.title, s.excerpt, true)).join('')
         }).join('')
+        // The query these results (or No results) are for: analytics counts a search only once it is shown.
+        list.dataset.q = q
         highlight(0)
       })
     </script>
     <script>
       import { copyWithFeedback } from '../scripts/copy'
+      import { analytics, pagePath } from '../analytics'
       // One handler for every Copy button: the install pill and the code blocks.
       document.addEventListener('click', (e) => {
         const button = (e.target as Element).closest<HTMLElement>('[data-copy-install], .code-copy')
@@ -142,7 +147,11 @@ const ogImage = new URL(`${import.meta.env.BASE_URL.replace(/\/?$/, '/')}og.png`
         const code = button.classList.contains('code-copy')
         const source = code ? (button.previousElementSibling as HTMLElement) : button.querySelector<HTMLElement>('[data-copy-text]')!
         const text = code ? source.innerText : 'npm install liaise'
-        copyWithFeedback(button, text, { onFail: () => getSelection()?.selectAllChildren(source) })
+        const block = code
+          ? `${pagePath(location.pathname, import.meta.env.BASE_URL)}#${[...document.querySelectorAll('.code-copy')].indexOf(button) + 1}`
+          : 'install'
+        void copyWithFeedback(button, text, { onFail: () => getSelection()?.selectAllChildren(source) })
+          .then((ok) => analytics.copy(block, ok))
       })
     </script>
   </body>

@@ -3,7 +3,11 @@
 // (intro/flag.ts) goes straight to Quick start: the head script runs before anything paints, and a
 // storage error shows the intro. /intro/ is the same page without the redirect. Back (or Forward)
 // onto this page doesn't redirect: a page the back/forward cache didn't keep runs the script again,
-// and going on to Quick start would undo the reader's Back.
+// and going on to Quick start would undo the reader's Back. A visit from another site (or with no
+// referrer) carries where it came from, since Quick start's referrer is then this page: `via=front`,
+// the referring site's origin as `r`, and this address's ref and utm tags. The collector reads and
+// removes via and r (analytics/page.ts, analytics/index.ts). A click from this site (the header's
+// logo, the 404 page) carries nothing: the reader is already on the site, so it is not an entry.
 import Base from '../layouts/Base.astro'
 import Intro from '../components/Intro.astro'
 import { url } from '../url'
@@ -16,7 +20,16 @@ const to = url('/start/quick-start/')
     <script is:inline define:vars={{ key: INTRO_KEY, to }}>
       try {
         const nav = typeof performance === 'undefined' ? undefined : performance.getEntriesByType?.('navigation')[0]
-        if (nav?.type !== 'back_forward' && localStorage.getItem(key)) location.replace(to)
+        if (nav?.type !== 'back_forward' && localStorage.getItem(key)) {
+          let o = ''
+          try { o = new URL(document.referrer).origin } catch {}
+          if (o === location.origin) location.replace(to)
+          else {
+            const q = new URLSearchParams(location.search)
+            const other = ['ref', 'utm_source', 'utm_medium', 'utm_campaign'].filter((k) => q.has(k)).map((k) => '&' + k + '=' + encodeURIComponent(q.get(k))).join('')
+            location.replace(to + '?via=front' + (o ? '&r=' + encodeURIComponent(o) : '') + other)
+          }
+        }
       } catch {}
     </script>
   </Fragment>

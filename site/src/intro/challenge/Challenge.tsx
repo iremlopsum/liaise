@@ -15,6 +15,7 @@ import { describeThrown, formatArgs, inspect } from './format'
 import { ApiDocs } from './ApiDocs'
 import { Words } from '../keynote/Headline'
 import { useMedia } from '../keynote/useMedia'
+import { analytics } from '../../analytics'
 import './challenge.css'
 
 export interface ChallengeProps {
@@ -103,13 +104,14 @@ function NetworkTable({ rows }: { rows: NetRow[] }) {
 export default function Challenge(props: ChallengeProps) {
   const small = useMedia('(max-width: 767px)')
   const [failed, setFailed] = useState(false)
-  if (small) return <Reader {...props} why="On a larger screen this step is an editor and five checks. Here is one way to write it:" />
-  if (failed) return <Reader {...props} why="The editor didn't load. Here is one way to write it:" />
+  if (small) return <Reader {...props} kind="reader" why="On a larger screen this step is an editor and five checks. Here is one way to write it:" />
+  if (failed) return <Reader {...props} kind="error" why="The editor didn't load. Here is one way to write it:" />
   return <Workbench {...props} onFail={() => setFailed(true)} />
 }
 
 /** No editor (a phone, or Monaco failed to load): the brief, a solution to read, and the way on. */
-function Reader({ docsHref, onComplete, onReplay, why }: ChallengeProps & { why: string }) {
+function Reader({ docsHref, onComplete, onReplay, why, kind }: ChallengeProps & { why: string; kind: 'reader' | 'error' }) {
+  useEffect(() => analytics.editor(kind), [kind])
   return (
     <div className="reader">
       <p className="eyebrow"><span className="n">10</span>Your turn</p>
@@ -117,8 +119,8 @@ function Reader({ docsHref, onComplete, onReplay, why }: ChallengeProps & { why:
       <p className="brief-body">{why}</p>
       <pre className="solution">{SOLUTION}</pre>
       <div className="done-actions">
-        <a className="pill" href={docsHref} onClick={onComplete}>Go to the docs →</a>
-        <button type="button" className="link-btn" onClick={onReplay}>Watch again</button>
+        <a className="pill" href={docsHref} onClick={() => { analytics.outcome('docs'); onComplete() }}>Go to the docs →</a>
+        <button type="button" className="link-btn" onClick={() => { analytics.outcome('again'); onReplay() }}>Watch again</button>
       </div>
     </div>
   )
@@ -126,6 +128,7 @@ function Reader({ docsHref, onComplete, onReplay, why }: ChallengeProps & { why:
 
 function Workbench({ base, docsHref, onComplete, onReplay, onFail }: ChallengeProps & { onFail: () => void }) {
   const host = useRef<HTMLDivElement>(null)
+  const mountedAt = useRef(performance.now())
   const ed = useRef<MountedEditor | null>(null)
   const [ready, setReady] = useState(false)
   const [mode, setMode] = useState<UnreadMode>('healthy')
@@ -191,6 +194,7 @@ function Workbench({ base, docsHref, onComplete, onReplay, onFail }: ChallengePr
         sources: { unread: readSaved() ?? SCAFFOLD }, current: 'unread', base,
         onRun: () => runRef.current(),
         onChange: (value) => {
+          analytics.firstEdit()
           window.clearTimeout(save)
           save = window.setTimeout(() => { save = undefined; writeSaved(value) }, 400)
           if (checkedRef.current !== null) setStale(value !== checkedRef.current)
@@ -204,6 +208,7 @@ function Workbench({ base, docsHref, onComplete, onReplay, onFail }: ChallengePr
         ed.current = editor
         setPristine(editor.value() === SCAFFOLD)
         setReady(true)
+        analytics.editor('loaded', performance.now() - mountedAt.current)
       })
       .catch((e) => { console.warn('intro: the editor did not load.', e); if (!gone) onFail() })
     return () => {
@@ -237,6 +242,7 @@ function Workbench({ base, docsHref, onComplete, onReplay, onFail }: ChallengePr
       const { js, diagnostics } = await editor.compile()
       if (goneRef.current) return
       push('divider', `Run · server ${MODE_LABEL[mode]}`)
+      analytics.run10(mode)
       if (diagnostics.length) push('warn', `${diagnostics.length} type error${diagnostics.length === 1 ? '' : 's'}, running it anyway. Line ${diagnostics[0].line}: ${diagnostics[0].message}`)
       const r = await runner.run(loadJs(js), { mode, timeoutMs: 15_000 })
       if (goneRef.current) return
@@ -277,6 +283,8 @@ function Workbench({ base, docsHref, onComplete, onReplay, onFail }: ChallengePr
       const results: Record<CheckId, CheckState> = {
         liaise: checkLiaise(a), healthy: checkHealthy(a), down: checkDown(b, source), throws: checkThrows(a, b), types: checkTypes(diagnostics),
       }
+      analytics.attempt(CHECKS.map((c) => results[c.id].status === 'pass'), results.down.status === 'pass' ? null : (results.down.code ?? 'other'))
+      if (CHECKS.every((c) => results[c.id].status === 'pass')) analytics.passed()
       await tick('down', results.down)
       await tick('throws', results.throws)
       await tick('types', results.types)
@@ -294,14 +302,15 @@ function Workbench({ base, docsHref, onComplete, onReplay, onFail }: ChallengePr
     }
   }
 
-  const startOver = () => { ed.current?.replace(SCAFFOLD); setRevealed(false); ed.current?.focus() }
-  const showSolution = () => { ed.current?.replace(SOLUTION); setConfirming(false); setRevealed(true); ed.current?.focus() }
+  const startOver = () => { analytics.startOver(); ed.current?.replace(SCAFFOLD); setRevealed(false); ed.current?.focus() }
+  const showSolution = () => { analytics.solution(); ed.current?.replace(SOLUTION); setConfirming(false); setRevealed(true); ed.current?.focus() }
 
   // The console and the network table follow their newest line.
   const consoleEl = useRef<HTMLDivElement>(null)
   useEffect(() => { const el = consoleEl.current; if (el) el.scrollTop = el.scrollHeight }, [lines, tab])
   const netEl = useRef<HTMLDivElement>(null)
   useEffect(() => { const el = netEl.current; if (el) el.scrollTop = el.scrollHeight }, [rows, tab])
+  const openDocs = () => { analytics.drawer(); setDocs(true) }
   const closeDocs = useCallback(() => setDocs(false), [])
 
   // The success screen takes focus on its primary action; Escape goes back to the editor.
@@ -368,7 +377,7 @@ function Workbench({ base, docsHref, onComplete, onReplay, onFail }: ChallengePr
                 When the server is down it returns <code>'{DOWN}'</code>. Use <code>error.kind</code>, and never throw.
               </p>
               <p className="brief-meta">
-                <button type="button" className="text-btn" onClick={() => setDocs(true)}>The API docs</button> list every endpoint.<span className="kbd-hint"> Run your code with <kbd>{RUN_KEYS}</kbd>.</span>
+                <button type="button" className="text-btn" onClick={openDocs}>The API docs</button> list every endpoint.<span className="kbd-hint"> Run your code with <kbd>{RUN_KEYS}</kbd>.</span>
               </p>
             </section>
 
@@ -427,8 +436,8 @@ function Workbench({ base, docsHref, onComplete, onReplay, onFail }: ChallengePr
             <h2 id="done-title" className="done-title"><Words text="That's liaise." className="w" step={90} /></h2>
             <p className="done-body">You defined an endpoint, called it, and handled a server that was down, without a try/catch. The docs have the rest.</p>
             <div className="done-actions">
-              <a ref={docsLink} className="pill big" href={docsHref} onClick={onComplete}>Go to the docs →</a>
-              <button type="button" className="link-btn" onClick={onReplay}>Watch again</button>
+              <a ref={docsLink} className="pill big" href={docsHref} onClick={() => { analytics.outcome('docs'); onComplete() }}>Go to the docs →</a>
+              <button type="button" className="link-btn" onClick={() => { analytics.outcome('again'); onReplay() }}>Watch again</button>
               <button type="button" className="text-btn" onClick={() => setSolved(false)}>Keep editing</button>
             </div>
           </div>

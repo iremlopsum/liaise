@@ -1,0 +1,32 @@
+---
+title: "Privacy"
+description: "What this site records about a page view, what it never records, and who can see it."
+order: 3
+---
+This site counts how its pages and its intro are used, so the docs can be improved. The counting uses no cookies and stores nothing in your browser.
+
+The site itself remembers a few choices in your browser, so they survive a reload: your light or dark theme, whether you have seen the intro, which variant the Compare page shows, and the code you typed in the intro's challenge. None of that is ever sent anywhere.
+
+## What a page view records
+
+- The page, any `ref`, `utm_source`, `utm_medium` or `utm_campaign` tag in its address, and where you came from: the site that linked to it (only that site's address, as browsers send it), or the page of this site you were on.
+- Your timezone, used to guess a country; your browser's language; and your browser, operating system and device as categories (for example "Safari", "macOS", "desktop").
+- How long the page was in front of you and in use, and whether you left the site from it.
+- On the docs: what you searched for, how many results there were and which position you picked, which Copy buttons worked, and clicks on links to GitHub, npm and Compare. A search with an @ in it is never recorded, so a pasted email address isn't kept.
+- In the playground and the intro: which example you ran, how far the intro got, and how the challenge's checks went.
+
+## What it never records
+
+Your IP address, your exact screen size or your User-Agent string. Google's servers see your IP address to answer the request, but the record never holds it. Each page view gets a random number, made when the page opens and never stored in your browser or reused, that only ties together the records of that one page view.
+
+## Turning it off
+
+If your browser sends Global Privacy Control, nothing is recorded. Automated browsers are never recorded either.
+
+## Where it goes, and for how long
+
+Records go to Google's Firebase, stored in the EU. Only the site's owner can read them.
+
+Records older than 30 days are deleted the next time the owner opens the analytics. So a record can stay longer than 30 days if the owner hasn't looked in a while.
+
+What remains is a set of daily totals, kept for good. They include the most common searches and the searches that found nothing, as typed.

@@ -255,21 +255,45 @@ describe('remembering the intro, and the way back', () => {
     expect(html.indexOf(script)).toBeLessThan(html.indexOf('</head>'))
     // performance: how the browser came to the page (Navigation Timing), as the script reads it.
     const came = (type: string) => ({ getEntriesByType: (t: string) => (t === 'navigation' ? [{ type }] : []) })
-    const run = (storage: { getItem(key: string): string | null }, performance: unknown = came('navigate')) => {
-      const location = { replace: vi.fn() }
-      new Function('localStorage', 'location', 'performance', script)(storage, location, performance)
+    const run = (storage: { getItem(key: string): string | null }, performance: unknown = came('navigate'), from = { referrer: '', search: '' }) => {
+      const location = { replace: vi.fn(), origin: 'https://iremlopsum.github.io', search: from.search }
+      new Function('localStorage', 'location', 'performance', 'document', script)(storage, location, performance, { referrer: from.referrer })
       return location.replace
     }
     const seen = { getItem: (k: string) => (k === INTRO_KEY ? 'skipped' : null) }
-    expect(run(seen)).toHaveBeenCalledWith('/liaise/start/quick-start/')
+    // Quick start's referrer will be this page, so the redirect says it came from here (via=front).
+    const quick = '/liaise/start/quick-start/?via=front'
+    expect(run(seen)).toHaveBeenCalledWith(quick)
     expect(run({ getItem: () => null })).not.toHaveBeenCalled()
     expect(run({ getItem: () => { throw new DOMException('blocked', 'SecurityError') } })).not.toHaveBeenCalled()
     // Back from Quick start: the page wasn't kept by the back/forward cache, so the script runs again.
     // Redirecting then would undo the Back.
     expect(run(seen, came('back_forward'))).not.toHaveBeenCalled()
-    expect(run(seen, came('reload'))).toHaveBeenCalledWith('/liaise/start/quick-start/')
+    expect(run(seen, came('reload'))).toHaveBeenCalledWith(quick)
     // A browser without Navigation Timing still redirects.
-    expect(run(seen, {})).toHaveBeenCalledWith('/liaise/start/quick-start/')
+    expect(run(seen, {})).toHaveBeenCalledWith(quick)
+  })
+  it('carries another site\'s origin and the address\'s ref and utm tags through the redirect, and nothing else', () => {
+    const script = redirect(page('index.html'))!
+    const run = (referrer: string, search: string) => {
+      const location = { replace: vi.fn(), origin: 'https://iremlopsum.github.io', search }
+      new Function('localStorage', 'location', 'performance', 'document', script)({ getItem: () => 'done' }, location, {}, { referrer })
+      return location.replace
+    }
+    expect(run('https://github.com/iremlopsum/liaise', '?utm_source=newsletter&utm_campaign=Launch%20Week&gclid=x'))
+      .toHaveBeenCalledWith('/liaise/start/quick-start/?via=front&r=https%3A%2F%2Fgithub.com&utm_source=newsletter&utm_campaign=Launch%20Week')
+    expect(run('', '?ref=readme')).toHaveBeenCalledWith('/liaise/start/quick-start/?via=front&ref=readme')
+    expect(run('not a url', '')).toHaveBeenCalledWith('/liaise/start/quick-start/?via=front')
+  })
+  it('carries nothing on a click from this site, so the header\'s logo and the 404 page are not counted as entries', () => {
+    const script = redirect(page('index.html'))!
+    const run = (referrer: string) => {
+      const location = { replace: vi.fn(), origin: 'https://iremlopsum.github.io', search: '' }
+      new Function('localStorage', 'location', 'performance', 'document', script)({ getItem: () => 'done' }, location, {}, { referrer })
+      return location.replace
+    }
+    expect(run('https://iremlopsum.github.io/liaise/compare/')).toHaveBeenCalledWith('/liaise/start/quick-start/')
+    expect(run('https://iremlopsum.github.io/liaise/404.html')).toHaveBeenCalledWith('/liaise/start/quick-start/')
   })
   it('never redirects /intro/', () => {
     expect(redirect(page('intro/index.html'))).toBeUndefined()
