@@ -19,7 +19,7 @@ A middleware is a `Middleware`: `(ctx, next) => Promise<Result<unknown>>`. [Writ
 | `request.params` | `unknown` | The params as the caller passed them. |
 | `request.headers` | `Headers` | The merged headers. A middleware can add, change or remove them. |
 | `request.fetchOptions` | `FetchOptions \| undefined` | The client's, the endpoint's and the call's `fetchOptions`, merged into a fresh object for each call. A middleware can change a field or assign a new object. `method`, `headers`, `body` and `signal` in it are ignored. Optional in the type only: liaise always sets it, so write `ctx.request.fetchOptions!.credentials = 'include'`, or assign a new object. |
-| `request.body` | `unknown` | The serialized body: a JSON string for an object of params, or the body as you passed it, such as a `FormData`. `null` when there is none. |
+| `request.body` | `unknown` | The serialized body: a JSON string for an object or array of params, or the body as you passed it, such as a `FormData`. `null` when there is none. |
 | `request.signal` | `AbortSignal \| undefined` | The caller's `signal` combined with the call's deadline, or `undefined` when there is neither. `fetch` receives it, merged with the dedupe signal under `dedupe`. Under `share` it is the signal this caller waits on, because the shared request has its own. A middleware can replace it ([Signals in middleware](/guide/writing-middleware/#signals-in-middleware)). |
 | `requestName` | `string` | The endpoint's key, such as `'getUser'`. |
 
