@@ -21,6 +21,22 @@ function setup(passThrough?: (input: RequestInfo | URL) => boolean) {
 afterEach(() => { vi.unstubAllGlobals() })
 
 describe('runner: every run can be stopped', () => {
+  it('reports each request a liaise client sends while its run is live, and none after', async () => {
+    const seen: Array<{ method: string; url: string }> = []
+    const scope: RunScope = { fetch: vi.fn() as unknown as typeof fetch, console: { log: vi.fn(), error: vi.fn() } }
+    const server = createFakeServer()
+    vi.stubGlobal('fetch', server.fetch)
+    const runner = createRunner({ scope, send: server.fetch, print: () => {}, onLiaiseRequest: (r) => seen.push(r) })
+    const getUser = defineRequest<{ name: string }>()({ method: 'GET', path: '/users/:id' })
+    let api!: { getUser: (p: { id: string }) => Promise<{ error: { kind: string } | null }> }
+    await runner.run(async (run) => {
+      api = createApi({ baseUrl: FAKE_ORIGIN, requests: { getUser }, middleware: [run.gate as never] }) as never
+      await api.getUser({ id: '42' })
+    })
+    expect(seen).toEqual([{ method: 'GET', url: `${FAKE_ORIGIN}/users/42` }])
+    expect((await api.getUser({ id: '7' })).error?.kind).toBe('abort') // the run is over: gated, and not reported
+    expect(seen).toHaveLength(1)
+  })
   it('stop ends a run whose request never settles: aborted, globals restored, later output dropped', async () => {
     const { original, scope, settled, printed, runner } = setup()
     let request!: Promise<Response>
