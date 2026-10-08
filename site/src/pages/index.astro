@@ -1,92 +1,19 @@
 ---
+// The front page is the intro (components/Intro.astro). A browser that finished or skipped it
+// (intro/flag.ts) goes straight to Quick start: the head script runs before anything paints, and a
+// storage error shows the intro. /intro/ is the same page without the redirect.
 import Base from '../layouts/Base.astro'
-import Playground from '../components/Playground.astro'
+import Intro from '../components/Intro.astro'
 import { url } from '../url'
-import { whatsNew } from '../data/whats-new'
-import pkg from '../../../package.json'
-import results from '../../../compare/results.json'
+import { INTRO_KEY } from '../intro/flag'
 
-// null when the CHANGELOG has no section for the released version: then there is no pill.
-const news = whatsNew()
-// Gzipped size of the REST-only import, from the comparison harness, never typed by hand.
-const gzipKb = Math.round(results.sizes.liaise.gzip / 1024)
-
-// The five rows of README "The problem it solves", word for word.
-const problems = [
-  ['Typing fast in a search box shows old results. A slow early search lands last.', '`dedupe` cancels the older call.', '/guide/cancelling-deadlines-and-stale-requests/'],
-  ['Five components load the same data, or five 401s each refresh the token. That’s five identical requests.', '`share` sends one and hands everyone the answer.', '/guide/sharing-identical-requests/'],
-  ['A 500 counts as success, offline throws, a hung server waits forever.', 'Every call returns `{ data, error }`, and `error.kind` names the failure. With `timeout` set, a hung server becomes an error too.', '/guide/handling-errors/'],
-  ['Retries run straight past your timeout.', '`timeout` covers the whole operation, retries included.', '/guide/cancelling-deadlines-and-stale-requests/'],
-  ['The backend changes a field and the page crashes three components later.', 'A schema checks the response. A bad shape is an error you handle.', '/guide/validating-responses/'],
-]
-const code = (s: string) => s.replace(/`([^`]+)`/g, '<code class="rounded-md bg-gray-950/[0.04] px-1.5 py-0.5 font-mono text-[0.85em] font-medium text-gray-950 ring-1 ring-gray-950/[0.06] ring-inset dark:bg-white/[0.06] dark:text-white dark:ring-white/10">$1</code>')
+const to = url('/start/quick-start/')
 ---
-<Base description="Type-safe REST and GraphQL on plain fetch. Every call returns { data, error }, so nothing throws.">
-  <main>
-    <section class="mx-auto max-w-[90rem] px-4 pt-16 sm:px-6 sm:pt-20 lg:px-8">
-      <div class="max-w-3xl">
-        {news && (
-          <a href={news.href} class="inline-flex items-center gap-2 rounded-full py-1 pr-3 pl-1 text-[13px] text-gray-600 ring-1 ring-gray-950/10 ring-inset transition hover:ring-gray-950/20 dark:text-gray-400 dark:ring-white/10 dark:hover:ring-white/20">
-            <span class="rounded-full bg-accent-soft px-2 py-0.5 text-[12px] font-semibold text-accent">{news.version}</span>
-            {news.text}
-            <span aria-hidden="true">→</span>
-          </a>
-        )}
-        <h1 class="mt-6 text-[2.75rem] leading-[1.05] font-semibold tracking-[-0.035em] text-balance text-gray-950 sm:text-6xl lg:text-[4.25rem] dark:text-white">
-          Your API calls, minus the surprises.
-        </h1>
-        <p class="mt-6 max-w-2xl text-lg leading-8 text-pretty text-gray-600 dark:text-gray-400">
-          Type-safe REST and GraphQL on plain <code class="font-mono text-[0.9em] text-gray-950 dark:text-white">fetch</code>.
-          Every call returns <code class="font-mono text-[0.9em] whitespace-nowrap text-gray-950 dark:text-white">{'{ data, error }'}</code>, so nothing throws.
-          Zero dependencies, about {gzipKb}&nbsp;kB gzipped for a REST client, any framework.
-        </p>
-        <div class="mt-8 flex flex-wrap items-center gap-3">
-          <a href={url('/start/quick-start/')} class="rounded-full bg-gray-950 px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-gray-800 dark:bg-white dark:text-gray-950 dark:hover:bg-gray-200">Get started</a>
-          <button data-copy-install class="group inline-flex items-center gap-3 rounded-full px-4 py-2.5 font-mono text-[13px] text-gray-700 ring-1 ring-gray-950/10 ring-inset transition hover:ring-gray-950/20 dark:text-gray-300 dark:ring-white/10 dark:hover:ring-white/20">
-            <span><span class="text-gray-400 select-none">$ </span><span data-copy-text>npm install liaise</span></span>
-            <span data-label class="font-sans text-[12px] text-gray-500 dark:text-gray-400 group-hover:text-gray-600 dark:group-hover:text-gray-300">Copy</span>
-          </button>
-        </div>
-      </div>
-
-      <div class="mt-14 sm:mt-16">
-        <div class="mb-3 flex items-baseline justify-between gap-4">
-          <p class="text-[13px] font-medium text-gray-950 dark:text-white">Try it. This is the real library, running in your browser against a fake API.</p>
-          <p class="hidden text-[13px] text-gray-500 dark:text-gray-400 md:block">Edit anything, then press Run.</p>
-        </div>
-        <Playground />
-      </div>
-    </section>
-
-    <section class="mx-auto max-w-[90rem] px-4 py-24 sm:px-6 lg:px-8">
-      <div class="max-w-2xl">
-        <h2 class="text-[13px] font-semibold text-accent">The problem it solves</h2>
-        <p class="mt-2 text-3xl font-semibold tracking-tight text-balance sm:text-4xl">The parts every project ends up writing around fetch.</p>
-      </div>
-      <div class="mt-12 divide-y divide-gray-950/[0.07] border-y border-gray-950/[0.07] dark:divide-white/10 dark:border-white/10">
-        <div class="hidden grid-cols-[1fr_1fr_6rem] gap-10 py-3 text-[12px] font-medium tracking-wide text-gray-500 dark:text-gray-400 uppercase md:grid">
-          <span>With plain fetch</span><span>With liaise</span><span></span>
-        </div>
-        {problems.map(([pain, fix, href]) => (
-          <a href={url(href)} data-problem class="group grid gap-2 py-6 md:grid-cols-[1fr_1fr_6rem] md:gap-10">
-            <p class="text-[15px] leading-7 text-gray-600 dark:text-gray-400">{pain}</p>
-            <p class="text-[15px] leading-7 text-gray-950 dark:text-white" set:html={code(fix)} />
-            <span class="text-[13px] font-medium text-gray-500 transition dark:text-gray-400 group-hover:text-accent md:text-right">Read →</span>
-          </a>
-        ))}
-      </div>
-    </section>
-
-    <footer class="border-t border-gray-950/5 dark:border-white/10">
-      <div class="mx-auto flex max-w-[90rem] flex-wrap items-center justify-between gap-4 px-4 py-8 text-[13px] text-gray-500 dark:text-gray-400 sm:px-6 lg:px-8">
-        <span>liaise {pkg.version} · MIT · Made by Kristjan Vool</span>
-        <div class="flex gap-6">
-          <a href={url('/start/quick-start/')} class="hover:text-gray-950 dark:hover:text-white">Docs</a>
-          <a href={url('/compare/')} class="hover:text-gray-950 dark:hover:text-white">Compare</a>
-          <a href="https://github.com/iremlopsum/liaise" class="hover:text-gray-950 dark:hover:text-white">GitHub</a>
-          <a href="https://www.npmjs.com/package/liaise" class="hover:text-gray-950 dark:hover:text-white">npm</a>
-        </div>
-      </div>
-    </footer>
-  </main>
+<Base intro="front" description="Type-safe REST and GraphQL on plain fetch. Every call returns { data, error }, so nothing throws.">
+  <Fragment slot="head">
+    <script is:inline define:vars={{ key: INTRO_KEY, to }}>
+      try { if (localStorage.getItem(key)) location.replace(to) } catch {}
+    </script>
+  </Fragment>
+  <Intro />
 </Base>
