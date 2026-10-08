@@ -185,6 +185,8 @@ const runnable = Object.fromEntries(await Promise.all(SCENARIOS.map(async (s) =>
       net.innerHTML = ''; out.innerHTML = ''; rows.clear(); count.textContent = ''; cors.hidden = true; server.reset()
       t0 = Date.now()
       showRunning(true)
+      // The tab this run is for: a tab switch changes `current` before the old run has ended.
+      const tab = current.id
       let edited = false, typeErrors = 0
       const end = await runner.run(async (r) => {
         // An example as shipped runs as compiled at build time; an edited one goes through the
@@ -203,7 +205,7 @@ const runnable = Object.fromEntries(await Promise.all(SCENARIOS.map(async (s) =>
           URL.revokeObjectURL(url); URL.revokeObjectURL(shim)
         }
       })
-      analytics.run({ tab: current.id, edited, typeErrors, threw: end.ended === 'threw' })
+      if (end.ended !== 'stopped') analytics.run({ tab, edited, typeErrors, threw: end.ended === 'threw' }) // an interrupted run isn't a run
       if (end.ended === 'threw') {
         const err = end.error as { name?: string; message?: string } | undefined
         print([`Uncaught ${err?.name ?? 'Error'}: ${err?.message ?? String(end.error)}`], 'text-rose-300')
