@@ -74,16 +74,20 @@ export function App({ base, docsHref, onComplete }: AppProps) {
   const onFinish = useCallback(() => setFinished(true), [])
   const deck = useDeck(onFinish)
 
-  // Start was pressed on the static start screen: that press is the gesture browsers want before
-  // anything plays. The deck plays as soon as the Player mounts.
-  useEffect(() => { deck.start() }, []) // eslint-disable-line react-hooks/exhaustive-deps
-
   // Our own handle on the Player, beside the deck's. Remotion's seekTo() on a playing
   // Player marks it to resume after the seek and never clears that mark when play() is
   // called right away (which deck.seek and deck.replay do), so the slide would loop back
   // to frame 0 at its end instead of stopping. Pausing first avoids the mark.
   const player = useRef<PlayerRef | null>(null)
-  const setPlayer = useCallback((p: PlayerRef | null) => { player.current = p; deck.playerRef(p) }, [deck.playerRef])
+  const [hasPlayer, setHasPlayer] = useState(false)
+  const setPlayer = useCallback((p: PlayerRef | null) => { player.current = p; deck.playerRef(p); if (p) setHasPlayer(true) }, [deck.playerRef])
+
+  // Start was pressed on the static start screen: that press is the gesture browsers want before
+  // anything plays. The deck plays once it holds the Player, which is after the deck's own seekTo(0)
+  // on it: started any earlier, that seek lands on a playing Player (the mark above), and slide 1
+  // loops at its end instead of stopping.
+  useEffect(() => { if (hasPlayer && !deck.started) deck.start() }, [hasPlayer]) // eslint-disable-line react-hooks/exhaustive-deps
+
   const seek = (f: number) => { if (player.current?.isPlaying()) player.current.pause(); deck.seek(f) }
   const replay = () => { if (player.current?.isPlaying()) player.current.pause(); deck.replay() }
   const tall = useMedia('(max-width: 640px)')
