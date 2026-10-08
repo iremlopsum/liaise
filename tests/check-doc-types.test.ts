@@ -13,6 +13,15 @@ function run(files: Record<string, string>) {
     return { code: 0, out: execFileSync('node', [script, '--root', join(__dirname, '..'), '--src', ...Object.keys(files).map(f => join(dir, f))], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }) }
   } catch (e: any) { return { code: e.status as number, out: String(e.stdout) + String(e.stderr) } }
 }
+// Runs the script with an intro module exporting FILES (name → code), checked as one project.
+function runIntro(files: Record<string, string>) {
+  const module = join(dir, 'files.ts')
+  writeFileSync(module, `export const FILES: Record<string, string> = ${JSON.stringify(files)}\n`)
+  writeFileSync(join(dir, 'a.md'), 'No code here.\n')
+  try {
+    return { code: 0, out: execFileSync('node', [script, '--root', join(__dirname, '..'), '--src', join(dir, 'a.md'), '--intro', module], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }) }
+  } catch (e: any) { return { code: e.status as number, out: String(e.stdout) + String(e.stderr) } }
+}
 beforeEach(() => { dir = mkdtempSync(join(tmpdir(), 'doc-types-')) })
 afterEach(() => { rmSync(dir, { recursive: true, force: true }) })
 
@@ -109,5 +118,26 @@ describe('check-doc-types', { timeout: 60_000 }, () => {
     catch (e: any) { code = e.status; out = String(e.stdout) + String(e.stderr) }
     expect(code).toBe(1)
     expect(out).toMatch(/bad-prelude\.d\.ts.*NoSuchExport/)
+  })
+
+  it('type-checks the intro files as one project: relative imports and TSX', () => {
+    const r = runIntro({
+      'api.ts': "import { createApi } from 'liaise'\nexport const api = createApi({ baseUrl: '/api', requests: {} })\n",
+      'View.tsx': "import { useState } from 'react'\nimport { api } from './api'\nexport function View() {\n  const [n] = useState(0)\n  void api\n  return <p>{n}</p>\n}\n",
+    })
+    expect(r.out).toMatch(/2 intro files/)
+    expect(r.code).toBe(0)
+  })
+
+  it('fails an intro file with a type error, naming the module, the file and the line', () => {
+    const r = runIntro({ 'api.ts': "import { createApi } from 'liaise'\n\ncreateApi({ baseUrl: '/api', requests: {}, timout: 1 })\n" })
+    expect(r.code).toBe(1)
+    expect(r.out).toMatch(/files\.ts \(api\.ts\):3: TS\d+ .*timout/)
+  })
+
+  it("keeps the snippets' prelude out of the intro files", () => {
+    const r = runIntro({ 'a.ts': "export const u: User = { id: '1', name: 'Ada' }\n" })
+    expect(r.code).toBe(1)
+    expect(r.out).toMatch(/\(a\.ts\):1: TS2304 .*'User'/)
   })
 })
