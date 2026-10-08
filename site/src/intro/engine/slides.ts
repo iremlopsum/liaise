@@ -1,6 +1,7 @@
-// The three slides every look shares: what gets typed, when the editor's hints appear,
-// and the caption for each moment. Every finished file is real TypeScript that compiles
-// against liaise (checked by `npm run check` in this folder).
+// The intro's nine slide scripts: what gets typed, when the editor's hints appear, and the
+// caption for each moment. site/tests/intro-slides.test.ts checks that each script ends on its
+// SOURCES files, keeps to 66 columns and has a caption for every cue; `npm run docs:types`
+// compiles SOURCES against liaise (through ../files.ts).
 import type { CompletionItem, SlideScript } from './timeline'
 import { compile } from './timeline'
 
