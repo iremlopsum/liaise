@@ -11,6 +11,7 @@ import { FPS } from '../length'
 import { SIZE, Stage, type Layout } from './Stage'
 import { Headline } from './Headline'
 import { useMedia } from './useMedia'
+import { StepBoundary } from './StepBoundary'
 import './keynote.css'
 
 // Monaco comes with it: nothing of the editor loads before step 10.
@@ -70,15 +71,18 @@ export interface AppProps {
 }
 
 export function App({ base, docsHref, onComplete }: AppProps) {
-  const [finished, setFinished] = useState(false)
-  const onFinish = useCallback(() => setFinished(true), [])
-  const deck = useDeck(onFinish)
-
   // Our own handle on the Player, beside the deck's. Remotion's seekTo() on a playing
   // Player marks it to resume after the seek and never clears that mark when play() is
   // called right away (which deck.seek and deck.replay do), so the slide would loop back
   // to frame 0 at its end instead of stopping. Pausing first avoids the mark.
   const player = useRef<PlayerRef | null>(null)
+
+  const [finished, setFinished] = useState(false)
+  // Next on slide 9 opens step 10. The Player stays mounted behind it (so Back finds its slide), so
+  // pause it, as toChallenge does: playing hidden, it would re-render the app every frame while the
+  // reader types.
+  const onFinish = useCallback(() => { player.current?.pause(); setFinished(true) }, [])
+  const deck = useDeck(onFinish)
   const [hasPlayer, setHasPlayer] = useState(false)
   const setPlayer = useCallback((p: PlayerRef | null) => { player.current = p; deck.playerRef(p); if (p) setHasPlayer(true) }, [deck.playerRef])
 
@@ -208,7 +212,8 @@ export function App({ base, docsHref, onComplete }: AppProps) {
         </div>
       </div>
 
-      <main className={`main${cutting ? ' cut' : ''}`}>
+      {/* Kept mounted at step 10, so the Player keeps its slide; hidden, so assistive tech skips it. */}
+      <main className={`main${cutting ? ' cut' : ''}`} hidden={finished}>
         <section className="captions" aria-label="Caption">
           <p className="eyebrow" key={slideId}>{pad(deck.index + 1)}<span>{NAMES[slideId]}</span></p>
           <Headline caption={caption} />
@@ -237,6 +242,8 @@ export function App({ base, docsHref, onComplete }: AppProps) {
                 compositionHeight={size.height}
                 moveToBeginningWhenEnded={false}
                 style={{ width: '100%', height: '100%' }}
+                // Remotion's free licence covers this project (spec §4, docs/superpowers/specs/2026-10-08-intro-front-page-design.md).
+                acknowledgeRemotionLicense
               />
             </div>
             {paused && <div className="paused" aria-hidden="true"><PlayIcon /></div>}
@@ -253,9 +260,11 @@ export function App({ base, docsHref, onComplete }: AppProps) {
 
       {finished && (
         <section className="step10" aria-label="Your turn">
-          <Suspense fallback={<p className="loading">Loading the editor…</p>}>
-            <Challenge base={base} docsHref={docsHref} onComplete={onComplete} onReplay={restart} />
-          </Suspense>
+          <StepBoundary docsHref={docsHref} onReplay={restart}>
+            <Suspense fallback={<p className="loading">Loading the editor…</p>}>
+              <Challenge base={base} docsHref={docsHref} onComplete={onComplete} onReplay={restart} />
+            </Suspense>
+          </StepBoundary>
         </section>
       )}
     </div>

@@ -157,3 +157,6 @@
 
 .intro-app .step10 { min-height: calc(100svh - 3.5rem - 1px - var(--bar, 64px)); }
 .intro-app .loading { margin: 0; padding: 96px var(--gutter); font: 500 13px/1.4 var(--mono); color: var(--dim); }
+/* Step 10's chunk didn't load (StepBoundary.tsx): the line above, and the ways on under it. */
+.intro-app .step-failed .loading { padding-bottom: 20px; }
+.intro-app .step-failed-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 0 var(--gutter); }
