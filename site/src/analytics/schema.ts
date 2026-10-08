@@ -57,27 +57,21 @@ const list = (item: string, max: number) => `^$|^${item}(,${item}){0,${max - 1}}
 const Q = '[a-z0-9 ._@/+#-]{1,60}'
 const SLIDE = '[01]:[01]:[0-9]{1,7}(:[0-9]{1,3}){7}'
 /** The patterns firestore.rules uses, character for character. */
-// The three patterns encodeRecord needs, on their own so the collector's bundle does not carry RX.
-export const RX_FROM = '^$|^/[a-z0-9/._~-]{0,120}$|^https?://[a-z0-9.-]{1,100}(:[0-9]{1,5})?$'
-export const RX_TZ = '^$|^[A-Za-z0-9_/+-]{1,40}$'
-export const RX_LANG = '^$|^[a-z]{2,3}(-[a-z0-9]{2,8})?$'
-// Built in a pure IIFE so a bundle that never calls decodeWire (the collector) drops it: esbuild
-// keeps a plain object whose template literals it cannot prove side-effect free.
-export const RX = /* @__PURE__ */ (() => ({
+export const RX = {
   pv: '^[a-z0-9]{12}$',
   path: '^/[a-z0-9/._~-]{0,120}$',
-  from: RX_FROM,
+  from: '^$|^/[a-z0-9/._~-]{0,120}$|^https?://[a-z0-9.-]{1,100}(:[0-9]{1,5})?$',
   tag: '^[a-z0-9._-]{1,40}$',
-  tz: RX_TZ,
-  lang: RX_LANG,
-  searches: /* @__PURE__ */ list(`${Q}:[0-9]{1,4}:([0-9]{1,2}|-)`, CAPS.searches),
-  copies: /* @__PURE__ */ list('(install|/[a-z0-9/._~-]{0,120}#[0-9]{1,3}):[01]', CAPS.copies),
-  tabs: /* @__PURE__ */ list('[a-z-]{1,24}', CAPS.tabs),
-  runs: /* @__PURE__ */ list('[a-z-]{1,24}:[01]:[0-9]{1,2}:[01]', CAPS.runs),
+  tz: '^$|^[A-Za-z0-9_/+-]{1,40}$',
+  lang: '^$|^[a-z]{2,3}(-[a-z0-9]{2,8})?$',
+  searches: list(`${Q}:[0-9]{1,4}:([0-9]{1,2}|-)`, CAPS.searches),
+  copies: list('(install|/[a-z0-9/._~-]{0,120}#[0-9]{1,3}):[01]', CAPS.copies),
+  tabs: list('[a-z-]{1,24}', CAPS.tabs),
+  runs: list('[a-z-]{1,24}:[01]:[0-9]{1,2}:[01]', CAPS.runs),
   start: '^$|^(click|enter):[0-9]{1,7}:[01]$',
   slides: `^$|^${SLIDE}(,${SLIDE}){8}$`,
-  attempts: /* @__PURE__ */ list('[pf]{5}:(http|healthy|undefined|threw|other)?', CAPS.attempts),
-}) as const)()
+  attempts: list('[pf]{5}:(http|healthy|undefined|threw|other)?', CAPS.attempts),
+} as const
 
 export const emptySlide = (): Slide => ({ reached: false, ended: false, ms: 0, pauses: 0, replays: 0, seeks: 0, back: 0, jumps: 0, copies: 0, copyFails: 0 })
 export const emptyStep10 = (): Step10 => ({ editor: '', loadMs: 0, runs: { healthy: 0, down: 0, slow: 0 }, attempts: [], solution: false, startOver: false, drawer: false, passMs: 0, outcome: '' })
@@ -99,8 +93,8 @@ export function encodeRecord(r: PageRecord): Wire {
   }
   const w: Wire = {
     v: SCHEMA_VERSION, pv: r.pv, seq: clamp(r.seq, 1, CAPS.sends), p: cleanPath(r.path),
-    f: new RegExp(RX_FROM).test(r.from) ? r.from : '', tz: new RegExp(RX_TZ).test(r.tz) ? r.tz : '',
-    lg: new RegExp(RX_LANG).test(r.lang) ? r.lang : '', br: r.browser, os: r.os, dv: r.device,
+    f: new RegExp(RX.from).test(r.from) ? r.from : '', tz: new RegExp(RX.tz).test(r.tz) ? r.tz : '',
+    lg: new RegExp(RX.lang).test(r.lang) ? r.lang : '', br: r.browser, os: r.os, dv: r.device,
     x: r.exit, e: clamp(r.engagedMs, 0, 86_400_000),
     se: r.searches.map((s) => ({ ...s, q: cleanQuery(s.q) })).filter((s) => s.q).slice(0, CAPS.searches)
       .map((s) => `${s.q}:${clamp(s.n, 0, 9999)}:${s.pos === null ? '-' : clamp(s.pos, 0, 99)}`).join(','),
