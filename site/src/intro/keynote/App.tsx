@@ -121,6 +121,9 @@ export function App({ base, docsHref, onComplete }: AppProps) {
       const arrow = e.key === 'ArrowRight' || e.key === 'ArrowLeft'
       if (!arrow && !(finished && e.key === ' ')) return
       e.stopPropagation()
+      // Step 10's own controls keep their keys: Space presses the focused button, and the arrows stay in
+      // its radios, tabs and API docs drawer. Stopped above, the deck's handler never sees them either.
+      if (finished && (e.target as Element | null)?.closest?.('.step10')) return
       e.preventDefault()
       if (e.key === 'ArrowRight') goNext()
       else if (e.key === 'ArrowLeft') goBack()
