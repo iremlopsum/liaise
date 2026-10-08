@@ -56,10 +56,22 @@ Callers ask the same thing when they use:
 
 - **The shortest `every` wins.** It is read again before each wait, so when the caller with the shortest one leaves, the poll goes back to the next shortest once the wait already started has passed. A caller that joins with a shorter `every` doesn't wait out the longer wait already started: the next request goes its `every` after the last answer. A longer wait after a failure stays as it is.
 - **A caller that joins late gets the last answer** without a new request. It arrives in a microtask, after `poll()` has returned, never inside the call. If the first answer hasn't come yet, the new caller waits for it like the others. A `pollUntil` whose `until` holds for that last answer resolves without sending anything.
-- **One caller leaving doesn't end the others.** `stop()`, an aborted `signal` or a `pollUntil` that resolves removes only that caller. The shared poll stops when its last caller leaves, and a request in flight at that moment is cancelled.
+- **One caller leaving doesn't end the others.** `stop()`, an aborted `signal` or a `pollUntil` that resolves removes only that caller. The shared poll stops when its last caller leaves, and a request in flight at that moment is cancelled, unless [`share`](#polls-and-share) has joined another call to it.
 - **A plain-object `params` is copied at the call**, so changing its top-level fields afterwards changes nothing. Nested values aren't copied, so don't change params after the call, nested objects included. Any other params value is sent as it is, without a copy. `URLSearchParams`, `FormData`, a `Blob` or an `ArrayBuffer` can't be compared, so each caller that passes one gets a shared poll of its own.
 
 **`dedupe` works per endpoint, not per params.** Two polls of a `dedupe: true` endpoint with different params, such as two job ids, cancel each other's requests, and a `pollUntil` among them can end with `kind: 'abort'`.
+
+### Polls and share
+
+[`share: true`](/guide/sharing-identical-requests/) on the endpoint goes further than polls being shared. Polls are matched before your middleware runs. `share` compares what is about to be sent, after it. So with `share`, polls that aren't shared still send one request when they ask the same thing at the same moment, and each poll gets its own `Result`:
+
+- **On a server**, where each `poll()` call is a poll of its own, `share` is the safe way to send fewer requests. Polls that send different users' tokens never share.
+- **Polls that a per-request option keeps apart** share one request when the option isn't sent, such as a different `timeout`.
+- **A direct call** made while a poll's request is in flight joins that request.
+- **Such polls stay in step** while every answer succeeds. After a failure, each one waits its own randomized backoff, so they usually drift apart. They share again only if one's next request starts while the other's is still in flight.
+- **A poll that stops** cancels its request only when no other call shares it.
+
+Polls that are already shared don't need `share`: they send one request per interval anyway.
 
 ## When a poll fails
 
