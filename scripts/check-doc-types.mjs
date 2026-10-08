@@ -46,14 +46,23 @@ for (const file of sources) {
 // The intro's files (site/src/intro/files.ts exports FILES: name → code) are one project of their
 // own: they import each other ('./api', './session'), some are TSX, and the snippets' prelude
 // (globals like `api` and `User`) must not leak into them. Without --src, the site's module is
-// checked; with --src, only when --intro names one.
-const introModule = introAt !== -1 ? resolve(args[introAt + 1]) : srcAt === -1 ? join(root, 'site/src/intro/files.ts') : null
+// checked; with --src, only when --intro names one. A module that isn't there fails the run: a
+// moved or renamed files.ts would otherwise check nothing and still pass.
+const introArg = introAt === -1 ? undefined : args[introAt + 1]
+const introModule = introAt !== -1 ? (introArg && !introArg.startsWith('--') ? resolve(introArg) : '') : srcAt === -1 ? join(root, 'site/src/intro/files.ts') : null
 const intro = []
-if (introModule && existsSync(introModule)) {
-  const { build } = await import('esbuild')
-  const out = await build({ entryPoints: [introModule], bundle: true, format: 'esm', platform: 'neutral', write: false, logLevel: 'silent' })
-  const { FILES } = await import(`data:text/javascript;base64,${Buffer.from(out.outputFiles[0].text).toString('base64')}`)
-  for (const [name, code] of Object.entries(FILES)) intro.push({ name, code })
+if (introModule === '') errors.push('--intro needs the path of a module that exports FILES')
+else if (introModule && !existsSync(introModule)) errors.push(`${relative(root, introModule)}: the intro module is missing, so the intro's files can't be checked`)
+else if (introModule) {
+  try {
+    const { build } = await import('esbuild')
+    const out = await build({ entryPoints: [introModule], bundle: true, format: 'esm', platform: 'neutral', write: false, logLevel: 'silent' })
+    const { FILES } = await import(`data:text/javascript;base64,${Buffer.from(out.outputFiles[0].text).toString('base64')}`)
+    if (FILES === null || typeof FILES !== 'object') errors.push(`${relative(root, introModule)}: exports no FILES (name → code)`)
+    else for (const [name, code] of Object.entries(FILES)) intro.push({ name, code })
+  } catch (e) {
+    errors.push(`${relative(root, introModule)}: didn't load: ${String(e?.message ?? e).split('\n')[0]}`)
+  }
 }
 
 const tmp = mkdtempSync(join(tmpdir(), 'doc-types-'))
