@@ -85,14 +85,12 @@ Everything else lives on the docs site, **[iremlopsum.github.io/liaise](https://
 
 - **[Getting started](https://iremlopsum.github.io/liaise/start/the-problem-it-solves/):** the problem it solves, the quick start, and how the pieces fit together.
 - **[Guide](https://iremlopsum.github.io/liaise/guide/defining-endpoints/):** defining endpoints, handling errors, sending data, reading and validating responses, deadlines and stale requests, sharing identical requests, retries, caching and logging, middleware, pagination, polling, GraphQL, and testing your code.
-- **[Recipes](https://iremlopsum.github.io/liaise/recipes/add-an-auth-header-and-refresh-the-token-on-a-401/):** a token refresh on 401, search as you type, TanStack Query, React, a store, server loaders, a flaky backend, per-attempt timeouts, Sentry, and file uploads and downloads.
+- **[Recipes](https://iremlopsum.github.io/liaise/recipes/add-an-auth-header-and-refresh-the-token-on-a-401/):** a token refresh on 401, search as you type, TanStack Query, React, a store, server loaders, a flaky backend, per-attempt timeouts, Sentry, file uploads and downloads, and a query param with a JSON body.
 - **[Choosing liaise](https://iremlopsum.github.io/liaise/choosing/when-it-fits-and-when-it-doesnt/):** when it fits and when it doesn't, [how it compares](https://iremlopsum.github.io/liaise/compare/) with axios, ky and ofetch, and where it runs.
 - **[Reference](https://iremlopsum.github.io/liaise/reference/createapi-options/):** every option, `Result` and `ApiError`, middleware context, `liaise/testing`, the exports, and behaviour in detail.
 
-The docs cover the latest version. For 5.1.1 and earlier, the README at that version's tag is the full documentation, for example the [README at 5.1.1](https://github.com/iremlopsum/liaise/blob/v5.1.1/README.md).
-
 ## Upgrading, contributing, licence
 
-- **Upgrading.** [MIGRATION.md](./MIGRATION.md) says what to change when an upgrade needs it. [CHANGELOG.md](./CHANGELOG.md) lists every release.
+- **Upgrading.** [MIGRATION.md](./MIGRATION.md) says what to change when an upgrade needs it. [CHANGELOG.md](./CHANGELOG.md) lists every release. The docs site covers the latest version; for 5.1.1 and earlier, read the README at that version's tag, such as [5.1.1's](https://github.com/iremlopsum/liaise/blob/v5.1.1/README.md).
 - **Contributing.** Bug reports, fixes and ideas are welcome. [CONTRIBUTING.md](./CONTRIBUTING.md) explains how to report a bug, run the tests, and the few rules a pull request is checked against.
 - **Licence.** MIT, in [LICENSE](./LICENSE).
