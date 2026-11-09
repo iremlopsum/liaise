@@ -98,8 +98,8 @@ With `items`, the pager keeps one list: `load()` fetches the first page, and eac
 - **`state.loaded` counts the pages in the list.** Save it, as the example does in `sessionStorage`, and pass it back as `restore` after a reload. With `restore: 3`, `load()` asks for pages 1, 2 and 3 again, one after another, and the list grows as each one lands. `loading` stays `true` until the last of them arrives, which is why the example saves the count only when `loading` is `false`.
 - **The list ends** at a page with no items, at the last page `pageCount` reports, or at a page your `next` returns nothing for. `hasNext` is then `false`, and `next()` resolves with `null` without sending anything.
 - **A second `next()` while one is loading returns the same promise,** so a scroll handler that fires twice asks for one page.
-- **A failure stops it there.** `error` is set, the pages that arrived stay, `loaded` counts them, and `hasNext` stays `true`, so the next `next()` asks for the failed page again.
-- **`refresh()` reloads pages 1 to `loaded`,** and the new items replace the shown ones when the last page arrives. `setParams` empties the list and loads page 1 with the new params.
+- **A failure during `next()` or a restore stops it there.** `error` is set, the pages that arrived stay, `loaded` counts them, and `hasNext` stays `true`, so the next `next()` asks for the failed page again.
+- **`refresh()` reloads pages 1 to `loaded`,** and the new items replace the shown ones when the last page arrives. A failed refresh keeps the list and sets `error`: `items`, `loaded` and `hasNext` stay as they were. `setParams` empties the list and loads page 1 with the new params.
 
 A list always starts at page 1: `goTo` and `prev` resolve with `null`, and `start`, `from` and `cache` have no effect.
 

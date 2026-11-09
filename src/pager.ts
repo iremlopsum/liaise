@@ -106,8 +106,9 @@ export interface PagerState<P, R, T = never> {
 /**
  * A pager. Every move resolves with the `Result` it showed (or the one that
  * failed), or `null` when it can't go anywhere and sent nothing. It never throws
- * or rejects. A move superseded by a newer one resolves with the endpoint's own
- * `kind: 'abort'` Result, and never changes `state`.
+ * or rejects. A move superseded by a newer one resolves with `kind: 'abort'`
+ * (body: the `Superseded by a newer move` DOMException), whether or not the
+ * endpoint honoured its signal, and never changes `state`.
  */
 export interface Pager<P, R, T = never> {
   readonly state: PagerState<P, R, T>
@@ -125,7 +126,7 @@ export interface Pager<P, R, T = never> {
   next(): Promise<Result<R> | null>
   /** List mode: `null`. */
   prev(): Promise<Result<R> | null>
-  /** Fetches the current page again, past the cache, and replaces its entry. List mode: pages 1..`loaded`, replacing `items`. */
+  /** Fetches the current page again, past the cache, and replaces its entry. List mode: pages 1..`loaded`, replacing `items`; a failure keeps them and sets `error`. */
   refresh(): Promise<Result<R> | null>
   /** New base params (a filter change): forgets the cache (and cursor history) and opens page 1, never `from`. */
   setParams(params: P): Promise<Result<R> | null>
@@ -559,16 +560,18 @@ export function createPager<P extends object, R, T = never>(
    * One list move: fetches pages after `list`, one at a time, until it holds
    * `upTo` pages or the list ends. Restore, refresh and next() are all this
    * loop. `progressive` shows each page as it lands (restore, next); otherwise
-   * (refresh) the shown items stay until the move ends. A failure stops it:
-   * the pages that landed are shown, the error is set and `hasNext` stays true,
-   * so next() asks for the failed page again.
+   * (refresh) the shown items stay until the move ends. A failure stops it.
+   * Progressive: the pages that landed are shown, the error is set and
+   * `hasNext` stays true, so next() asks for the failed page again. A refresh:
+   * only the error is set, and the list it would have replaced stays as it was.
    */
   async function fill(
     list: ListPage<P, R, T>[], upTo: number, mine: number, move: AbortController, progressive: boolean,
   ): Promise<Result<R> | null> {
     const end = (result: Result<R>): Result<R> => {
       controller = undefined
-      publish(list, { loading: false, target: null, error: result.error, hasNext: true })
+      if (progressive) publish(list, { loading: false, target: null, error: result.error, hasNext: true })
+      else set({ loading: false, target: null, error: result.error })
       return result
     }
     for (;;) {

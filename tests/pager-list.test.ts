@@ -368,4 +368,140 @@ describe.each(modes)('createPager: list mode ($name)', ({ name, options, params 
     expect(f.calls.map(c => c.params)).toEqual([params(1), params(2)])
     expect(pager.state).toMatchObject({ page: 2, loaded: 2, items: [11, 12, 21, 22] })
   })
+
+  // A refresh replaces the list only when it succeeds: a failure keeps the list it would have replaced.
+  /** A pager with pages 1..3 loaded (`[11, 12, 21, 22, 31, 32]`), and every later page shifted by 100. */
+  async function loadedThree(f: ReturnType<typeof fake>, extra: Partial<PagerOptions<P, D, number>> = {}, signal?: AbortSignal) {
+    const pager = createPager(f.endpoint, base, { ...options, ...extra, restore: 3, signal } as PagerOptions<P, D, number>)
+    const loading = pager.load()
+    f.release(0); await flush()
+    f.release(1); await flush()
+    f.release(2); await loading
+    f.state.shift = 100
+    return pager
+  }
+  const keeps = (pager: { state: unknown }, before: { items: readonly number[]; data: D | null; params: P | null }) => {
+    expect(pager.state).toMatchObject({ loading: false, target: null, loaded: 3, page: 3, hasNext: false, pageCount: name === 'numbered' ? 3 : null })
+    const state = pager.state as typeof before
+    expect(state.items).toBe(before.items)
+    expect(state.data).toBe(before.data)
+    expect(state.params).toEqual(before.params)
+  }
+
+  it('a refresh that fails on page 1 keeps the list: only error is set', async () => {
+    const f = fake({ pages: 3 })
+    const pager = await loadedThree(f)
+    const before = pager.state
+    expect(before).toMatchObject({ items: [11, 12, 21, 22, 31, 32], loaded: 3, hasNext: false })
+    const refreshing = pager.refresh()
+    f.fail(3)
+    const result = await refreshing
+    expect(result?.error?.status).toBe(500)
+    keeps(pager, before)
+    expect(pager.state.error?.status).toBe(500)
+    expect(f.calls).toHaveLength(4)
+  })
+
+  it('a refresh that fails on a later page keeps the old list, not the pages it refetched', async () => {
+    const f = fake({ pages: 3 })
+    const pager = await loadedThree(f)
+    const before = pager.state
+    const refreshing = pager.refresh()
+    f.release(3); await flush()
+    expect(f.calls[4]?.params).toEqual(params(2))
+    f.fail(4)
+    await refreshing
+    await flush()
+    expect(f.calls).toHaveLength(5)
+    keeps(pager, before)
+    expect(pager.state.items).toEqual([11, 12, 21, 22, 31, 32])
+    expect(pager.state.error?.status).toBe(500)
+    // A later refresh that succeeds replaces it, and clears the error.
+    const again = pager.refresh()
+    f.release(5); await flush()
+    f.release(6); await flush()
+    f.release(7); await again
+    expect(pager.state).toMatchObject({ items: [111, 112, 121, 122, 131, 132], loaded: 3, error: null })
+  })
+
+  const throwers: [string, (boom: Error) => Partial<PagerOptions<P, D, number>>][] = [
+    ['items', boom => ({ items: (r: Result<D>) => { if (r.data?.items[0] === 121) throw boom; return r.data!.items } })],
+    name === 'numbered'
+      ? ['pageCount', boom => ({ pageCount: (r: Result<D>) => { if (r.data?.items[0] === 121) throw boom; return 3 } })]
+      : ['next', boom => ({ next: (r: Result<D>, p: P) => { if (r.data?.items[0] === 121) throw boom; return r.data!.next ? { ...p, cursor: r.data!.next } : null } })],
+  ]
+  for (const [callback, make] of throwers) {
+    it(`a throwing ${callback} during a refresh keeps the list and sets error`, async () => {
+      const f = fake({ pages: 3 })
+      const boom = new Error(`${callback} broke`)
+      const pager = await loadedThree(f, make(boom))
+      const before = pager.state
+      const refreshing = pager.refresh()
+      f.release(3); await flush()
+      f.release(4)
+      const result = await refreshing
+      expect(result?.error?.kind).toBe('middleware')
+      expect(result?.error?.body).toBe(boom)
+      await flush()
+      expect(f.calls).toHaveLength(5)
+      keeps(pager, before)
+      expect(pager.state.error?.body).toBe(boom)
+    })
+  }
+
+  it("the caller's signal stopping a refresh in flight keeps the old items", async () => {
+    const f = fake({ pages: 3 })
+    const stop = new AbortController()
+    const reason = new Error('left the page')
+    const pager = await loadedThree(f, {}, stop.signal)
+    const before = pager.state
+    const refreshing = pager.refresh()
+    f.release(3); await flush()
+    stop.abort(reason)
+    expect(f.calls[4]!.signal!.aborted).toBe(true)
+    const result = await refreshing
+    expect(result?.error?.kind).toBe('abort')
+    expect(result?.error?.body).toBe(reason)
+    await flush()
+    expect(f.calls).toHaveLength(5)
+    keeps(pager, before)
+    expect(pager.state.error).toBeNull()
+  })
+
+  it('load() on a loaded list starts over: it rebuilds pages 1..restore', async () => {
+    const f = fake()
+    const pager = createPager(f.endpoint, base, { ...options, restore: 2 })
+    const loading = pager.load()
+    f.release(0); await flush()
+    f.release(1); await loading
+    const more = pager.next(); f.release(2); await more
+    expect(pager.state).toMatchObject({ loaded: 3, items: [11, 12, 21, 22, 31, 32] })
+    f.state.shift = 100
+    const reloading = pager.load()
+    expect(pager.state).toMatchObject({ loading: true, items: [], loaded: 0, target: 1 })
+    expect(f.calls[3]?.params).toEqual(params(1))
+    f.release(3); await flush()
+    expect(f.calls[4]?.params).toEqual(params(2))
+    f.release(4); await reloading
+    await flush()
+    expect(f.calls).toHaveLength(5)
+    expect(pager.state).toMatchObject({ loading: false, loaded: 2, items: [111, 112, 121, 122], hasNext: true })
+  })
+
+  it("next() during a restore returns the restore's promise and sends nothing extra", async () => {
+    const f = fake()
+    const pager = createPager(f.endpoint, base, { ...options, restore: 3 })
+    const restoring = pager.load()
+    expect(pager.next()).toBe(restoring)
+    expect(f.calls).toHaveLength(1)
+    f.release(0); await flush()
+    expect(pager.next()).toBe(restoring)
+    expect(f.calls).toHaveLength(2)
+    f.release(1); await flush()
+    f.release(2)
+    await restoring
+    await flush()
+    expect(f.calls.map(c => c.params)).toEqual([params(1), params(2), params(3)])
+    expect(pager.state).toMatchObject({ loaded: 3, loading: false })
+  })
 })

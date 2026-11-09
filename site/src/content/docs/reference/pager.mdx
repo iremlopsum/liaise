@@ -77,7 +77,7 @@ Every move returns a promise that resolves with the `Result` it showed, or the o
 | `goTo(page)` | Opens `page`. | Numbered: `page` isn't a whole number from 1, or is above `pageCount`. Cursor: the pager hasn't shown that page, or opened with `from`. List: always. |
 | `next()` | Opens the page after the one shown, or after the one loading, so two quick clicks move two pages. List: appends the next page; a second `next()` while one is loading returns the same promise. | `hasNext` is `false`, or before `load()`. Cursor: also while a page that hasn't named its next page yet is loading. |
 | `prev()` | Opens the page before the one shown. Cursor: from the pages already seen, or with `prev` before a `from` page. | `hasPrev` is `false`, or before `load()`. List: always. |
-| `refresh()` | Asks for the shown page again, past the cache, and replaces its cache entry. List: asks for pages 1 to `loaded` again, and replaces `items` when the last one arrives. | Before `load()`. |
+| `refresh()` | Asks for the shown page again, past the cache, and replaces its cache entry. List: asks for pages 1 to `loaded` again, and replaces `items` when the last one arrives. A failed refresh keeps the list and sets `error`. | Before `load()`. |
 | `setParams(params)` | New base params, such as a filter change: forgets the cache (a cursor pager also forgets the pages it has seen) and opens page 1. List: empties `items` and loads page 1. | Never. |
 | `subscribe(listener)` | Calls `listener`, with no arguments, after each change, and returns the function that unsubscribes. | — |
 

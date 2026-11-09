@@ -28,9 +28,9 @@ const entries = {
 // 10887 → 11544 B, core + middleware 12239 → 12879 B; core + polling stays within its budget).
 // 5.4.0 added createPager (numbered, cursor and list pagers with a subscribable state) to the
 // core entry, with its own row. It is tree-shaken out of everything that doesn't import it
-// (REST only 7153 B and core + polling 9650 B are unchanged), and costs 10077 - 7153 = 2924 B
-// over a REST client. Raised: core entry 11677 → 13997 B (budget 12100 → 14900), core +
-// middleware 13011 → 15357 B (13500 → 16300). core + pager is new, at 10077 B.
+// (REST only 7153 B and core + polling 9650 B are unchanged), and costs 10089 - 7153 = 2936 B
+// over a REST client. Raised: core entry 11677 → 14007 B (budget 12100 → 14900), core +
+// middleware 13011 → 15366 B (13500 → 16300). core + pager is new, at 10089 B.
 const budgets = { 'REST only': 7700, 'core + polling': 9740, 'core + pager': 10700, 'core entry': 14900, 'core + middleware': 16300 }
 
 let failed = false
