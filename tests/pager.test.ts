@@ -2,7 +2,9 @@ import { describe, it, expect, vi, afterEach } from 'vitest'
 import { createPager } from '../src/pager.js'
 import type { NumberedPagerOptions, PagerState } from '../src/pager.js'
 import { ApiError, createNetworkErrorResult } from '../src/result.js'
-import { errorResult, successResult } from '../src/testing.js'
+import { errorResult, jsonResponse, mockFetch, successResult } from '../src/testing.js'
+import { createApi } from '../src/create-api.js'
+import { Request } from '../src/request.js'
 import type { CallOptions, Result } from '../src/types.js'
 
 type P = { offset: number; limit: number; q?: string }
@@ -366,7 +368,7 @@ describe('createPager: failures become Results', () => {
   })
 
   it("an endpoint that throws, rejects or returns a non-Result → kind 'middleware'", async () => {
-    vi.spyOn(console, 'error').mockImplementation(() => {})
+    const log = vi.spyOn(console, 'error').mockImplementation(() => {})
     const cause = new Error('down')
     const endpoints = [
       (): Promise<Result<D>> => { throw cause },
@@ -380,6 +382,10 @@ describe('createPager: failures become Results', () => {
       expect(pager.state.error?.kind).toBe('middleware')
       expect(pager.state.loading).toBe(false)
     }
+    // Each one is reported too, outside a browser on console.error.
+    expect(log).toHaveBeenCalledTimes(3)
+    expect(log).toHaveBeenNthCalledWith(1, '[liaise] pager: the endpoint failed:', cause)
+    expect(log).toHaveBeenNthCalledWith(3, '[liaise] pager: the endpoint failed:', expect.any(TypeError))
   })
 
   it("options with neither toParams nor next → every move resolves kind 'middleware' with a TypeError", async () => {
@@ -465,5 +471,53 @@ describe('createPager: failures become Results', () => {
       expect(call.options).not.toHaveProperty('pageCount')
       expect(call.options).not.toHaveProperty('cache')
     }
+  })
+})
+
+// The documented limit (guide: "When a reply arrives late"): `dedupe` cancels
+// per endpoint, so a pager's request and a plain call to the same endpoint
+// cancel each other. A pager on its own endpoint is unaffected.
+describe('createPager over a dedupe endpoint', () => {
+  it("a pager move cancels the endpoint's other call in flight", async () => {
+    const mock = mockFetch({
+      'GET /items': () => new Promise<Response>(resolve => setTimeout(() => resolve(jsonResponse({ items: [1], totalCount: 230 })), 5)),
+    })
+    mock.install()
+    try {
+      const api = createApi({
+        baseUrl: 'https://api.example.com',
+        requests: { items: new Request<P, D>({ method: 'GET', path: '/items', dedupe: true }) },
+      })
+      const plain = api.items({ offset: 100, limit: 25 })
+      const pager = createPager(api.items, base, numbered)
+      const loaded = await pager.load()
+      expect(loaded?.error).toBeNull()
+      expect((await plain).error?.kind).toBe('abort')
+    } finally {
+      mock.restore()
+    }
+  })
+})
+
+// The reference page's methods table: when each move resolves null.
+describe('createPager: moves with nowhere to go before load()', () => {
+  it('next, prev and refresh resolve null and send nothing, in every mode', async () => {
+    const f = fake()
+    const pagers = [
+      createPager(f.endpoint, base, numbered),
+      createPager(f.endpoint, base, { next: (_, p) => ({ ...p, offset: p.offset + p.limit }) }),
+      createPager(f.endpoint, base, { ...numbered, items: r => r.data.items }),
+    ]
+    // Counted before awaiting: a move that sent would never settle here.
+    const moves = pagers.flatMap(pager => [pager.next(), pager.prev(), pager.refresh()])
+    expect(f.calls).toHaveLength(0)
+    expect(await Promise.all(moves)).toEqual(Array(9).fill(null))
+  })
+
+  it('a numbered load() resolves null when start is not a whole number from 1', async () => {
+    const f = fake()
+    const loads = [0, -1, 1.5, Number.NaN].map(start => createPager(f.endpoint, base, { ...numbered, start }).load())
+    expect(f.calls).toHaveLength(0)
+    expect(await Promise.all(loads)).toEqual([null, null, null, null])
   })
 })

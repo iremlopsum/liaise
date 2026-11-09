@@ -336,4 +336,36 @@ describe.each(modes)('createPager: list mode ($name)', ({ name, options, params 
     expect(pager.state).toMatchObject({ loading: false, loaded: 1, items: [11, 12], hasNext: true })
     expect(pager.state.error?.body).toBe(boom)
   })
+
+  // The reference page states these: a list always starts at page 1, and `restore` is sanitised.
+  it('restore that is not a whole number of at least 1: below 1 or not finite loads one page, a fraction is rounded down', async () => {
+    for (const restore of [0, -2, Number.NaN, Number.POSITIVE_INFINITY]) {
+      const f = fake()
+      const pager = createPager(f.endpoint, base, { ...options, restore })
+      void pager.load()
+      f.release(0); await flush()
+      // Counted without awaiting the load: one that asked for page 2 would never settle here.
+      expect(f.calls, `restore: ${restore}`).toHaveLength(1)
+      expect(pager.state).toMatchObject({ loading: false, loaded: 1 })
+    }
+    const f = fake()
+    const pager = createPager(f.endpoint, base, { ...options, restore: 2.7 })
+    void pager.load()
+    f.release(0); await flush()
+    f.release(1); await flush()
+    expect(f.calls.map(c => c.params)).toEqual([params(1), params(2)])
+    expect(pager.state).toMatchObject({ loading: false, loaded: 2 })
+  })
+
+  it('a list ignores start, from and cache: it opens at page 1 and keeps every page in items', async () => {
+    const f = fake()
+    const ignored = name === 'numbered' ? { start: 3, cache: false } : { from: params(3), cache: false }
+    const pager = createPager(f.endpoint, base, { ...options, ...ignored } as PagerOptions<P, D, number>)
+    const first = pager.load()
+    expect(f.calls.map(c => c.params)).toEqual([params(1)])
+    f.release(0); await first
+    const second = pager.next(); f.release(1); await second
+    expect(f.calls.map(c => c.params)).toEqual([params(1), params(2)])
+    expect(pager.state).toMatchObject({ page: 2, loaded: 2, items: [11, 12, 21, 22] })
+  })
 })
