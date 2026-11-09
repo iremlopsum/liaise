@@ -54,7 +54,7 @@ Your "Next" link then carries `data.cursor` in its URL. With a numbered pager it
 
 - **An error page ends it.** You get the error page, and then a loop ends, or the next `pages.next()` gives `done`, because there is no data to read the next cursor from. You see what failed. It never stops quietly.
 - **`maxPages` has no default.** Set it if you want a ceiling, as in `paginate(api.listItems, { limit: 50 }, { next, maxPages: 100 })`. liaise doesn't pick a number, because a silent cut-off at an arbitrary page looks exactly like reaching the last one.
-- **`truncated` tells a capped walk from a finished one.** Once the loop has ended, `pages.truncated` is `true` when `maxPages` stopped it and your `next` says there was another page, and `false` when the pages ran out, an error page ended it, or the cap landed exactly on the last page. Reading it sends no request, but it calls your `next` once with the last page, each time you read it.
+- **`truncated` tells a capped walk from a finished one.** Once the loop has ended, `pages.truncated` is `true` when `maxPages` stopped it and your `next` says there was another page, and `false` when the pages ran out, an error page ended it, or the cap landed exactly on the last page. Reading it sends no request, but it calls your `next` once with the last page, on the first read, and remembers the answer.
 
   <Example name="paginate-truncated" />
 

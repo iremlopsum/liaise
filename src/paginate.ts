@@ -30,7 +30,8 @@ export interface Pages<R> extends AsyncGenerator<Result<R>, void, undefined> {
    * `maxPages` is `0` (nothing was fetched to ask `next` about).
    *
    * Reading it sends no request, but it does call your `next` once with the
-   * last page, on every read, so a throw from `next` propagates from here.
+   * last page, on the first read, and remembers the answer. A throw from `next`
+   * propagates from here and is not remembered, so the next read asks again.
    */
   readonly truncated: boolean
 }
@@ -120,6 +121,9 @@ export function paginate<TParams extends object, TResponse>(
   let endedAtCap = false
   let lastPage: SuccessResult<TResponse> | undefined
   let lastParams: TParams | undefined
+  // The answer, once `next` has returned. Assigned only after it returns, so a
+  // throw is not cached and the following read asks again.
+  let memo: boolean | undefined
 
   async function* walk(): AsyncGenerator<Result<TResponse>, void, undefined> {
     let current: TParams | undefined | null = params
@@ -157,8 +161,10 @@ export function paginate<TParams extends object, TResponse>(
     enumerable: false,
     get(): boolean {
       if (!endedAtCap || lastPage === undefined || lastParams === undefined) return false
+      if (memo !== undefined) return memo
       const following = next(lastPage, lastParams)
-      return following !== undefined && following !== null
+      memo = following !== undefined && following !== null
+      return memo
     },
   })
   return pages

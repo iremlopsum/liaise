@@ -260,7 +260,23 @@ describe('truncated', () => {
     expect(pages.truncated).toBe(true)
     expect(next).toHaveBeenCalledTimes(2)
     expect(pages.truncated).toBe(true)
-    expect(next).toHaveBeenCalledTimes(3)
+    expect(next).toHaveBeenCalledTimes(2) // memoized
+  })
+
+  it('does not remember a throw: the next read asks next again', async () => {
+    const { endpoint } = fakeEndpoint(three)
+    let calls = 0
+    const next = (page: { data: Page }, prev: Params) => {
+      if (++calls === 2) throw new Error('next exploded on the check')
+      return byCursor(page, prev)
+    }
+    const pages = paginate(endpoint, { limit: 1 }, { next, maxPages: 2 })
+    await collect(pages)
+    expect(() => pages.truncated).toThrow('next exploded on the check')
+    expect(pages.truncated).toBe(true) // asked again, answered, now remembered
+    expect(calls).toBe(3)
+    expect(pages.truncated).toBe(true)
+    expect(calls).toBe(3)
   })
 
   it('lets a throw from next propagate when truncated is read', async () => {
