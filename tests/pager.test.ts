@@ -123,9 +123,10 @@ describe('createPager: numbered pages', () => {
       f.release(1)
       f.release(2)
       const [r3, r5] = await Promise.all([to3, to5])
-      if (honour) {
-        expect(r3?.error?.kind).toBe('abort')
-        expect(r5?.error?.kind).toBe('abort')
+      // Always an abort, even from an endpoint that ignored its signal and answered.
+      for (const r of [r3, r5]) {
+        expect(r?.error?.kind).toBe('abort')
+        expect(r?.error?.body).toMatchObject({ name: 'AbortError', message: 'Superseded by a newer move' })
       }
       await flush()
 
@@ -403,8 +404,11 @@ describe('createPager: failures become Results', () => {
     const reason = new Error('left the page')
     controller.abort(reason)
     expect(f.calls[1]!.signal!.aborted).toBe(true)
-    expect((await to2)?.error?.kind).toBe('abort')
-    expect(pager.state.loading).toBe(false)
+    const stopped = await to2
+    expect(stopped?.error?.kind).toBe('abort')
+    expect(stopped?.error?.body).toBe(reason)
+    // A stop is the caller's own cancellation: loading ends, no error, the page stays.
+    expect(pager.state).toMatchObject({ loading: false, target: null, error: null, page: 1 })
 
     const later = await pager.goTo(3)
     expect(later?.error?.kind).toBe('abort')
@@ -417,6 +421,22 @@ describe('createPager: failures become Results', () => {
     const dead = createPager(g.endpoint, base, { ...numbered, signal: gone.signal })
     expect((await dead.load())?.error?.kind).toBe('abort')
     expect(g.calls).toHaveLength(0)
+  })
+
+  it("the caller's signal stops the pager even when the endpoint ignores it", async () => {
+    const f = fake({ honour: false })
+    const controller = new AbortController()
+    const pager = createPager(f.endpoint, base, { ...numbered, signal: controller.signal })
+    const first = pager.load(); f.release(0); await first
+    const to2 = pager.goTo(2)
+    const reason = new Error('left the page')
+    controller.abort(reason)
+    f.release(1) // answers anyway, with page 2
+    const stopped = await to2
+    expect(stopped?.error?.kind).toBe('abort')
+    expect(stopped?.error?.body).toBe(reason)
+    expect(pager.state).toMatchObject({ loading: false, target: null, error: null, page: 1 })
+    expect(shown(pager.state)).toBe(1)
   })
 
   it('other CallOptions go with every request', async () => {

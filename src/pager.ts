@@ -211,6 +211,11 @@ export function createPager<P extends object, R, T = never>(
     return result
   }
 
+  /** `result` when it is the abort for `reason`, else an abort Result the pager builds. */
+  function aborted(result: Result<R>, reason: unknown, sent: P): Result<R> {
+    return result.error?.kind === 'abort' && result.error.body === reason ? result : own('abort', reason, sent)
+  }
+
   /** A move that failed before sending anything: it still supersedes, and its error shows. */
   function failed(body: unknown, sent: P): Result<R> {
     supersede()
@@ -295,10 +300,17 @@ export function createPager<P extends object, R, T = never>(
     const signal = anySignal([move.signal, stop])
     const result = await call(sent, signal)
     releaseSignal(signal)
-    // Superseded: whatever came back, from an endpoint that honoured its signal
-    // or one that didn't, is not this pager's state any more.
-    if (mine !== token) return result
+    // Superseded: whatever came back is not this pager's state any more, and the
+    // move resolves as an abort even from an endpoint that ignored its signal, so
+    // no caller ever gets a success Result for a page that isn't shown.
+    if (mine !== token) return aborted(result, move.signal.reason, sent)
     controller = undefined
+    // Stopped by the caller's signal: their own cancellation, not a failure. Loading
+    // ends; `error` and the shown page stay as they were.
+    if (stop?.aborted) {
+      set({ loading: false, target: null })
+      return aborted(result, stop.reason, sent)
+    }
     if (result.error) {
       set({ loading: false, target: null, error: result.error })
       return result
