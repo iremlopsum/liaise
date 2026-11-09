@@ -368,6 +368,31 @@ describe('createPager: failures become Results', () => {
     expect(pager.state.loading).toBe(false)
   })
 
+  it("a throwing pageCount resolves kind 'middleware' with the thrown value as body; the success is neither shown nor cached", async () => {
+    const f = fake()
+    const thrown = new Error('no totalCount')
+    const pager = createPager(f.endpoint, base, {
+      ...numbered,
+      pageCount: r => { if (r.data.items[0] === 2) throw thrown; return Math.ceil(r.data.totalCount / 25) },
+    })
+    const first = pager.load(); f.release(0); await first
+    const moving = pager.goTo(2)
+    f.release(1)
+    const result = await moving
+    expect(result?.data).toBeNull()
+    expect(result?.error?.kind).toBe('middleware')
+    expect(result?.error?.body).toBe(thrown)
+    expect(pager.state).toMatchObject({ loading: false, target: null, page: 1, pageCount: 10 })
+    expect(shown(pager.state)).toBe(1)
+    expect(pager.state.error?.body).toBe(thrown)
+    // Page 1 comes from the cache; page 2 was never cached, so it is asked for again.
+    await pager.goTo(1)
+    expect(f.calls).toHaveLength(2)
+    void pager.goTo(2)
+    expect(f.calls).toHaveLength(3)
+    expect(f.calls[2]!.params.offset).toBe(25)
+  })
+
   it("an endpoint that throws, rejects or returns a non-Result → kind 'middleware'", async () => {
     const log = vi.spyOn(console, 'error').mockImplementation(() => {})
     const cause = new Error('down')
