@@ -25,8 +25,8 @@ export { defineRequest } from './define-request.js'
 /** Walks a paginated endpoint, yielding one Result per page. */
 export { paginate } from './paginate.js'
 
-/** Options for `paginate` — `next`, `maxPages`, and any CallOptions. */
-export type { PaginateOptions } from './paginate.js'
+/** Options for `paginate` — `next`, `maxPages`, and any CallOptions. `Pages` is what it returns: the pages plus `truncated`. */
+export type { PaginateOptions, Pages } from './paginate.js'
 
 /** `poll` asks an endpoint again on an interval; `pollUntil` resolves once a condition holds. Callers asking the same thing share one poll. */
 export { poll, pollUntil } from './poll.js'
