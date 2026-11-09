@@ -20,7 +20,7 @@ Adds `createPager()`, which holds the page a screen shows, and `truncated` on wh
 
 - Pagination has the pager: a numbered pager, Previous and Next over cursors, infinite scroll that restores, GraphQL, React, Vue and Svelte wrappers, and what happens when a reply arrives late. The reference page lists every option, every field of the state, every method and every way a move resolves. The playground has a pager example.
 
-Sizes, gzipped: a REST-only import is 7.0 kB and 9.4 kB with `poll` and `pollUntil`, both unchanged, because the pager is left out of any bundle that doesn't import it. Importing `createPager` makes REST plus the pager 9.8 kB. The core entry is 13.7 kB (was 11.3 kB), and 15.0 kB with all the middleware (was 12.6 kB).
+Sizes, gzipped: a REST-only import is 7.0 kB and 9.4 kB with `poll` and `pollUntil`, both unchanged, because the pager is left out of any bundle that doesn't import it. Importing `createPager` makes REST plus the pager 9.9 kB. The core entry is 13.7 kB (was 11.4 kB), and 15.0 kB with all the middleware (was 12.7 kB).
 
 ## [5.3.1] — 2026-10-08
 
