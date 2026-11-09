@@ -439,6 +439,17 @@ describe('createPager: failures become Results', () => {
     expect(shown(pager.state)).toBe(1)
   })
 
+  it("a signal that isn't an AbortSignal: every move resolves kind 'middleware' and sends nothing", async () => {
+    const f = fake()
+    const pager = createPager(f.endpoint, base, { ...numbered, signal: {} as AbortSignal })
+    for (const move of [() => pager.load(), () => pager.goTo(2), () => pager.refresh(), () => pager.setParams(base)]) {
+      const result = move()
+      await expect(result).resolves.toMatchObject({ data: null, error: { kind: 'middleware' } })
+      expect((await result)?.error?.body).toBeInstanceOf(TypeError)
+    }
+    expect(f.calls).toHaveLength(0)
+  })
+
   it('other CallOptions go with every request', async () => {
     const f = fake()
     const controller = new AbortController()

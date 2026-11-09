@@ -161,8 +161,11 @@ export function createPager<P extends object, R, T = never>(
   } = (options ?? {}) as AnyOptions<P, R, T>
 
   // A mistake in the options is a Result on every move, never a throw here.
+  // A `signal` that isn't one (plain JS) would throw inside anySignal: refuse it here.
   const problem: string | undefined =
-    typeof toParams === 'function'
+    stop !== undefined && typeof (stop as { addEventListener?: unknown } | null)?.addEventListener !== 'function'
+      ? 'createPager: signal must be an AbortSignal'
+      : typeof toParams === 'function'
       ? (_items !== undefined ? 'createPager: list mode (items) is not supported yet' : undefined)
       : typeof _next === 'function'
         ? 'createPager: cursor pages (next) are not supported yet'
