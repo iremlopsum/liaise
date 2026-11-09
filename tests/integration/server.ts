@@ -3,6 +3,9 @@ import http from 'node:http'
 export interface TestServer {
   baseUrl: string
   callCounts: Map<string, number>
+  // Like callCounts, but keyed by "METHOD /pathname?search" (the query string as
+  // sent), for counting the requests of one page of a paginated route.
+  queryCounts: Map<string, number>
   close: () => Promise<void>
 }
 
@@ -35,6 +38,7 @@ function sendJson(res: http.ServerResponse, status: number, data: unknown): void
 
 export function startServer(): Promise<TestServer> {
   const callCounts = new Map<string, number>()
+  const queryCounts = new Map<string, number>()
 
   const server = http.createServer((req, res) => {
     void (async () => {
@@ -43,6 +47,8 @@ export function startServer(): Promise<TestServer> {
       const pathname = url.pathname
       const countKey = `${method} ${pathname}`
       callCounts.set(countKey, (callCounts.get(countKey) ?? 0) + 1)
+      const queryKey = `${countKey}${url.search}`
+      queryCounts.set(queryKey, (queryCounts.get(queryKey) ?? 0) + 1)
 
       try {
         if (method === 'GET' && pathname === '/hello') {
@@ -66,6 +72,19 @@ export function startServer(): Promise<TestServer> {
             items: [cursor * 2, cursor * 2 + 1],
             cursor: cursor < last ? String(cursor + 1) : null,
           })
+
+        } else if (method === 'GET' && pathname === '/numbered') {
+          // 230 numbered items, served by `offset` and `limit` (default 10),
+          // after `delay` ms (default 0) so a test can make an earlier request
+          // reply after a later one. Reports `totalCount: 230`.
+          const offset = Number(url.searchParams.get('offset') ?? '0')
+          const limit = Number(url.searchParams.get('limit') ?? '10')
+          const delay = Number(url.searchParams.get('delay') ?? '0')
+          if (delay > 0) await new Promise(r => setTimeout(r, delay))
+          const total = 230
+          const items: number[] = []
+          for (let i = offset; i < Math.min(offset + limit, total); i++) items.push(i)
+          sendJson(res, 200, { items, totalCount: total })
 
         } else if (method === 'GET' && pathname === '/search') {
           const params: Record<string, string> = {}
@@ -163,6 +182,13 @@ export function startServer(): Promise<TestServer> {
             // Delayed so concurrent identical operations overlap in flight.
             await new Promise(r => setTimeout(r, 30))
             sendJson(res, 200, { data: { slow: { id: variables.id ?? null } } })
+          } else if (query.includes('gqlNumbered')) {
+            // The /numbered route over GraphQL: `offset` and `limit` variables.
+            const offset = Number(variables.offset ?? 0)
+            const limit = Number(variables.limit ?? 10)
+            const items: number[] = []
+            for (let i = offset; i < Math.min(offset + limit, 230); i++) items.push(i)
+            sendJson(res, 200, { data: { numbered: { items, totalCount: 230 } } })
           } else if (query.includes('gqlError')) {
             sendJson(res, 200, { errors: [{ message: 'Something went wrong' }] })
           } else if (query.includes('gqlMutation')) {
@@ -198,6 +224,7 @@ export function startServer(): Promise<TestServer> {
       resolve({
         baseUrl: `http://${addr.address}:${addr.port}`,
         callCounts,
+        queryCounts,
         close: () => new Promise<void>((r, rj) => {
           server.closeAllConnections()
           server.close((err) => (err ? rj(err) : r()))
