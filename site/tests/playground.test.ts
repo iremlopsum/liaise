@@ -85,4 +85,30 @@ describe('playground examples do what their hints say', () => {
     expect(gone.log).toEqual(['gave up: http 404'])
     expect(gone.net).toHaveLength(1)
   })
+
+  it('pager: the click on 5 cancels slow page 3, which never shows; page 1 comes back from the cache, or with cache: false a fourth request', async () => {
+    const ok = await run('pager')
+    expect(ok.log).toEqual([
+      'loading page 1',
+      'page 1 of 10, from Item 1',
+      'loading page 3',
+      'loading page 5',
+      'page 5 of 10, from Item 101',
+      'the move to page 3 resolved with abort',
+      'page 1 of 10, from Item 1',
+    ])
+    expect(ok.net.map(r => `${r.path} ${r.outcome}`)).toEqual([
+      '/items?offset=0&limit=25 200',
+      '/items?offset=50&limit=25 cancelled',
+      '/items?offset=100&limit=25 200',
+    ])
+    const fresh = await run('pager', [['cache: true', 'cache: false']])
+    expect(fresh.log.slice(-2)).toEqual(['loading page 1', 'page 1 of 10, from Item 1'])
+    expect(fresh.net.map(r => `${r.path} ${r.outcome}`)).toEqual([
+      '/items?offset=0&limit=25 200',
+      '/items?offset=50&limit=25 cancelled',
+      '/items?offset=100&limit=25 200',
+      '/items?offset=0&limit=25 200',
+    ])
+  })
 })

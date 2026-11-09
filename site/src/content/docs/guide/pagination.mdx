@@ -1,9 +1,12 @@
 ---
 title: "Pagination"
-description: "paginate asks a list endpoint for a page only when you ask for the next one, so you can load one page per click or walk every page."
+description: "paginate walks a list endpoint one page at a time, and createPager holds the page a screen shows: numbered pages, Previous and Next over cursors, or infinite scroll that comes back after a reload."
 order: 10
 ---
-This page shows how to read a list endpoint that returns one page at a time, whether your API pages by cursor, offset or page number. `paginate` asks for a page only when you ask for the next one, so you can load page 1, then page 2 when the reader wants more, or walk every page in a loop.
+This page shows how to read a list endpoint that returns one page at a time, whether your API pages by cursor, offset or page number. liaise has two tools for it:
+
+- **`paginate` walks the pages**, asking for each one only when you ask for the next. Use it for a "Load more" button, an export or a sync job.
+- **`createPager` holds the page a screen shows**, and moves it: to page 7, to the next or previous page, or to page 1 of a new filter. It keeps a state your UI subscribes to, and a late reply never overwrites a newer page. Use it for a numbered pager, Previous and Next over cursors, or infinite scroll ([A numbered pager](#a-numbered-pager)).
 
 <Example name="pagination" />
 
@@ -16,20 +19,6 @@ For an export or a sync job, where you want every page, loop over the pages with
 <Example name="pagination-walk" />
 
 The loop asks for `/items?limit=50`, then for `?limit=50&cursor=…` with each page's `cursor`, and stops after the first page that comes back without one. `break` stops it sooner, and no further page is requested.
-
-## Going straight to a page
-
-`paginate` only moves forward, from each page to the one after it. A numbered pager ("go to page 7") or a cursor kept in the URL needs one particular page, so there you don't need `paginate`. Keep the page number or the cursor in your own state, and call the endpoint with it:
-
-```ts
-// The cursor lives in the URL, so a reload or a shared link opens the same page.
-const cursor = new URLSearchParams(location.search).get('cursor') ?? undefined
-const { data, error } = await api.listItems({ limit: 50, cursor })
-if (error) showError(error)
-else render(data.items)
-```
-
-Your "Next" link then carries `data.cursor` in its URL. With a numbered pager it's the same call with the number the reader picked, such as `{ limit: 50, page: 7 }` for an API that pages by number.
 
 ## Getting to the next page
 
@@ -65,5 +54,89 @@ Your "Next" link then carries `data.cursor` in its URL. With a numbered pager it
 
 - **Every other option applies to every page.** Any of the [`CallOptions`](/reference/calloptions/), such as `signal`, `timeout` or `headers`, goes with each request, so one signal cancels every page, whether you walk them or load them one at a time.
 - **`paginate` yields pages.** Read the items from each page yourself. Flattening them would mean guessing which field holds the array.
+
+## Going straight to a page
+
+`paginate` only moves forward, from each page to the one after it. A screen that shows one page at a time needs more: "go to page 7", a Previous button, a page number or a cursor kept in the address, and a filter that starts again at page 1. That is `createPager`. It takes the same endpoints as `paginate`, and you tell it how your API pages in one of two ways:
+
+- **`toParams` makes a numbered pager**, for APIs that page by offset or page number, where any page can be opened directly.
+- **`next` makes a cursor pager**, for APIs where each page names the one after it. It is the same `next` that `paginate` takes.
+
+Add `items` to either one and it becomes one growing list, for infinite scroll. Every option is listed in [createPager() options and state](/reference/pager/).
+
+## A numbered pager
+
+<Example name="pager-numbered" />
+
+`render` stands for your own code. Creating the pager sends nothing, and `pager.load()` opens the page in the address: with `?page=2`, it sends `/orders?offset=25&limit=25`. After every change, the pager calls your listener, which renders `pager.state` and writes the page back to the address.
+
+- **`toParams` builds each page's params** from the page number, counted from 1, and the base params: the ones you passed to `createPager`, which `setParams` replaces. liaise doesn't guess whether your API counts by offset or by page. Give the base params a type with every field `setParams` may add, as the example does with `Params`. Otherwise TypeScript reads their type from the object you pass, and `setParams` with a `q` doesn't compile.
+- **`pageCount` reads how many pages there are** from a result: 230 orders at 25 a page make 10. `hasNext` is `false` on the last page. Without `pageCount`, `state.pageCount` is `null` and `hasNext` stays `true`, because the pager can't know where the list ends.
+- **The shown page stays while the next one loads.** `goTo(3)` sets `loading` and `target: 3`, and `data` and `page` are still page 2's until page 3 arrives. A failed move leaves the shown page as well, with `error` set until the next success.
+- **A page that doesn't exist sends nothing.** `goTo(0)`, `goTo(2.5)` and `goTo(11)` of 10 pages resolve with `null`, and so do `prev()` on page 1 and `next()` on the last page.
+- **Two quick clicks on Next move two pages.** `next()` counts from the page that is loading, so two clicks from page 3 land on page 5.
+- **Pages you've seen come back without a request.** Going back to page 2 shows it from the cache, at once. `refresh()` asks for the shown page again and replaces its cache entry, `setParams` forgets every page, and `cache: false` asks on every visit.
+- **A filter change is `setParams`.** It opens page 1 with the new base params, so `onFilter('acme')` sends `/orders?offset=0&limit=25&q=acme`. A page of the old filter that was still loading never shows.
+
+## Previous and Next over cursors
+
+<Example name="pager-cursor" />
+
+Without a cursor in the address, `load()` opens the first page, `/items?limit=50`, as page 1. A reader who reloads on a later page, or follows a shared link, has its cursor in the address, and `from` opens that page instead: `/items?limit=50&cursor=c2`. Next asks for `?limit=50&cursor=c3`, and the listener writes `?cursor=c3` to the address.
+
+- **Previous goes back through the pages already seen,** from the cache, without a request. A cursor API can only be walked forward, so `goTo(n)` works only for a page this pager has shown and knows the number of, and resolves with `null` for one it hasn't reached.
+- **A page opened with `from` has no number.** `state.page` is `null` there, and on the pages Next reaches from it, because the pager can't know how many pages came before. `hasPrev` is `false` on it, unless your API returns a previous cursor: give `prev`, which reads the params of the page before from a result, and Previous asks for that page.
+- **`setParams` starts over at the first page**, which is page 1 again. In the example, `firstPage()` sends `/items?limit=50`, and Next from there is page 2. `from` isn't used again.
+- **When a page you've seen names a different next page**, after `refresh()` or a visit with `cache: false`, the list has changed. The pages after it are forgotten, and Next follows the new cursor. A `next` that returns `undefined` or `null` makes the shown page the last one.
+
+## Infinite scroll
+
+<Example name="pager-list" />
+
+With `items`, the pager keeps one list: `load()` fetches the first page, and each `next()` appends the following page's items to `state.items`. `items` reads the items from a result, because liaise never guesses which field holds them.
+
+- **`state.loaded` counts the pages in the list.** Save it, as the example does in `sessionStorage`, and pass it back as `restore` after a reload. With `restore: 3`, `load()` asks for pages 1, 2 and 3 again, one after another, and the list grows as each one lands. `loading` stays `true` until the last of them arrives, which is why the example saves the count only when `loading` is `false`.
+- **The list ends** at a page with no items, at the last page `pageCount` reports, or at a page your `next` returns nothing for. `hasNext` is then `false`, and `next()` resolves with `null` without sending anything.
+- **A second `next()` while one is loading returns the same promise,** so a scroll handler that fires twice asks for one page.
+- **A failure stops it there.** `error` is set, the pages that arrived stay, `loaded` counts them, and `hasNext` stays `true`, so the next `next()` asks for the failed page again.
+- **`refresh()` reloads pages 1 to `loaded`,** and the new items replace the shown ones when the last page arrives. `setParams` empties the list and loads page 1 with the new params.
+
+A list always starts at page 1: `goTo` and `prev` resolve with `null`, and `start`, `from` and `cache` have no effect.
+
+## With GraphQL
+
+A pager takes a `createGraphQL` operation as it takes a REST endpoint. Its params are the operation's variables:
+
+<Example name="pager-graphql" />
+
+`load()` sends the operation with `{ offset: 0, limit: 25 }`, and `goTo(4)` sends it with `{ offset: 75, limit: 25 }`. `pageCount` reads `totalCount` from the response, so the state shows page 4 of 10, and going back to page 1 comes from the cache.
+
+## With React, Vue and Svelte
+
+`pager.state` is a frozen snapshot that stays the same object until something changes, and `subscribe` returns the function that unsubscribes. That is the shape each framework's own store wrapper expects, so the adapter is a few lines.
+
+React, with `useSyncExternalStore`:
+
+<Example name="pager-react" />
+
+Vue, with a `shallowRef`, unsubscribing when the component's scope ends:
+
+<Example name="pager-vue" />
+
+Svelte, as a readable store. It reads the state when its first subscriber arrives, so a move made before then still shows:
+
+<Example name="pager-svelte" />
+
+Create the pager outside the component, or once per component instance, and call `load()` when it should start fetching. Creating a pager sends nothing, so it is safe during server rendering.
+
+## When a reply arrives late
+
+**The latest move wins, per pager.** Each move cancels the request this pager started for the move before it, through that request's own signal. A reply that arrives anyway, from an endpoint or a middleware that ignored its signal, never changes the state. In the numbered example, clicking 3, then 5, then 4 renders only page 4.
+
+- **A move that was overtaken resolves with `kind: 'abort'`**, whose `body` is a `DOMException` with the message `Superseded by a newer move`. It never changes `state`, not even `error`.
+- **This isn't `dedupe`.** The pager cancels only what it started, so two pagers over the same endpoint, a `paginate` walk and a plain call never cancel each other.
+- **Don't give a pager an endpoint with `dedupe: true`** when its other calls must survive. `dedupe` cancels per endpoint, so a pager move cancels the endpoint's other call in flight ([Drop stale calls with dedupe](/guide/cancelling-deadlines-and-stale-requests/#drop-stale-calls-with-dedupe)).
+- **[`share: true`](/guide/sharing-identical-requests/) works.** A pager's request is an ordinary call, so it can join an identical call in flight. When the pager's move is overtaken, only the pager leaves the shared request, and the other caller still gets its result.
+- **Your `signal` stops the pager.** Pass one in the options to stop it, for example when the reader leaves the page. The request in flight is cancelled, `loading` ends, and `error` and the shown page stay as they were. That move, and every move after it, resolves with `kind: 'abort'`, whose `body` is the signal's reason, and sends nothing more. The other [`CallOptions`](/reference/calloptions/), such as `headers` or `timeout`, go with every request.
 
 **Next:** [Polling](/guide/polling/) asks an endpoint again on an interval, to keep data fresh or to wait until something is done.

@@ -6,6 +6,8 @@
 //                     'flaky' → 500, 500, then 200
 //   GET  /search?q=   answers short queries more slowly, to show the race
 //   GET  /notifications/unread   { unread: 3 } · the intro challenge's switch can make it 500 or slow
+//   GET  /items?offset=&limit=   a page of 230 items, { items: [{ id, name }], total: 230 }
+//                     offset 50 (page 3 of 25) answers slowly, to show a late reply
 //   POST /graphql     real GraphQL over the same people (fake-graphql.ts)
 import { executeGraphQL, operationName } from './fake-graphql'
 
@@ -19,6 +21,11 @@ export type Outcome = number | 'offline' | 'cancelled' | 'timeout'
 export type UnreadMode = 'healthy' | 'down' | 'slow'
 /** How long /notifications/unread takes to answer while the switch says slow. */
 export const SLOW_MS = 3000
+
+/** How many items GET /items pages through. */
+export const ITEMS = 230
+/** How long GET /items?offset=50 takes to answer: long enough to click again while it loads. */
+export const SLOW_ITEMS_MS = 600
 
 /** How an aborted request ended: its deadline passed ('timeout', as liaise reports it) or it was cancelled. */
 export const abortOutcome = (signal: AbortSignal | null | undefined): 'timeout' | 'cancelled' =>
@@ -106,6 +113,12 @@ export function createFakeServer({ onRequest = () => {}, onSettle = () => {}, un
       // query is still in flight when the next key cancels it (dedupe on, 60 ms to spare), and
       // without dedupe the answers land in reverse: "l" last, 160 ms after "li".
       return { kind: 'answer', status: 200, body: [`${q}`, `${q} docs`, `${q} examples`], delay: 120 + 220 * Math.max(0, 6 - q.length) }
+    }
+    if (method === 'GET' && url.pathname === '/items') {
+      const offset = Math.max(0, Number(url.searchParams.get('offset')) || 0)
+      const limit = Math.max(1, Number(url.searchParams.get('limit')) || 25)
+      const items = Array.from({ length: Math.max(0, Math.min(limit, ITEMS - offset)) }, (_, i) => ({ id: offset + i + 1, name: `Item ${offset + i + 1}` }))
+      return { kind: 'answer', status: 200, body: { items, total: ITEMS }, delay: offset === 50 ? SLOW_ITEMS_MS : 120 }
     }
     if (method === 'POST' && url.pathname === '/graphql') return executeGraphQL(body, people)
     return { kind: 'answer', status: 404, body: { message: 'Not found' }, delay: 50 }

@@ -57,7 +57,7 @@ describe('built site', () => {
   it('renders the playground tabs as HTML, on every page that has one', () => {
     const pages = distFiles(/\.html$/).filter(f => readFileSync(dist(f), 'utf8').includes('data-playground'))
     expect(pages).toContain('playground/index.html')
-    expect(SCENARIOS.map(s => s.label)).toEqual(['Quick start', 'Every failure', 'Search as you type', 'Share', 'Retry', 'GraphQL', 'Polling'])
+    expect(SCENARIOS.map(s => s.label)).toEqual(['Quick start', 'Every failure', 'Search as you type', 'Share', 'Retry', 'GraphQL', 'Polling', 'Pager'])
     for (const page of pages) {
       const html = readFileSync(dist(page), 'utf8')
       expect(html.match(/<button[^>]*role="tab"/g), page).toHaveLength(SCENARIOS.length)
