@@ -25,14 +25,28 @@ export { defineRequest } from './define-request.js'
 /** Walks a paginated endpoint, yielding one Result per page. */
 export { paginate } from './paginate.js'
 
-/** Options for `paginate` — `next`, `maxPages`, and any CallOptions. */
-export type { PaginateOptions } from './paginate.js'
+/** Options for `paginate` — `next`, `maxPages`, and any CallOptions. `Pages` is what it returns: the pages plus `truncated`. */
+export type { PaginateOptions, Pages } from './paginate.js'
 
 /** `poll` asks an endpoint again on an interval; `pollUntil` resolves once a condition holds. Callers asking the same thing share one poll. */
 export { poll, pollUntil } from './poll.js'
 
 /** Options and the endpoint shape for `poll`. */
 export type { Pollable, PollOptions, PollUntilOptions } from './poll.js'
+
+/** A pager over a paginated endpoint: numbered, cursor-based or an infinite list, with a state a UI can subscribe to. */
+export { createPager } from './pager.js'
+
+/** The pager, its snapshot and its options: `NumberedPagerOptions`, `CursorPagerOptions` and `ListOptions` combine into `PagerOptions`; `PagerBaseOptions` is what they share. */
+export type {
+  Pager,
+  PagerState,
+  PagerOptions,
+  NumberedPagerOptions,
+  CursorPagerOptions,
+  ListOptions,
+  PagerBaseOptions
+} from './pager.js'
 
 // ---------------------------------------------------------------------------
 // Error class — exported as a value so consumers can use `instanceof`

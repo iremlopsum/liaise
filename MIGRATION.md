@@ -8,6 +8,12 @@ For the full record of what changed in each release, see [CHANGELOG.md](./CHANGE
 
 ---
 
+## Upgrading to 5.4.0
+
+No action needed. 5.4.0 adds `createPager()` for numbered, cursor and infinite-scroll pagination, and `truncated` on what `paginate` returns. `paginate`'s return type is now `Pages<R>`, a subtype of the async generator it was before, so existing code compiles unchanged.
+
+---
+
 ## Upgrading to 5.3.1
 
 No action needed, unless you pass an array as a call's params. On a `POST`, `PUT` or `PATCH` it is now sent as a JSON

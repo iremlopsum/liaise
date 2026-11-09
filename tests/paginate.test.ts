@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, vi } from 'vitest'
 import { paginate } from '../src/paginate.js'
 import { successResult, errorResult } from '../src/testing.js'
 import type { Result, CallOptions } from '../src/types.js'
@@ -190,5 +190,105 @@ describe('paginate', () => {
     await collect(paginate(endpoint, { limit: 1 }, { next: byCursor, maxPages: 3 }))
     expect(calls[0].options).not.toHaveProperty('next')
     expect(calls[0].options).not.toHaveProperty('maxPages')
+  })
+})
+
+describe('truncated', () => {
+  const three: Page[] = [
+    { items: [1], cursor: '1' },
+    { items: [2], cursor: '2' },
+    { items: [3], cursor: null },
+  ]
+
+  it('is true when maxPages stopped the walk and another page existed', async () => {
+    const { endpoint, calls } = fakeEndpoint(three)
+    const pages = paginate(endpoint, { limit: 1 }, { next: byCursor, maxPages: 2 })
+    await collect(pages)
+    expect(pages.truncated).toBe(true)
+    expect(calls).toHaveLength(2) // reading it sent nothing
+  })
+
+  it('is false when the cap lands exactly on the last page', async () => {
+    const { endpoint, calls } = fakeEndpoint([
+      { items: [1], cursor: '1' },
+      { items: [2], cursor: null },
+    ])
+    const pages = paginate(endpoint, { limit: 1 }, { next: byCursor, maxPages: 2 })
+    await collect(pages)
+    expect(pages.truncated).toBe(false)
+    expect(calls).toHaveLength(2)
+  })
+
+  it('is false when next ended the walk before the cap', async () => {
+    const { endpoint, calls } = fakeEndpoint(three)
+    const pages = paginate(endpoint, { limit: 1 }, { next: byCursor, maxPages: 10 })
+    await collect(pages)
+    expect(pages.truncated).toBe(false)
+    expect(calls).toHaveLength(3)
+  })
+
+  it('is false while the walk has not ended', async () => {
+    const { endpoint } = fakeEndpoint(three)
+    const pages = paginate(endpoint, { limit: 1 }, { next: byCursor, maxPages: 1 })
+    expect(pages.truncated).toBe(false) // not started
+    await pages.next()
+    expect(pages.truncated).toBe(false) // the cap is reached only when it is resumed
+  })
+
+  it('is false after an error page', async () => {
+    const { endpoint } = fakeEndpoint([{ items: [1], cursor: '1' }]) // page 2 is a 404
+    const pages = paginate(endpoint, { limit: 1 }, { next: byCursor, maxPages: 5 })
+    const out = await collect(pages)
+    expect(out).toHaveLength(2)
+    expect(out[1].error).not.toBeNull()
+    expect(pages.truncated).toBe(false)
+  })
+
+  it('is false at maxPages 0, where nothing was fetched to ask next about', async () => {
+    const { endpoint } = fakeEndpoint(three)
+    const pages = paginate(endpoint, { limit: 1 }, { next: byCursor, maxPages: 0 })
+    await collect(pages)
+    expect(pages.truncated).toBe(false)
+  })
+
+  it('calls next at most once for the check, and only when read', async () => {
+    const { endpoint } = fakeEndpoint(three)
+    const next = vi.fn(byCursor)
+    const pages = paginate(endpoint, { limit: 1 }, { next, maxPages: 2 })
+    await collect(pages)
+    expect(next).toHaveBeenCalledTimes(1) // between the two pages, none for the cap
+    expect(pages.truncated).toBe(true)
+    expect(next).toHaveBeenCalledTimes(2)
+    expect(pages.truncated).toBe(true)
+    expect(next).toHaveBeenCalledTimes(2) // memoized
+  })
+
+  it('does not remember a throw: the next read asks next again', async () => {
+    const { endpoint } = fakeEndpoint(three)
+    let calls = 0
+    const next = (page: { data: Page }, prev: Params) => {
+      if (++calls === 2) throw new Error('next exploded on the check')
+      return byCursor(page, prev)
+    }
+    const pages = paginate(endpoint, { limit: 1 }, { next, maxPages: 2 })
+    await collect(pages)
+    expect(() => pages.truncated).toThrow('next exploded on the check')
+    expect(pages.truncated).toBe(true) // asked again, answered, now remembered
+    expect(calls).toBe(3)
+    expect(pages.truncated).toBe(true)
+    expect(calls).toBe(3)
+  })
+
+  it('lets a throw from next propagate when truncated is read', async () => {
+    const { endpoint } = fakeEndpoint(three)
+    const boom = new Error('next exploded on the check')
+    let calls = 0
+    const next = (page: { data: Page }, prev: Params) => {
+      if (++calls === 2) throw boom
+      return byCursor(page, prev)
+    }
+    const pages = paginate(endpoint, { limit: 1 }, { next, maxPages: 2 })
+    await collect(pages) // the walk itself never throws: next is not called at the cap
+    expect(() => pages.truncated).toThrow(boom)
   })
 })

@@ -1,7 +1,7 @@
 // The playground's tabs, in order. Each id names an example in ./examples/<id>.ts, and every
 // hint is checked: tests/playground.test.ts runs the example and each variant a hint names.
 export interface Scenario {
-  id: 'quick-start' | 'errors' | 'search' | 'share' | 'retry' | 'graphql' | 'polling'
+  id: 'quick-start' | 'errors' | 'search' | 'share' | 'retry' | 'graphql' | 'polling' | 'pager'
   label: string
   hint: string
 }
@@ -14,4 +14,5 @@ export const SCENARIOS: Scenario[] = [
   { id: 'retry', label: 'Retry', hint: 'Two 500s, then a 200. Lower the timeout to 600 and the one deadline stops the retries.' },
   { id: 'graphql', label: 'GraphQL', hint: "Change the id to '404' and the GraphQL error comes back in error.body, with error.partialData. '500' and 'slow' fail as they do over REST." },
   { id: 'polling', label: 'Polling', hint: "Four requests in the network panel, then the finished job. Set giveUpAfter to 600 and it gives up with a timeout; change the id to '404' and it stops at once." },
+  { id: 'pager', label: 'Pager', hint: 'Page 3 answers slowly, so the click on 5 cancels it and page 3 never shows. Going back to page 1 comes from the cache: set cache to false and it is a fourth request.' },
 ]

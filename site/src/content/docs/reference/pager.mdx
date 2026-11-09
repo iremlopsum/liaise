@@ -1,0 +1,102 @@
+---
+title: "createPager() options and state"
+description: "Every option createPager takes, every field of its state, what each method does and when it resolves with null, and every way a move can resolve."
+order: 10.5
+---
+This page lists the options of `createPager`, the fields of its state, its methods, and every way a move can resolve. Look here when you wire a pager into a screen. [Pagination](/guide/pagination/#going-straight-to-a-page) shows when to use one.
+
+`createPager(endpoint, params, options)` returns a `Pager`. `endpoint` is any `createApi` endpoint or `createGraphQL` operation, `params` are the base params that each page's params are built from, and `options` decide the kind of pager:
+
+- **`toParams`** makes a numbered pager, where any page can be opened directly.
+- **`next`** makes a cursor pager, where pages are reached one after another.
+- **`items`**, added to either one, makes it one growing list (infinite scroll).
+
+Creating a pager sends nothing; `load()` opens it. `createPager` never throws. Called with options it can't use, such as neither `toParams` nor `next`, or a `signal` that isn't an `AbortSignal`, it still returns a pager, and every move resolves with a `kind: 'middleware'` error whose `body` is a `TypeError`, and sends nothing.
+
+## Options every pager takes
+
+| Option | Type | Default | What it does |
+| ------ | ---- | ------- | ------------ |
+| `cache` | `boolean` | `true` | Keeps the pages it has shown, so going back to one shows it without a request. Only successes are kept. A numbered pager keys them by page number, a cursor pager by their place in the pages it has seen. `refresh()` replaces the shown page's entry, and `setParams` forgets them all. With `false`, every visit sends a request; a cursor pager still remembers each page's params, so Previous works. |
+| `signal` | `AbortSignal` | — | Stops the pager. The request in flight is cancelled, `loading` ends, and `error` and the shown page stay as they were. That move and every later one resolve with `kind: 'abort'`, whose `body` is the signal's `reason`, and send nothing. With a signal that is already aborted, `load()` sends nothing. It isn't passed to the requests as it is: each request gets a signal of its own that it also follows. |
+
+Every other option is one of the [`CallOptions`](/reference/calloptions/), such as `headers`, `timeout` or `middleware`, and goes with every request.
+
+## Numbered pages
+
+| Option | Type | Default | What it does |
+| ------ | ---- | ------- | ------------ |
+| `toParams` | `(page: number, params: P) => P` | required | Builds the params for `page`, counted from 1, from the base params: the ones passed to `createPager`, or to the latest `setParams`. |
+| `pageCount` | `(result: SuccessResult<R>) => number \| null \| undefined` | — | Reads how many pages there are from a result. Without it, or when it returns `null` or `undefined`, `state.pageCount` is `null`, and a numbered pager that isn't a list keeps `hasNext` `true`. A list still ends at a page with no items. |
+| `start` | `number` | `1` | The page `load()` opens, such as a page number from the address. |
+
+## Cursor pages
+
+| Option | Type | Default | What it does |
+| ------ | ---- | ------- | ------------ |
+| `next` | `(result: SuccessResult<R>, params: P) => P \| null \| undefined` | required | Returns the params of the page after `result`, or `null` or `undefined` when it is the last. It is the same `next` that [`paginate`](/guide/pagination/#getting-to-the-next-page) takes. |
+| `prev` | `(result: SuccessResult<R>, params: P) => P \| null \| undefined` | — | Returns the params of the page before `result`, for APIs that return a previous cursor. A pager opened with `from` reads it from its earliest page, so Previous can go back past where it opened. Without it, that page has no Previous. Every other Previous goes back through the pages already seen. |
+| `from` | `P` | — | The params of the page `load()` opens when it isn't the first, such as a cursor from the address. Pages reached from it have no number: `state.page` is `null`, and `goTo` resolves with `null`. `setParams` opens the first page instead, and `from` isn't used again. |
+
+When a page that was shown before is fetched again, by `refresh()` or by a visit with `cache: false`, and names a different next page than it did, the pages after it are forgotten, with their cache entries, and Next follows the new one. Params are compared by value; params that can't be compared, such as ones holding a `BigInt`, count as different. A `next` that returns `null` or `undefined` also forgets the pages after it.
+
+## Infinite scroll
+
+| Option | Type | Default | What it does |
+| ------ | ---- | ------- | ------------ |
+| `items` | `(result: SuccessResult<R>) => readonly T[]` | required | Reads the items of one page. Each page's items are appended to `state.items`. |
+| `restore` | `number` | `1` | How many pages `load()` fetches, from the first, one after another: the `loaded` count saved before a reload. A value below 1, or one that isn't finite, such as `NaN` or `Infinity`, loads one page. A fraction is rounded down, so `2.7` loads two. |
+
+A list always starts at page 1, so it ignores `start`, `from` and `cache`. Every page it has loaded is in `state.items` already. The list ends at a page with no items, at the last page `pageCount` reports (numbered), or at a page `next` returns nothing for (cursor).
+
+## PagerState
+
+`pager.state` is a frozen object, and the same object until something changes, so `useSyncExternalStore` can read it directly. A move that changes nothing, such as going to the page already shown from the cache, keeps the same object and calls no listener.
+
+| Field | Type | Before `load()` | What it holds |
+| ----- | ---- | --------------- | ------------- |
+| `loading` | `boolean` | `false` | A move is waiting for its reply. |
+| `page` | `number \| null` | `null` | The page `data` belongs to, counted from 1. `null` in a cursor pager opened with `from`, where the number isn't known. In a list, the last page loaded. |
+| `target` | `number \| null` | `null` | The page a move is loading. `null` when nothing is loading, or when the page's number isn't known. |
+| `params` | `P \| null` | `null` | The params that loaded `data`: what you write to the address. |
+| `data` | `R \| null` | `null` | The shown page. It stays the previous page while the next one loads, and when a move fails. |
+| `error` | `ApiError \| null` | `null` | The last move's error. The next success clears it. A move that was overtaken, or stopped by your `signal`, never sets it. |
+| `pageCount` | `number \| null` | `null` | What `pageCount` read from the shown page. Always `null` in a cursor pager. |
+| `hasNext` | `boolean` | `false` | There is a page after the shown one. A numbered pager that isn't a list, without a page count: always `true` once loaded. |
+| `hasPrev` | `boolean` | `false` | There is a page before the shown one. Always `false` in a list. |
+| `items` | `readonly T[]` | `[]` | List only: every page's items, in order. A new frozen array each time they change. `[]` in the other modes. |
+| `loaded` | `number` | `0` | List only: how many pages `items` holds. Save it for `restore`. `0` in the other modes. |
+
+## Methods
+
+Every move returns a promise that resolves with the `Result` it showed, or the one that failed, or with `null` when it has nowhere to go and sends nothing. None of them throws or rejects.
+
+| Method | What it does | Resolves with `null` when |
+| ------ | ------------ | ------------------------- |
+| `load()` | Opens the pager: page `start` (numbered), the first page or `from` (cursor), or pages 1 to `restore` (list). Called again, a cursor pager opens its first page again, from the cache. | Numbered: `start` isn't a whole number from 1. |
+| `goTo(page)` | Opens `page`. | Numbered: `page` isn't a whole number from 1, or is above `pageCount`. Cursor: the pager hasn't shown that page, or opened with `from`. List: always. |
+| `next()` | Opens the page after the one shown, or after the one loading, so two quick clicks move two pages. List: appends the next page; a second `next()` while one is loading returns the same promise. | `hasNext` is `false`, or before `load()`. Cursor: also while a page that hasn't named its next page yet is loading. |
+| `prev()` | Opens the page before the one shown. Cursor: from the pages already seen, or with `prev` before a `from` page. | `hasPrev` is `false`, or before `load()`. List: always. |
+| `refresh()` | Asks for the shown page again, past the cache, and replaces its cache entry. List: asks for pages 1 to `loaded` again, and replaces `items` when the last one arrives. A failed refresh keeps the list and sets `error`. | Before `load()`. |
+| `setParams(params)` | New base params, such as a filter change: forgets the cache (a cursor pager also forgets the pages it has seen) and opens page 1. List: empties `items` and loads page 1. | Never. |
+| `subscribe(listener)` | Calls `listener`, with no arguments, after each change, and returns the function that unsubscribes. | — |
+
+**Listeners.** A listener may call a move or unsubscribe while it runs. Each other listener is still called once for that change, and a listener added during a notification is first called for the next change. A listener that throws doesn't stop the others: the error goes to `reportError` in a browser, and to `console.error` everywhere else, as `[liaise] pager: a listener failed:`.
+
+## What a move resolves with
+
+| It resolves with | When |
+| ---------------- | ---- |
+| the endpoint's success `Result` | The move showed it. A page from the cache resolves with the same `Result` it showed the first time. |
+| the endpoint's error `Result` | The request failed. `state.error` is set to its `error`, and the shown page stays. |
+| `null` | The move has nowhere to go ([Methods](#methods)), and sent nothing. |
+| a `Result` with `kind: 'abort'`, whose `body` is a `DOMException` named `AbortError` with the message `Superseded by a newer move` | A newer move overtook it. Its request was cancelled, and a reply that arrives anyway, from an endpoint that ignored its signal, never changes `state`. |
+| a `Result` with `kind: 'abort'`, whose `body` is your signal's `reason` | Your `signal` stopped the pager, during this move or before it. |
+| a `Result` with `kind: 'middleware'`, whose `body` is what was thrown | `toParams`, `next`, `prev`, `pageCount` or `items` threw, or the endpoint threw, rejected or resolved with something that isn't a `Result`, which a liaise endpoint never does but a hand-written function might. An endpoint's failure is also reported, as a listener's is. `state.error` is set, and the shown page stays. |
+| a `Result` with `kind: 'middleware'`, whose `body` is a `TypeError` | `createPager` got options it can't use: neither `toParams` nor `next`, or a `signal` that isn't an `AbortSignal`. Nothing is sent. |
+
+When a callback throws, asking again would change nothing, so that `Result`'s `retry()` sends nothing and resolves with the same `Result`.
+
+`dedupe: true` on the endpoint cancels per endpoint, so a pager move cancels that endpoint's other call in flight. `share: true` works: a pager's request can join an identical call, and a move that is overtaken leaves only the pager's part of it ([When a reply arrives late](/guide/pagination/#when-a-reply-arrives-late)).
+
+**Next:** [liaise/testing](/reference/liaisetesting/) lists the test helpers and how the stub behaves.

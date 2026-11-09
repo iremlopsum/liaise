@@ -5,6 +5,23 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [5.4.0] — 2026-11-09
+
+Adds `createPager()`, which holds the page a screen shows, and `truncated` on what `paginate` returns, which tells a walk that `maxPages` cut short from one that finished.
+
+### Added
+
+- **`createPager(endpoint, params, options)`** holds the page a screen shows, moves it, and keeps a frozen `state` that a UI subscribes to. It takes any `createApi` endpoint or `createGraphQL` operation. `toParams` makes a numbered pager, where `goTo(page)` opens any page; `next` makes a cursor pager, with Previous through the pages already seen, and `from` and `prev` for a cursor kept in the address; adding `items` to either makes one growing list for infinite scroll, which `restore` brings back after a reload. Pages already shown come back from a cache without a request, and `setParams` starts again at page 1 for a filter change. Creating a pager sends nothing, and it never throws ([createPager()](https://iremlopsum.github.io/liaise/reference/pager/), [Pagination](https://iremlopsum.github.io/liaise/guide/pagination/#going-straight-to-a-page)).
+- **The latest move wins, per pager.** A move cancels the request the same pager started for the move before it, and a reply that arrives anyway never changes the state. The overtaken move resolves with `kind: 'abort'`. Only the pager's own requests are cancelled: two pagers over one endpoint, a `paginate` walk and a plain call never cancel each other, and with `share: true` an overtaken move leaves only the pager's part of the shared request.
+- **`truncated` on what `paginate` returns.** Once the loop has ended, `pages.truncated` is `true` when `maxPages` stopped the walk and your `next` says there was another page, and `false` when the pages ran out, an error page ended it, or the cap landed on the last page. It sends no request: it calls your `next` once, on the first read, and remembers the answer ([When to stop](https://iremlopsum.github.io/liaise/guide/pagination/#when-to-stop)).
+- **New exports:** `createPager`, and the types `Pager`, `PagerState`, `PagerOptions`, `NumberedPagerOptions`, `CursorPagerOptions`, `ListOptions`, `PagerBaseOptions` and `Pages`. `paginate` now returns `Pages<R>`, a subtype of the async generator it returned before, so existing code compiles unchanged.
+
+### Documentation
+
+- Pagination has the pager: a numbered pager, Previous and Next over cursors, infinite scroll that restores, GraphQL, React, Vue and Svelte wrappers, and what happens when a reply arrives late. The reference page lists every option, every field of the state, every method and every way a move resolves. The playground has a pager example.
+
+Sizes, gzipped: a REST-only import is 7.0 kB and 9.4 kB with `poll` and `pollUntil`, both unchanged, because the pager is left out of any bundle that doesn't import it. Importing `createPager` makes REST plus the pager 9.9 kB. The core entry is 13.7 kB (was 11.4 kB), and 15.0 kB with all the middleware (was 12.7 kB).
+
 ## [5.3.1] — 2026-10-08
 
 Fixes an array passed as params, which was sent as an object with index keys. An array on a request whose params go in the query string is now refused; see [MIGRATION.md](./MIGRATION.md#upgrading-to-531).
@@ -1259,6 +1276,7 @@ Initial release of the rewritten client. Reconstructed from the release commit
   `ArrayBuffer` and strings
 - Response parsing as `json`, `text`, `blob`, `arrayBuffer` or `formData`
 
+[5.4.0]: https://github.com/iremlopsum/liaise/compare/v5.3.1...v5.4.0
 [5.3.1]: https://github.com/iremlopsum/liaise/compare/v5.3.0...v5.3.1
 [5.3.0]: https://github.com/iremlopsum/liaise/compare/v5.2.1...v5.3.0
 [5.2.1]: https://github.com/iremlopsum/liaise/compare/v5.2.0...v5.2.1

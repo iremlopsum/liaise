@@ -11,8 +11,9 @@ Each entry point is a separate import, and your bundler leaves out what you don'
 | --- | --- |
 | `createApi` and `defineRequest` (REST only) | about 7.0 kB |
 | REST plus `poll` and `pollUntil` | 9.4 kB |
-| the whole core entry, GraphQL included | 11.3 kB |
-| the core entry plus all of `liaise/middleware` | 12.6 kB |
+| REST plus `createPager` | 9.9 kB |
+| the whole core entry, GraphQL included | 13.7 kB |
+| the core entry plus all of `liaise/middleware` | 15.0 kB |
 
 [How it compares](/compare/) takes the REST-only figure from the comparison, which bundles one JSON GET, call site included, with the liaise version named on that page. It can differ from the first row above, which is measured on this version's entry points.
 
@@ -27,6 +28,7 @@ Each entry point is a separate import, and your bundler leaves out what you don'
 | `paginate` | function | Walks a paginated endpoint, one `Result` per page ([Pagination](/guide/pagination/)). |
 | `poll` | function | Asks an endpoint on an interval and hands every `Result` to a callback, until `stop()` ([Polling](/guide/polling/)). |
 | `pollUntil` | function | Asks an endpoint on an interval until a condition holds, and resolves with that `Result` ([Polling](/guide/polling/#waiting-until-something-is-done-with-polluntil)). |
+| `createPager` | function | Pages through an endpoint and keeps a state a UI can subscribe to: numbered, cursor-based, or one growing list ([createPager()](/reference/pager/)). |
 | `ApiError` | class | The `error` of a failed call ([Result and ApiError](/reference/result-and-apierror/)). |
 | `createGraphQL` | function | Creates a GraphQL client from your operations ([createGraphQL options](/reference/creategraphql-options/)). |
 | `Operation` | class | Defines one GraphQL operation ([Operation options](/reference/operation-options/)). |
@@ -36,6 +38,11 @@ Each entry point is a separate import, and your bundler leaves out what you don'
 | `CallOptions` | type | The second argument of a call ([CallOptions](/reference/calloptions/)). |
 | `FetchOptions` | type | The options `fetchOptions` takes: `RequestInit` without `method`, `headers`, `body` and `signal` ([Cookies and other fetch options](/guide/defining-endpoints/#cookies-and-other-fetch-options)). |
 | `PaginateOptions` | type | `next`, `maxPages`, and any `CallOptions`. |
+| `Pages` | type | What `paginate` returns: an async generator of `Result`s, plus `truncated`, which says whether `maxPages` cut the walk short ([Pagination](/guide/pagination/#when-to-stop)). |
+| `Pager`, `PagerState` | type | What `createPager` returns, and its `state` snapshot ([createPager()](/reference/pager/)). |
+| `PagerOptions` | type | The options of `createPager`: `NumberedPagerOptions`, `CursorPagerOptions`, each combined with `ListOptions` for a list ([createPager()](/reference/pager/)). |
+| `NumberedPagerOptions`, `CursorPagerOptions`, `ListOptions` | type | The three option sets `PagerOptions` is built from: page numbers, cursors, and a growing list ([createPager()](/reference/pager/)). |
+| `PagerBaseOptions` | type | The options every pager takes: `signal`, `cache`, and any `CallOptions` ([createPager()](/reference/pager/)). |
 | `Pollable` | type | What `poll` and `pollUntil` take as an endpoint: `(params, options?) => Promise<Result>`, which every endpoint and operation is. |
 | `PollOptions`, `PollUntilOptions` | type | The options of `poll` and `pollUntil` ([poll() and pollUntil() options](/reference/polling-options/)). |
 | `WithHeadersOptions` | type | The options of `withHeaders`: `dedupe` ([withHeaders()](/reference/withheaders/)). |

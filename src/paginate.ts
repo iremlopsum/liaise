@@ -15,6 +15,28 @@
 import type { CallOptions, Result, SuccessResult } from './types.js'
 
 /**
+ * What `paginate` returns: the pages, plus whether the walk was cut short.
+ *
+ * An `AsyncGenerator` like any other, so every `for await` and `pages.next()`
+ * caller compiles unchanged.
+ *
+ * @typeParam R - The endpoint's success data type.
+ */
+export interface Pages<R> extends AsyncGenerator<Result<R>, void, undefined> {
+  /**
+   * `true` when `maxPages` stopped the walk and `next` says another page
+   * existed. `false` while the walk is still going, when it ended on a page
+   * `next` had no follow-up for, when it ended on an error page, and when
+   * `maxPages` is `0` (nothing was fetched to ask `next` about).
+   *
+   * Reading it sends no request, but it does call your `next` once with the
+   * last page, on the first read, and remembers the answer. A throw from `next`
+   * propagates from here and is not remembered, so the next read asks again.
+   */
+  readonly truncated: boolean
+}
+
+/**
  * How to continue, and when to stop.
  *
  * @typeParam TParams - The endpoint's params type.
@@ -58,8 +80,9 @@ export interface PaginateOptions<TParams extends object, TResponse> extends Call
    * indistinguishable from "no more pages", which is a worse failure than the
    * runaway it would prevent.
    *
-   * `0` means zero pages, not "unset". A caller who needs to know they hit the
-   * cap counts pages themselves; they are already writing the loop body.
+   * `0` means zero pages, not "unset". To tell a walk the cap cut short from one
+   * that ran out of pages, read `truncated` on the returned `Pages` once the
+   * walk has ended.
    */
   maxPages?: number
 }
@@ -85,29 +108,64 @@ export interface PaginateOptions<TParams extends object, TResponse> extends Call
  * @param params - The params for the first page.
  * @param options - `next`, plus any `CallOptions` to apply to every request.
  */
-export async function* paginate<TParams extends object, TResponse>(
+export function paginate<TParams extends object, TResponse>(
   endpoint: (params: TParams, options?: CallOptions) => Promise<Result<TResponse>>,
   params: TParams,
   options: PaginateOptions<TParams, TResponse>
-): AsyncGenerator<Result<TResponse>, void, undefined> {
+): Pages<TResponse> {
   const { next, maxPages, ...callOptions } = options
-  let current: TParams | undefined | null = params
-  let fetched = 0
 
-  while (current !== undefined && current !== null) {
-    // `maxPages !== undefined`, not `maxPages &&` — 0 is a value, and reading
-    // it as "unset" would make `maxPages: 0` fetch every page.
-    if (maxPages !== undefined && fetched >= maxPages) return
+  // What `truncated` reads. Recorded by the walk, only when it stops at the cap
+  // on a page that succeeded: `next` is never called for the cap itself, so the
+  // question is asked once, on read, and a walk nobody asks about costs nothing.
+  let endedAtCap = false
+  let lastPage: SuccessResult<TResponse> | undefined
+  let lastParams: TParams | undefined
+  // The answer, once `next` has returned. Assigned only after it returns, so a
+  // throw is not cached and the following read asks again.
+  let memo: boolean | undefined
 
-    const page: Result<TResponse> = await endpoint(current, callOptions)
-    fetched++
-    yield page
+  async function* walk(): AsyncGenerator<Result<TResponse>, void, undefined> {
+    let current: TParams | undefined | null = params
+    let fetched = 0
 
-    // An error page ends the walk. Not a policy choice — `next` is typed to
-    // receive a SuccessResult, and a failed page carries no data from which to
-    // build the following params.
-    if (page.error !== null) return
+    while (current !== undefined && current !== null) {
+      // `maxPages !== undefined`, not `maxPages &&` — 0 is a value, and reading
+      // it as "unset" would make `maxPages: 0` fetch every page.
+      if (maxPages !== undefined && fetched >= maxPages) return
 
-    current = next(page, current)
+      const page: Result<TResponse> = await endpoint(current, callOptions)
+      fetched++
+      yield page
+
+      // An error page ends the walk. Not a policy choice — `next` is typed to
+      // receive a SuccessResult, and a failed page carries no data from which to
+      // build the following params.
+      if (page.error !== null) return
+
+      // At the cap, stop here and leave the "was there another page?" question
+      // to `truncated`.
+      if (maxPages !== undefined && fetched >= maxPages) {
+        endedAtCap = true
+        lastPage = page
+        lastParams = current
+        return
+      }
+
+      current = next(page, current)
+    }
   }
+
+  const pages = walk() as Pages<TResponse>
+  Object.defineProperty(pages, 'truncated', {
+    enumerable: false,
+    get(): boolean {
+      if (!endedAtCap || lastPage === undefined || lastParams === undefined) return false
+      if (memo !== undefined) return memo
+      const following = next(lastPage, lastParams)
+      memo = following !== undefined && following !== null
+      return memo
+    },
+  })
+  return pages
 }

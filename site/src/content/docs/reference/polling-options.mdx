@@ -58,4 +58,4 @@ The two results that `pollUntil` builds itself hold:
 
 An endpoint that throws, rejects or resolves with something that isn't a `Result`, which a liaise endpoint never does but a hand-written function might, is reported, and that answer becomes a `kind: 'middleware'` error. `poll` delivers it and goes on polling, and `pollUntil` resolves with it. Its `retry()` calls the endpoint once more, and never throws or rejects either.
 
-**Next:** [liaise/testing](/reference/liaisetesting/) lists the test helpers and how the stub behaves.
+**Next:** [createPager() options and state](/reference/pager/) lists the options, state and methods of a pager.

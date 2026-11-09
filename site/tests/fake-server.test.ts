@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach } from 'vitest'
-import { createFakeServer, FAKE_ORIGIN, SLOW_MS, type UnreadMode } from '../src/playground/fake-server'
+import { createFakeServer, FAKE_ORIGIN, SLOW_MS, ITEMS, SLOW_ITEMS_MS, type UnreadMode } from '../src/playground/fake-server'
 
 const UNREAD = `${FAKE_ORIGIN}/notifications/unread`
 afterEach(() => { vi.useRealTimers() })
@@ -34,5 +34,30 @@ describe('fake server: GET /notifications/unread (the intro challenge)', () => {
     await createFakeServer({ onRequest: (r) => sent.push(r), onSettle: (s) => settled.push(s) }).fetch(UNREAD)
     expect(sent).toEqual([expect.objectContaining({ method: 'GET', path: '/notifications/unread' })])
     expect(settled).toEqual([expect.objectContaining({ outcome: 200 })])
+  })
+})
+
+describe('fake server: GET /items (the pager example)', () => {
+  it('pages through 230 items by offset and limit', async () => {
+    const server = createFakeServer()
+    const first = await (await server.fetch(`${FAKE_ORIGIN}/items?offset=0&limit=25`)).json()
+    expect(first.total).toBe(ITEMS)
+    expect(ITEMS).toBe(230)
+    expect(first.items).toHaveLength(25)
+    expect(first.items[0]).toEqual({ id: 1, name: 'Item 1' })
+    const last = await (await server.fetch(`${FAKE_ORIGIN}/items?offset=225&limit=25`)).json()
+    expect(last.items.map((i: { id: number }) => i.id)).toEqual([226, 227, 228, 229, 230])
+  })
+  it('answers offset 50 after SLOW_ITEMS_MS, and the others sooner', async () => {
+    vi.useFakeTimers()
+    const server = createFakeServer()
+    let slow = false, quick = false
+    void server.fetch(`${FAKE_ORIGIN}/items?offset=50&limit=25`).then(() => { slow = true })
+    void server.fetch(`${FAKE_ORIGIN}/items?offset=100&limit=25`).then(() => { quick = true })
+    await vi.advanceTimersByTimeAsync(SLOW_ITEMS_MS - 1)
+    expect(quick).toBe(true)
+    expect(slow).toBe(false)
+    await vi.advanceTimersByTimeAsync(1)
+    expect(slow).toBe(true)
   })
 })
