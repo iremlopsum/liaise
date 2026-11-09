@@ -114,13 +114,17 @@ export interface Pager<P, R, T = never> {
   subscribe(listener: () => void): () => void
   /** Opens the pager. Creating one sends nothing. */
   load(): Promise<Result<R> | null>
+  /** Cursor pages: only a page already shown, and only when numbers are known (not after `from`). */
   goTo(page: number): Promise<Result<R> | null>
-  /** The page after the one shown, or after the one loading, so two quick clicks move two pages. */
+  /**
+   * The page after the one shown, or after the one loading, so two quick clicks move two pages.
+   * Cursor pages: after the one loading only once it has named its next page.
+   */
   next(): Promise<Result<R> | null>
   prev(): Promise<Result<R> | null>
   /** Fetches the current page again, past the cache, and replaces its entry. */
   refresh(): Promise<Result<R> | null>
-  /** New base params (a filter change): forgets the cache and opens page 1. */
+  /** New base params (a filter change): forgets the cache (and cursor history) and opens page 1, never `from`. */
   setParams(params: P): Promise<Result<R> | null>
 }
 
@@ -129,6 +133,17 @@ type AnyOptions<P, R, T> = PagerBaseOptions & Partial<NumberedPagerOptions<P, R>
   Partial<Omit<CursorPagerOptions<P, R>, 'next'>> & { next?: unknown } & Partial<ListOptions<R, T>>
 
 type Writable<S> = { -readonly [K in keyof S]: S[K] }
+
+/** A cursor page the pager knows the params of. */
+interface Step<P, R> {
+  params: P
+  /** It has been shown, so `goTo` may return to it. */
+  seen: boolean
+  /** Its cache entry (only when caching). */
+  entry?: Entry<P, R>
+  /** The previous page's params, read by `prev` when this step opened at `from` and is the earliest. */
+  before?: P | null | undefined
+}
 
 /** A page this pager has shown: what it showed, and what it read from it. */
 interface Entry<P, R> {
@@ -149,14 +164,14 @@ function countOf(value: number | null | undefined): number | null {
  *
  * @param endpoint - Any `createApi` method or `createGraphQL` operation.
  * @param params - The base params: what `toParams` builds each page's params from.
- * @param options - `toParams` (numbered pages), plus any `CallOptions` for every request.
+ * @param options - `toParams` (numbered pages) or `next` (cursor pages), plus any `CallOptions` for every request.
  */
 export function createPager<P extends object, R, T = never>(
   endpoint: Pollable<P, R>, params: P, options: PagerOptions<P, R, T>,
 ): Pager<P, R, T> {
   const {
     toParams, pageCount: readCount, start = 1, cache = true, signal: stop,
-    next: _next, prev: _prev, from: _from, items: _items, restore: _restore,
+    next: readNext, prev: readPrev, from: opening, items: _items, restore: _restore,
     ...callOptions
   } = (options ?? {}) as AnyOptions<P, R, T>
 
@@ -165,14 +180,26 @@ export function createPager<P extends object, R, T = never>(
   const problem: string | undefined =
     stop !== undefined && typeof (stop as { addEventListener?: unknown } | null)?.addEventListener !== 'function'
       ? 'createPager: signal must be an AbortSignal'
-      : typeof toParams === 'function'
+      : typeof toParams === 'function' || typeof readNext === 'function'
       ? (_items !== undefined ? 'createPager: list mode (items) is not supported yet' : undefined)
-      : typeof _next === 'function'
-        ? 'createPager: cursor pages (next) are not supported yet'
-        : 'createPager needs toParams (numbered pages) or next (cursor pages)'
+      : 'createPager needs toParams (numbered pages) or next (cursor pages)'
+  // `toParams` wins when both are given.
+  const cursor = typeof toParams !== 'function' && typeof readNext === 'function'
 
   const listeners = new Set<() => void>()
   const visited = new Map<number, Entry<P, R>>()
+  // Cursor mode. Pages are reached one after another, so the pager keeps every
+  // step it knows the params of: the visited ones, plus the next one each landed
+  // page names. A step's place in `history` is its index, and the cache lives on
+  // the step, so prepending a step (Previous from a `from` start) shifts both.
+  let history: Step<P, R>[] = []
+  // The step `load()` opens: the first page, or the one `from` names.
+  let opened: Step<P, R> | undefined
+  // Whether history[0] is the first page, so page numbers are known (not after `from`).
+  let numberedSteps = true
+  let shownAt: number | null = null
+  // The step a cursor move is loading; read only while `state.loading`.
+  let loadingAt = 0
   let base = params
   // Bumped by every move; a reply applies only while its move's token is current.
   let token = 0
@@ -296,10 +323,24 @@ export function createPager<P extends object, R, T = never>(
     // A listener can start a newer move during that notification: then this one
     // is superseded before it sent anything, and sends nothing.
     if (mine !== token) return Promise.resolve(own('abort', move.signal.reason, sent))
-    return settle(page, sent, move, mine)
+    return settle(sent, move, mine, result => {
+      let count: number | null
+      try {
+        count = readCount ? countOf(readCount(result)) : null
+      } catch (error) {
+        return failed(error, sent)
+      }
+      const entry: Entry<P, R> = { result, params: sent, count }
+      if (cache) visited.set(page, entry)
+      show(page, entry)
+      return result
+    })
   }
 
-  async function settle(page: number, sent: P, move: AbortController, mine: number): Promise<Result<R>> {
+  /** Sends a move's request and, while it is still the current move, lands a success with `land`. */
+  async function settle(
+    sent: P, move: AbortController, mine: number, land: (result: SuccessResult<R>) => Result<R>,
+  ): Promise<Result<R>> {
     const signal = anySignal([move.signal, stop])
     const result = await call(sent, signal)
     releaseSignal(signal)
@@ -318,16 +359,115 @@ export function createPager<P extends object, R, T = never>(
       set({ loading: false, target: null, error: result.error })
       return result
     }
-    let count: number | null
-    try {
-      count = readCount ? countOf(readCount(result)) : null
-    } catch (error) {
-      return failed(error, sent)
+    return land(result)
+  }
+
+  /** The page number of history step `i`, or null when numbers are unknown (a `from` start). */
+  const pageAt = (i: number): number | null => (numberedSteps ? i + 1 : null)
+
+  function showStep(i: number, entry: Entry<P, R>): void {
+    shownAt = i
+    set({
+      loading: false, target: null, page: pageAt(i), params: entry.params, data: entry.result.data, error: null,
+      pageCount: null, hasNext: i + 1 < history.length, hasPrev: i > 0 || history[0]!.before != null,
+    })
+  }
+
+  /** Opens history step `i`: from the cache unless `fresh`, else with that step's params. */
+  function step(i: number, fresh: boolean): Promise<Result<R> | null> {
+    const at = history[i]!
+    const hit = fresh ? undefined : at.entry
+    if (hit) {
+      supersede()
+      showStep(i, hit)
+      return Promise.resolve(hit.result)
     }
-    const entry: Entry<P, R> = { result, params: sent, count }
-    if (cache) visited.set(page, entry)
-    show(page, entry)
-    return result
+    const sent = at.params
+    const mine = supersede()
+    const move = new AbortController()
+    controller = move
+    loadingAt = i
+    set({ loading: true, target: pageAt(i) })
+    if (mine !== token) return Promise.resolve(own('abort', move.signal.reason, sent))
+    return settle(sent, move, mine, result => {
+      let after: P | null | undefined
+      let before: P | null | undefined
+      try {
+        after = (readNext as CursorPagerOptions<P, R>['next'])(result, sent)
+        // Only the earliest step of a `from` start asks: anywhere else, the step
+        // before is already in history, or this is the first page.
+        before = !numberedSteps && history[0] === at && readPrev ? readPrev(result, sent) : undefined
+      } catch (error) {
+        return failed(error, sent)
+      }
+      // Its index now: a Previous from a `from` start may have prepended since.
+      const index = history.indexOf(at)
+      at.seen = true
+      at.before = before
+      // The page names its next one. When it says it is the last, steps
+      // remembered past it are gone (a refresh can find the list shorter).
+      if (after == null) history.length = index + 1
+      else if (index + 1 === history.length) history.push({ params: after, seen: false })
+      const entry: Entry<P, R> = { result, params: sent, count: null }
+      if (cache) at.entry = entry
+      showStep(index, entry)
+      return result
+    })
+  }
+
+  /** Starts cursor history over at `params`. */
+  function begin(params: P, numbered: boolean): void {
+    opened = { params, seen: false }
+    history = [opened]
+    numberedSteps = numbered
+    shownAt = null
+  }
+
+  /** The step a relative cursor move counts from: the one loading, else the one shown. */
+  const stepFrom = (): number | null => (state.loading ? loadingAt : shownAt)
+
+  /** A cursor move, through the checks every move shares; `pick` names the step, or null for nowhere. */
+  function cursorMove(pick: () => number | null, fresh = false): Promise<Result<R> | null> {
+    const early = refused()
+    if (early) return Promise.resolve(early)
+    const i = pick()
+    return i === null ? Promise.resolve(null) : step(i, fresh)
+  }
+
+  const cursorPager: Pager<P, R, T> = {
+    get state() {
+      return state
+    },
+    subscribe: listener => subscribe(listener),
+    load: () => cursorMove(() => {
+      if (!opened) begin(opening === undefined ? base : opening, opening === undefined)
+      return history.indexOf(opened!)
+    }),
+    goTo: page => cursorMove(() => {
+      const i = page - 1
+      // Only a page already shown: the API can't jump to one not yet reached.
+      return numberedSteps && Number.isInteger(page) && i >= 0 && i < history.length && history[i]!.seen ? i : null
+    }),
+    next: () => cursorMove(() => {
+      const at = stepFrom()
+      return at === null || at + 1 >= history.length ? null : at + 1
+    }),
+    prev: () => cursorMove(() => {
+      const at = stepFrom()
+      if (at === null) return null
+      if (at > 0) return at - 1
+      const before = history[0]!.before
+      if (before == null) return null
+      history.unshift({ params: before, seen: false })
+      if (shownAt !== null) shownAt += 1
+      return 0
+    }),
+    refresh: () => cursorMove(stepFrom, true),
+    setParams: next => cursorMove(() => {
+      base = next
+      begin(next, true)
+      return 0
+    }, true),
   }
 
   /** A move to `page` (or nowhere, for `null`), through the checks every move shares. */
@@ -341,18 +481,21 @@ export function createPager<P extends object, R, T = never>(
   /** The page a relative move counts from: the one loading, else the one shown. */
   const from = (): number | null => state.target ?? state.page
 
+  function subscribe(listener: () => void): () => void {
+    // A wrapper per subscription, so subscribing one function twice is two subscriptions.
+    const entry = (): void => listener()
+    listeners.add(entry)
+    return () => {
+      listeners.delete(entry)
+    }
+  }
+
+  if (cursor) return cursorPager
   return {
     get state() {
       return state
     },
-    subscribe(listener) {
-      // A wrapper per subscription, so subscribing one function twice is two subscriptions.
-      const entry = (): void => listener()
-      listeners.add(entry)
-      return () => {
-        listeners.delete(entry)
-      }
-    },
+    subscribe: listener => subscribe(listener),
     load: () => moveTo(start),
     goTo: page => moveTo(page),
     next: () => {
