@@ -13,6 +13,7 @@ import { ApiError, createNetworkErrorResult } from './result.js'
 import { stableKey } from './utils/stable-key.js'
 import { parseRetryAfter } from './utils/retry-after.js'
 import { pollIdOf } from './utils/copy.js'
+import { report } from './utils/report.js'
 
 /** Any liaise endpoint: a `createApi` method or a `createGraphQL` operation. */
 export type Pollable<P extends object, R> = (params: P, options?: CallOptions) => Promise<Result<R>>
@@ -55,24 +56,11 @@ interface Caller {
   deliver: (result: Result<unknown>) => void
 }
 
-/**
- * A thrown callback or `until`, or an endpoint that fails to return a Result, never
- * breaks the poll. In a browser (where there is a `document`) it goes to `reportError`,
- * like an error thrown from an event handler. Everywhere else it's logged, saying what
- * failed: Deno's `reportError` ends the process, and Node has none. Never re-thrown
- * later: in Node an async throw would crash the process.
- */
-function report(error: unknown, what: string): void {
-  const g = globalThis as { reportError?: (error: unknown) => void }
-  if (typeof document !== 'undefined' && typeof g.reportError === 'function') g.reportError(error)
-  else console.error(`[liaise] poll: ${what} failed:`, error)
-}
-
 function deliver(caller: Caller, result: Result<unknown>): void {
   try {
     caller.deliver(result)
   } catch (error) {
-    report(error, 'the callback')
+    report(error, 'poll: the callback')
   }
 }
 
@@ -213,7 +201,7 @@ class SharedPoll {
       if (typeof result === 'object' && result !== null) return result
       throw new TypeError(`the endpoint resolved with ${String(result)}, not a Result`)
     } catch (error) {
-      report(error, 'the endpoint')
+      report(error, 'poll: the endpoint')
       return createNetworkErrorResult(
         new ApiError({ kind: 'middleware', status: 0, statusText: '', body: error, headers: new Headers(), request: { method: this.request?.method ?? '', url: this.request?.url ?? '', params: this.params } }),
         () => this.call(),
@@ -360,7 +348,7 @@ export function poll<P extends object, R>(
   } catch (error) {
     // Untyped misuse, such as no options or a signal that isn't one: report it, stop
     // what it started, and hand back a stop that does nothing.
-    report(error, 'poll()')
+    report(error, 'poll: poll()')
     leave()
     return () => {}
   }
@@ -434,7 +422,7 @@ export function pollUntil<P extends object, R>(
           try {
             done = until(result)
           } catch (error) {
-            report(error, 'until')
+            report(error, 'poll: until')
           }
           if (done || asksOnce) finish(result)
         } else if (asksOnce || endsPolling(result.error.kind, result.error.status)) {
@@ -456,7 +444,7 @@ export function pollUntil<P extends object, R>(
         }, giveUpAfter)
       }
     } catch (error) {
-      report(error, 'pollUntil()')
+      report(error, 'poll: pollUntil()')
       if (!settled) {
         settled = true
         leave()
