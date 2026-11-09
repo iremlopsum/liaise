@@ -399,6 +399,65 @@ describe('createPager: cursor pages', () => {
     expect(pager.state.page).toBe(2)
   })
 
+  // Asymmetric cursor params, as Stripe (ending_before / starting_after) or Relay (before / after):
+  // the page Previous reaches carries `dir: 'before'`, which next keeps, so the
+  // params it names for the page after differ from the ones that opened the pager.
+  type Dir = P & { dir?: 'before' }
+  const asymmetric: CursorPagerOptions<P, D> = {
+    ...cursors,
+    prev: (r, p) => (r.data.prev ? ({ limit: p.limit, cursor: r.data.prev, dir: 'before' } as Dir) : null),
+  }
+
+  it('a page Previous prepended keeps the from page and later history on its first landing', async () => {
+    const f = fake()
+    const pager = createPager(f.endpoint, base, { ...asymmetric, from: { limit: 10, cursor: 'c3' } })
+    const a = pager.load(); f.release(0); const r3 = await a
+    const b = pager.next(); f.release(1); const r4 = await b
+    await pager.prev()
+    const c = pager.prev()
+    expect(f.calls[2]?.params).toEqual({ limit: 10, cursor: 'c2', dir: 'before' })
+    f.release(2); await c
+    expect(shown(pager.state)).toBe(2)
+    // c2 names { cursor: 'c3', dir: 'before' }, not the from params: still the remembered pages.
+    // Counted before awaiting: a move that sent would never settle here.
+    const to3 = pager.next()
+    expect(f.calls).toHaveLength(3)
+    expect(await to3).toBe(r3)
+    const to4 = pager.next()
+    expect(f.calls).toHaveLength(3)
+    expect(await to4).toBe(r4)
+  })
+
+  it('load() after a cut dropped the from page starts over at the from params', async () => {
+    const f = fake()
+    const pager = createPager(f.endpoint, base, { ...withPrev, from: { limit: 10, cursor: 'c3' } })
+    const a = pager.load(); f.release(0); await a
+    const b = pager.prev(); f.release(1); await b
+    // c2 refreshed now names another chain: the from page goes with the old one.
+    const c = pager.refresh()
+    f.calls[2]!.resolve(successResult<D>({ items: [2], next: 'c7', prev: 'c1' }))
+    await c
+    let reopened: Promise<Result<D> | null> | undefined
+    expect(() => { reopened = pager.load() }).not.toThrow()
+    expect(f.calls[3]?.params).toEqual({ limit: 10, cursor: 'c3' })
+    expect(pager.state.target).toBeNull()
+    f.release(3)
+    expect((await reopened)?.data?.items).toEqual([3])
+    expect(pager.state).toMatchObject({ page: null, hasPrev: true, hasNext: true })
+  })
+
+  it('load() again in a from pager after a prepend reopens the from page from the cache', async () => {
+    const f = fake()
+    const pager = createPager(f.endpoint, base, { ...withPrev, from: { limit: 10, cursor: 'c3' } })
+    const a = pager.load(); f.release(0); const r3 = await a
+    const b = pager.prev(); f.release(1); await b
+    expect(shown(pager.state)).toBe(2)
+    expect(await pager.load()).toBe(r3)
+    expect(f.calls).toHaveLength(2)
+    expect(shown(pager.state)).toBe(3)
+    expect(pager.state).toMatchObject({ page: null, hasPrev: true })
+  })
+
   it('refresh() refetches the shown step past the cache', async () => {
     const f = fake()
     const pager = createPager(f.endpoint, base, cursors)

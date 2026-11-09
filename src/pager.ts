@@ -204,6 +204,8 @@ export function createPager<P extends object, R, T = never>(
   let opened: Step<P, R> | undefined
   // Whether history[0] is the first page, so page numbers are known (not after `from`).
   let numberedSteps = true
+  // Whether `opened` was the first page, for starting over at it.
+  let openedNumbered = true
   let shownAt: number | null = null
   // The step a cursor move is loading; read only while `state.loading`.
   let loadingAt = 0
@@ -409,15 +411,19 @@ export function createPager<P extends object, R, T = never>(
       }
       // Its index now: a Previous from a `from` start may have prepended since.
       const index = history.indexOf(at)
+      const again = at.seen
       at.seen = true
       at.before = before
-      // The page names its next one. When it says it is the last, or names a
-      // different one than remembered (a refresh, or a `cache: false` revisit,
-      // found the list changed), the steps past it are gone, with their cache
-      // entries, and Next follows the new chain. A key `stableKey` can't build
-      // counts as different.
+      // The page names its next one. When it says it is the last, the steps
+      // past it are gone, with their cache entries. So are they when a page
+      // shown before (a refresh, or a `cache: false` revisit) now names a
+      // different next one: the list changed, and Next follows the new chain.
+      // A key `stableKey` can't build counts as different. Never on a first
+      // landing: a page Previous prepended names its next page in its own
+      // params (Stripe's `ending_before` against `starting_after`, Relay's
+      // `before` against `after`), and the page after it is already known.
       const later = history[index + 1]
-      if (later && (after == null || !sameParams(later.params, after))) history.length = index + 1
+      if (later && (after == null || (again && !sameParams(later.params, after)))) history.length = index + 1
       if (after != null && index + 1 === history.length) history.push({ params: after, seen: false })
       const entry: Entry<P, R> = { result, params: sent, count: null }
       if (cache) at.entry = entry
@@ -431,6 +437,7 @@ export function createPager<P extends object, R, T = never>(
     opened = { params, seen: false }
     history = [opened]
     numberedSteps = numbered
+    openedNumbered = numbered
     shownAt = null
   }
 
@@ -442,7 +449,8 @@ export function createPager<P extends object, R, T = never>(
     const early = refused()
     if (early) return Promise.resolve(early)
     const i = pick()
-    return i === null ? Promise.resolve(null) : step(i, fresh)
+    // Out of range is nowhere, never a crash.
+    return i === null || !(i >= 0 && i < history.length) ? Promise.resolve(null) : step(i, fresh)
   }
 
   const cursorPager: Pager<P, R, T> = {
@@ -452,6 +460,9 @@ export function createPager<P extends object, R, T = never>(
     subscribe: listener => subscribe(listener),
     load: () => cursorMove(() => {
       if (!opened) begin(opening === undefined ? base : opening, opening === undefined)
+      // A cut (a page Previous prepended now says it is the last, or names a
+      // new chain) can drop the opened page: start over at its params.
+      else if (!history.includes(opened)) begin(opened.params, openedNumbered)
       return history.indexOf(opened!)
     }),
     goTo: page => cursorMove(() => {
