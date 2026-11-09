@@ -31,6 +31,7 @@ import type { Pollable } from './poll.js'
 import { ApiError, createNetworkErrorResult } from './result.js'
 import { anySignal, releaseSignal } from './utils/any-signal.js'
 import { report } from './utils/report.js'
+import { stableKey } from './utils/stable-key.js'
 
 /** Options every pager takes, plus any `CallOptions`, which go with every request. */
 export interface PagerBaseOptions extends Omit<CallOptions, 'signal'> {
@@ -153,6 +154,12 @@ interface Entry<P, R> {
 }
 
 const NONE: readonly never[] = Object.freeze([])
+
+/** Whether two params are the same request params; unkeyable ones never are. */
+function sameParams(a: unknown, b: unknown): boolean {
+  const key = stableKey(a)
+  return key !== null && key === stableKey(b)
+}
 
 /** A page count the state can hold: a whole number of at least 0, or null. */
 function countOf(value: number | null | undefined): number | null {
@@ -404,10 +411,14 @@ export function createPager<P extends object, R, T = never>(
       const index = history.indexOf(at)
       at.seen = true
       at.before = before
-      // The page names its next one. When it says it is the last, steps
-      // remembered past it are gone (a refresh can find the list shorter).
-      if (after == null) history.length = index + 1
-      else if (index + 1 === history.length) history.push({ params: after, seen: false })
+      // The page names its next one. When it says it is the last, or names a
+      // different one than remembered (a refresh, or a `cache: false` revisit,
+      // found the list changed), the steps past it are gone, with their cache
+      // entries, and Next follows the new chain. A key `stableKey` can't build
+      // counts as different.
+      const later = history[index + 1]
+      if (later && (after == null || !sameParams(later.params, after))) history.length = index + 1
+      if (after != null && index + 1 === history.length) history.push({ params: after, seen: false })
       const entry: Entry<P, R> = { result, params: sent, count: null }
       if (cache) at.entry = entry
       showStep(index, entry)

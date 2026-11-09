@@ -333,6 +333,72 @@ describe('createPager: cursor pages', () => {
     expect(f.calls).toHaveLength(2)
   })
 
+  it('a refetched page naming a different next cursor drops the later pages; Next follows the new cursor', async () => {
+    const f = fake()
+    const pager = createPager(f.endpoint, base, cursors)
+    const a = pager.load(); f.release(0); await a
+    const b = pager.next(); f.release(1); await b
+    const c = pager.next(); f.release(2); await c
+    await pager.goTo(1)
+    // Page 1 refreshed: the list changed, and it now names 'c9' as its next page.
+    const d = pager.refresh()
+    f.calls[3]!.resolve(successResult<D>({ items: [1], next: 'c9', prev: null }))
+    await d
+    expect(pager.state).toMatchObject({ page: 1, hasNext: true })
+    // Page 3 was remembered as visited, and is gone with the old chain.
+    expect(await pager.goTo(3)).toBeNull()
+    const e = pager.next()
+    expect(f.calls[4]?.params).toEqual({ limit: 10, cursor: 'c9' })
+    f.release(4); await e
+    expect(shown(pager.state)).toBe(9)
+  })
+
+  it('a refetched page naming the same next cursor keeps the later pages; Next serves the remembered page', async () => {
+    for (const cache of [true, false]) {
+      const f = fake()
+      const pager = createPager(f.endpoint, base, { ...cursors, cache })
+      const a = pager.load(); f.release(0); await a
+      const b = pager.next(); f.release(1); const r2 = await b
+      const c = pager.next(); f.release(2); await c
+      const d = pager.prev(); if (!cache) f.release(3); await d
+      const e = pager.prev(); if (!cache) f.release(4); await e
+      const sentSoFar = f.calls.length
+      const g = pager.refresh(); f.release(sentSoFar); await g // page 1 again: still names 'c2'
+      expect(pager.state.page).toBe(1)
+      const h = pager.next()
+      if (cache) {
+        expect(f.calls).toHaveLength(sentSoFar + 1)
+        expect(await h).toBe(r2)
+      } else {
+        expect(f.calls[sentSoFar + 1]?.params).toEqual({ limit: 10, cursor: 'c2' })
+        f.release(sentSoFar + 1); await h
+      }
+      // Page 3 is still a visited page: goTo reaches it (asking again only without a cache).
+      const before = f.calls.length
+      const to3 = pager.goTo(3)
+      expect(f.calls).toHaveLength(cache ? before : before + 1)
+      if (!cache) f.release(before)
+      expect((await to3)?.data?.items).toEqual([3])
+    }
+  })
+
+  it('next params stableKey cannot key count as different: the later pages are dropped', async () => {
+    const f = fake()
+    // A BigInt makes the params unkeyable, even with the same cursor.
+    const pager = createPager(f.endpoint, base, {
+      next: (r, p) => (r.data.next ? ({ ...p, cursor: r.data.next, v: BigInt(1) } as P) : null),
+    })
+    const a = pager.load(); f.release(0); await a
+    const b = pager.next(); f.release(1); await b
+    await pager.prev()
+    const c = pager.refresh(); f.release(2); await c
+    const d = pager.next()
+    expect(f.calls).toHaveLength(4)
+    expect(f.calls[3]?.params).toMatchObject({ limit: 10, cursor: 'c2' })
+    f.release(3); await d
+    expect(pager.state.page).toBe(2)
+  })
+
   it('refresh() refetches the shown step past the cache', async () => {
     const f = fake()
     const pager = createPager(f.endpoint, base, cursors)
