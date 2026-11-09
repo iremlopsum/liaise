@@ -115,15 +115,17 @@ export interface Pager<P, R, T = never> {
   subscribe(listener: () => void): () => void
   /** Opens the pager. Creating one sends nothing. */
   load(): Promise<Result<R> | null>
-  /** Cursor pages: only a page already shown, and only when numbers are known (not after `from`). */
+  /** Cursor pages: only a page already shown, and only when numbers are known (not after `from`). List mode: `null`. */
   goTo(page: number): Promise<Result<R> | null>
   /**
    * The page after the one shown, or after the one loading, so two quick clicks move two pages.
    * Cursor pages: after the one loading only once it has named its next page.
+   * List mode: appends the next page; while a list move is loading, returns that same promise.
    */
   next(): Promise<Result<R> | null>
+  /** List mode: `null`. */
   prev(): Promise<Result<R> | null>
-  /** Fetches the current page again, past the cache, and replaces its entry. */
+  /** Fetches the current page again, past the cache, and replaces its entry. List mode: pages 1..`loaded`, replacing `items`. */
   refresh(): Promise<Result<R> | null>
   /** New base params (a filter change): forgets the cache (and cursor history) and opens page 1, never `from`. */
   setParams(params: P): Promise<Result<R> | null>
@@ -144,6 +146,19 @@ interface Step<P, R> {
   entry?: Entry<P, R>
   /** The previous page's params, read by `prev` when this step opened at `from` and is the earliest. */
   before?: P | null | undefined
+}
+
+/** List mode: one page of the list, and what was read from it. */
+interface ListPage<P, R, T> {
+  /** 1-based: lists always start at the first page. */
+  page: number
+  params: P
+  result: SuccessResult<R>
+  items: readonly T[]
+  /** Numbered: the page count it reported. */
+  count: number | null
+  /** Cursor: the params of the page after it (nullish at the end). */
+  after: P | null | undefined
 }
 
 /** A page this pager has shown: what it showed, and what it read from it. */
@@ -178,7 +193,7 @@ export function createPager<P extends object, R, T = never>(
 ): Pager<P, R, T> {
   const {
     toParams, pageCount: readCount, start = 1, cache = true, signal: stop,
-    next: readNext, prev: readPrev, from: opening, items: _items, restore: _restore,
+    next: readNext, prev: readPrev, from: opening, items: readItems, restore,
     ...callOptions
   } = (options ?? {}) as AnyOptions<P, R, T>
 
@@ -187,9 +202,11 @@ export function createPager<P extends object, R, T = never>(
   const problem: string | undefined =
     stop !== undefined && typeof (stop as { addEventListener?: unknown } | null)?.addEventListener !== 'function'
       ? 'createPager: signal must be an AbortSignal'
-      : typeof toParams === 'function' || typeof readNext === 'function'
-      ? (_items !== undefined ? 'createPager: list mode (items) is not supported yet' : undefined)
-      : 'createPager needs toParams (numbered pages) or next (cursor pages)'
+      : typeof toParams !== 'function' && typeof readNext !== 'function'
+      ? 'createPager needs toParams (numbered pages) or next (cursor pages)'
+      : readItems !== undefined && typeof readItems !== 'function'
+      ? 'createPager: items must be a function'
+      : undefined
   // `toParams` wins when both are given.
   const cursor = typeof toParams !== 'function' && typeof readNext === 'function'
 
@@ -512,6 +529,154 @@ export function createPager<P extends object, R, T = never>(
     }
   }
 
+  // List mode (infinite scroll). Every page from the first is in `items`, so a
+  // list always starts at page 1 (`start` and `from` don't apply), and a page
+  // number is always known. The pages `state.items` holds, in order:
+  let pages: ListPage<P, R, T>[] = []
+  // The list move in flight; a next() during it returns this same promise.
+  let pending: Promise<Result<R> | null> | undefined
+  const restoreCount =
+    typeof restore === 'number' && Number.isFinite(restore) && restore >= 1 ? Math.floor(restore) : 1
+
+  /** Whether the list goes on after `last`: an empty page, the page count or no next cursor ends it. */
+  const goesOn = (last: ListPage<P, R, T>): boolean =>
+    last.items.length > 0 && (cursor ? last.after != null : last.count === null || last.page < last.count)
+
+  /** Shows `list` as the list's pages; `patch` adds to (or overrides) what is read from them. */
+  function publish(list: ListPage<P, R, T>[], patch: Partial<Writable<PagerState<P, R, T>>>): void {
+    pages = list
+    const last = list[list.length - 1]
+    set({
+      // A new frozen array per change, never one a callback returned.
+      items: last ? Object.freeze(list.flatMap(p => p.items)) : NONE, loaded: list.length,
+      page: last ? last.page : null, params: last ? last.params : null, data: last ? last.result.data : null,
+      pageCount: last ? last.count : null, hasNext: last ? goesOn(last) : false, hasPrev: false,
+      ...patch,
+    })
+  }
+
+  /**
+   * One list move: fetches pages after `list`, one at a time, until it holds
+   * `upTo` pages or the list ends. Restore, refresh and next() are all this
+   * loop. `progressive` shows each page as it lands (restore, next); otherwise
+   * (refresh) the shown items stay until the move ends. A failure stops it:
+   * the pages that landed are shown, the error is set and `hasNext` stays true,
+   * so next() asks for the failed page again.
+   */
+  async function fill(
+    list: ListPage<P, R, T>[], upTo: number, mine: number, move: AbortController, progressive: boolean,
+  ): Promise<Result<R> | null> {
+    const end = (result: Result<R>): Result<R> => {
+      controller = undefined
+      publish(list, { loading: false, target: null, error: result.error, hasNext: true })
+      return result
+    }
+    for (;;) {
+      const page = list.length + 1
+      const last = list[list.length - 1]
+      let sent: P
+      try {
+        sent = cursor
+          ? (last ? last.after as P : base)
+          : (toParams as NumberedPagerOptions<P, R>['toParams'])(page, base)
+      } catch (error) {
+        if (mine !== token) return own('abort', move.signal.reason, base)
+        return end(own('middleware', error, base))
+      }
+      // A listener (or a callback) started a newer move: this one sends nothing more.
+      if (mine !== token) return own('abort', move.signal.reason, sent)
+      // Stopped between pages (Review Focus 5): nothing more is asked for, and
+      // the pages that landed stay.
+      if (stop?.aborted) {
+        controller = undefined
+        set({ loading: false, target: null })
+        return own('abort', stop.reason, sent)
+      }
+      set({ loading: true, target: page })
+      if (mine !== token) return own('abort', move.signal.reason, sent)
+      const signal = anySignal([move.signal, stop])
+      const result = await call(sent, signal)
+      releaseSignal(signal)
+      // Superseded: not one item of it lands, even from an endpoint that ignored its signal.
+      if (mine !== token) return aborted(result, move.signal.reason, sent)
+      if (stop?.aborted) {
+        controller = undefined
+        set({ loading: false, target: null })
+        return aborted(result, stop.reason, sent)
+      }
+      if (result.error) return end(result)
+      let landed: ListPage<P, R, T>
+      try {
+        const found = (readItems as ListOptions<R, T>['items'])(result)
+        if (!Array.isArray(found)) throw new TypeError(`items returned ${String(found)}, not an array`)
+        landed = {
+          page, params: sent, result, items: found,
+          count: !cursor && readCount ? countOf(readCount(result)) : null,
+          after: cursor ? (readNext as CursorPagerOptions<P, R>['next'])(result, sent) : undefined,
+        }
+      } catch (error) {
+        if (mine !== token) return own('abort', move.signal.reason, sent)
+        return end(own('middleware', error, sent))
+      }
+      if (mine !== token) return own('abort', move.signal.reason, sent)
+      // A new array: `list` may be the one `pages` holds.
+      list = [...list, landed]
+      if (list.length >= upTo || !goesOn(landed)) {
+        controller = undefined
+        publish(list, { loading: false, target: null, error: null })
+        return result
+      }
+      if (progressive) publish(list, { error: null, loading: true, target: page + 1 })
+    }
+  }
+
+  /**
+   * Starts a list move from `list` up to `upTo` pages. `clear` empties the list
+   * first (load, setParams). The promise is `pending` before anything notifies,
+   * so a listener's next() during the move gets this same promise.
+   */
+  function listMove(list: ListPage<P, R, T>[], upTo: number, progressive: boolean, clear: boolean): Promise<Result<R> | null> {
+    const mine = supersede()
+    const move = new AbortController()
+    controller = move
+    let done!: (result: Result<R> | null) => void
+    const promise = new Promise<Result<R> | null>(resolve => { done = resolve })
+    pending = promise
+    if (clear) publish([], { loading: true, target: 1 })
+    fill(list, upTo, mine, move, progressive).then(done, error => done(own('middleware', error, base)))
+    return promise
+  }
+
+  /** A list move, through the checks every move shares; `start` returns null for nowhere. */
+  function listGuard(start: () => Promise<Result<R> | null> | null): Promise<Result<R> | null> {
+    const early = refused()
+    if (early) return Promise.resolve(early)
+    return start() ?? Promise.resolve(null)
+  }
+
+  const listPager: Pager<P, R, T> = {
+    get state() {
+      return state
+    },
+    subscribe: listener => subscribe(listener),
+    // Pages 1..restore, from the start (for cursors, walking `next`): the list
+    // the reader had before a reload, with `restore` set to the `loaded` they had.
+    load: () => listGuard(() => listMove([], restoreCount, true, true)),
+    goTo: () => listGuard(() => null),
+    next: () => listGuard(() => {
+      if (state.loading && pending) return pending
+      return state.hasNext ? listMove(pages, pages.length + 1, true, false) : null
+    }),
+    prev: () => listGuard(() => null),
+    // Pages 1..loaded again; the items they hold replace the shown ones when done.
+    refresh: () => listGuard(() => (pages.length === 0 ? null : listMove([], pages.length, false, false))),
+    setParams: next => listGuard(() => {
+      base = next
+      return listMove([], 1, true, true)
+    }),
+  }
+
+  if (readItems !== undefined && problem === undefined) return listPager
   if (cursor) return cursorPager
   return {
     get state() {
