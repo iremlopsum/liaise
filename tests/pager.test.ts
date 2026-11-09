@@ -5,6 +5,7 @@ import { ApiError, createNetworkErrorResult } from '../src/result.js'
 import { errorResult, jsonResponse, mockFetch, successResult } from '../src/testing.js'
 import { createApi } from '../src/create-api.js'
 import { Request } from '../src/request.js'
+import { paginate } from '../src/paginate.js'
 import type { CallOptions, Result } from '../src/types.js'
 
 type P = { offset: number; limit: number; q?: string }
@@ -519,5 +520,39 @@ describe('createPager: moves with nowhere to go before load()', () => {
     const loads = [0, -1, 1.5, Number.NaN].map(start => createPager(f.endpoint, base, { ...numbered, start }).load())
     expect(f.calls).toHaveLength(0)
     expect(await Promise.all(loads)).toEqual([null, null, null, null])
+  })
+})
+
+// The guide's "This isn't dedupe": the pager aborts only what it started.
+describe('createPager over a plain endpoint (no dedupe, no share)', () => {
+  it("a pager superseding its own move cancels none of the endpoint's other calls in flight", async () => {
+    const mock = mockFetch({
+      'GET /items': () => new Promise<Response>(resolve => setTimeout(() => resolve(jsonResponse({ items: [1], totalCount: 230 })), 5)),
+    })
+    mock.install()
+    try {
+      const api = createApi({
+        baseUrl: 'https://api.example.com',
+        requests: { items: new Request<P, D>({ method: 'GET', path: '/items' }) },
+      })
+      // In flight on the same endpoint: a second pager's move, a paginate walk and a plain call.
+      const other = createPager(api.items, base, numbered)
+      const otherMove = other.load()
+      const walk = paginate(api.items, base, { next: () => undefined }).next()
+      const plain = api.items({ offset: 100, limit: 25 })
+
+      const pager = createPager(api.items, base, numbered)
+      const overtaken = pager.load()
+      const latest = pager.goTo(2) // supersedes this pager's own load()
+
+      expect((await overtaken)?.error?.kind).toBe('abort')
+      expect((await latest)?.error).toBeNull()
+      expect((await otherMove)?.error).toBeNull()
+      expect((await walk).value?.error).toBeNull()
+      expect((await plain).error).toBeNull()
+      expect(other.state.page).toBe(1)
+    } finally {
+      mock.restore()
+    }
   })
 })

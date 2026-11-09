@@ -27,7 +27,7 @@ Every other option is one of the [`CallOptions`](/reference/calloptions/), such 
 | Option | Type | Default | What it does |
 | ------ | ---- | ------- | ------------ |
 | `toParams` | `(page: number, params: P) => P` | required | Builds the params for `page`, counted from 1, from the base params: the ones passed to `createPager`, or to the latest `setParams`. |
-| `pageCount` | `(result: SuccessResult<R>) => number \| null \| undefined` | — | Reads how many pages there are from a result. Without it, or when it returns `null` or `undefined`, `state.pageCount` is `null` and `hasNext` stays `true`. |
+| `pageCount` | `(result: SuccessResult<R>) => number \| null \| undefined` | — | Reads how many pages there are from a result. Without it, or when it returns `null` or `undefined`, `state.pageCount` is `null`, and a numbered pager that isn't a list keeps `hasNext` `true`. A list still ends at a page with no items. |
 | `start` | `number` | `1` | The page `load()` opens, such as a page number from the address. |
 
 ## Cursor pages
@@ -62,7 +62,7 @@ A list always starts at page 1, so it ignores `start`, `from` and `cache`. Every
 | `data` | `R \| null` | `null` | The shown page. It stays the previous page while the next one loads, and when a move fails. |
 | `error` | `ApiError \| null` | `null` | The last move's error. The next success clears it. A move that was overtaken, or stopped by your `signal`, never sets it. |
 | `pageCount` | `number \| null` | `null` | What `pageCount` read from the shown page. Always `null` in a cursor pager. |
-| `hasNext` | `boolean` | `false` | There is a page after the shown one. Numbered without a page count: always `true` once loaded. |
+| `hasNext` | `boolean` | `false` | There is a page after the shown one. A numbered pager that isn't a list, without a page count: always `true` once loaded. |
 | `hasPrev` | `boolean` | `false` | There is a page before the shown one. Always `false` in a list. |
 | `items` | `readonly T[]` | `[]` | List only: every page's items, in order. A new frozen array each time they change. `[]` in the other modes. |
 | `loaded` | `number` | `0` | List only: how many pages `items` holds. Save it for `restore`. `0` in the other modes. |
