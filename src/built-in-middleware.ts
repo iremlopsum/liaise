@@ -181,6 +181,10 @@ export function retryMiddleware(options: number | RetryOptions = 3): Middleware 
   const jitter = o.jitter ?? true
   const respectRetryAfter = o.respectRetryAfter ?? true
   const retryOn = o.retryOn ?? ((r: Result<unknown>) => (r.error?.status ?? 0) >= 500)
+  // A non-array `methods` (plain JS) counts as left out: every method, as
+  // before, rather than a throw from a factory.
+  const methods = Array.isArray(o.methods) ? o.methods.map(m => String(m).toUpperCase()) : null
+  const mutations = o.mutations === true
 
   // A user-supplied predicate must never be able to break the never-throws
   // contract. If it throws we cannot know whether to retry, so we stop —
@@ -221,6 +225,10 @@ export function retryMiddleware(options: number | RetryOptions = 3): Middleware 
   }
 
   return async (ctx, next) => {
+    // Calls it doesn't retry pass straight through: an unlisted method, then
+    // a GraphQL mutation (5.5.0). retryOn and onRetry are not asked.
+    if (methods && !methods.includes(String(ctx.request.method).toUpperCase())) return next()
+    if (!mutations && ctx.operationType === 'mutation') return next()
     // Make the initial request by calling next(). This traverses all
     // downstream middleware and eventually hits the core fetch function.
     let result = await next()

@@ -40,13 +40,23 @@ To retry 429s and network errors too, pass `retryOn`. This client retries a 503,
 
 ### Retry only what is safe to send twice
 
-`retryMiddleware` retries any method. A 5xx after a `POST` can mean the server did the work and failed afterwards, so a retry can create the same order twice. On a client that also writes, retry only the methods that are safe to repeat:
+On REST, `retryMiddleware` retries any method unless you pass `methods`. A 5xx after a `POST` can mean the server did the work and failed afterwards, so a retry can create the same order twice. On a client that also writes, list the methods that are safe to repeat:
 
 <Example name="retry-idempotent" />
 
-- `r.error.request.method` is the method the call was sent with.
+- `methods` is compared without regard to case. A call with any other method is sent once, and `retryOn` isn't asked about it.
 - `PUT` and `DELETE` are idempotent by HTTP's definition, but only if your API implements them that way. Check before you add them.
 - If a `POST` must be retried and your API supports idempotency keys, send one with each order, so the server can recognise the repeat.
+
+### GraphQL mutations are never retried
+
+On GraphQL every operation is a `POST`, so `methods` can't tell a read from a write. `retryMiddleware` reads the operation type instead: it retries queries, and sends a mutation once, without asking `retryOn`. A mutation that is safe to repeat opts in with `mutations: true` on its own retry:
+
+<Example name="retry-graphql" />
+
+- The client's retry lets `parseUpload` through once, and the operation's retry retries it, so it makes at most 3 attempts in all, not 9.
+- `mutations: true` on the client's retry would retry every mutation, as `retryMiddleware` did before 5.5.0.
+- How liaise tells a query from a mutation is under [Query or mutation](/reference/middlewarecontext/#query-or-mutation).
 
 Pass an object to tune the waits between attempts:
 

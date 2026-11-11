@@ -56,6 +56,8 @@ graphql.mutation.updateCategory({ id: '123', name: 'New Name' })
 
 A query and a mutation may have the same name. Each runs its own operation, and `dedupe` and `share` treat them as separate endpoints, so a query never cancels or joins the mutation of the same name.
 
+liaise knows which operations are mutations, and uses it to keep writes safe: `retryMiddleware` doesn't retry a mutation unless you say so ([GraphQL mutations are never retried](/guide/retries-caching-and-logging/#graphql-mutations-are-never-retried)), and a middleware can read the type as `ctx.operationType`. A flat client (`operations`) reads it from each document instead ([Query or mutation](/reference/middlewarecontext/#query-or-mutation)).
+
 ## Caching queries
 
 GraphQL sends every operation as a `POST`, and `cacheMiddleware` caches only `GET` and `HEAD` unless you tell it otherwise. To cache a query, give its operation a cache that includes `POST`:

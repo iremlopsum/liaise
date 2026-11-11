@@ -869,6 +869,25 @@ export interface RetryOptions {
    * promise stays pending through every attempt and resolves exactly once.
    */
   onRetry?: (info: RetryInfo) => void
+  /**
+   * Retry GraphQL mutations too. Default `false`: a call whose
+   * `ctx.operationType` is `'mutation'` is sent once, and `retryOn` and
+   * `onRetry` are not asked, because a mutation the server finished before
+   * failing would be written twice. Set it on a retry for operations that are
+   * safe to repeat. REST calls have no operation type, so this never affects
+   * them.
+   */
+  mutations?: boolean
+  /**
+   * The methods it retries, compared without regard to case, such as
+   * `['GET', 'HEAD', 'PUT', 'DELETE']`. A call with any other method is sent
+   * once and `retryOn` is not asked. Left out, every method is retried, as
+   * before. GraphQL sends every operation as a POST, so `['GET']` turns
+   * retries off on a GraphQL client.
+   *
+   * The checks run in this order: `methods`, then `mutations`, then `retryOn`.
+   */
+  methods?: readonly string[]
 }
 
 // ---------------------------------------------------------------------------

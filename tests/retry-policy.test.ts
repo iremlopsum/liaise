@@ -360,3 +360,47 @@ describe('retryMiddleware defaults (the README option table)', () => {
     expect(seen).toEqual([30_000])
   })
 })
+
+describe('retryMiddleware methods', () => {
+  afterEach(() => { vi.restoreAllMocks() })
+  const fast = { max: 2, baseDelay: 1, jitter: false } as const
+  const twoMethods = (mw: ReturnType<typeof retryMiddleware>) => createApi({
+    baseUrl: '', middleware: [mw],
+    requests: {
+      g: new Request<Record<string, never>, unknown>({ method: 'GET', path: '/g' }),
+      p: new Request<Record<string, never>, unknown>({ method: 'POST', path: '/p' }),
+    },
+  })
+
+  it('never retries a method it does not list, and does not ask retryOn about it', async () => {
+    vi.stubGlobal('fetch', always(503))
+    const retryOn = vi.fn(() => true)
+    await twoMethods(retryMiddleware({ ...fast, methods: ['GET'], retryOn })).p()
+    expect((globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls.length).toBe(1)
+    expect(retryOn).not.toHaveBeenCalled()
+  })
+
+  it('retries a listed method', async () => {
+    vi.stubGlobal('fetch', always(503))
+    await twoMethods(retryMiddleware({ ...fast, methods: ['GET'] })).g()
+    expect((globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls.length).toBe(3)
+  })
+
+  it('compares methods without regard to case', async () => {
+    vi.stubGlobal('fetch', always(503))
+    await twoMethods(retryMiddleware({ ...fast, methods: ['get'] })).g()
+    expect((globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls.length).toBe(3)
+  })
+
+  it('retries every method when methods is left out, as before', async () => {
+    vi.stubGlobal('fetch', always(503))
+    await twoMethods(retryMiddleware(fast)).p()
+    expect((globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls.length).toBe(3)
+  })
+
+  it('treats a methods value that is not an array (plain JS) as left out', async () => {
+    vi.stubGlobal('fetch', always(503))
+    await twoMethods(retryMiddleware({ ...fast, methods: 'GET' as unknown as string[] })).p()
+    expect((globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls.length).toBe(3)
+  })
+})
