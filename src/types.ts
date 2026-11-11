@@ -635,6 +635,22 @@ export interface MiddlewareContext {
 
   /** The key name of the request in the api object (e.g., 'getUser'). */
   requestName: string
+
+  /**
+   * Whether this GraphQL call is a query or a mutation. Never set on a REST
+   * call.
+   *
+   * A split client's record decides (`gql.query.x` is a query and
+   * `gql.mutation.x` a mutation, whatever the document says). A flat client's
+   * comes from the document's first operation keyword, read once when the
+   * client is built; a document liaise can't read (a `subscription`, text that
+   * isn't GraphQL) counts as a mutation, the safe side: `retryMiddleware` and
+   * `cacheMiddleware` skip mutations unless told otherwise.
+   *
+   * It describes the call. Changing it changes nothing liaise has already
+   * decided, such as the call's default timeout.
+   */
+  readonly operationType?: OperationType
 }
 
 /**
@@ -858,6 +874,9 @@ export interface RetryOptions {
 // ---------------------------------------------------------------------------
 // GraphQL Types
 // ---------------------------------------------------------------------------
+
+/** Whether a GraphQL operation is a query or a mutation. See `MiddlewareContext.operationType`. */
+export type OperationType = 'query' | 'mutation'
 
 /**
  * Configuration object for the `Operation` class constructor.

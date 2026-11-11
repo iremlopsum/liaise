@@ -22,10 +22,23 @@ A middleware is a `Middleware`: `(ctx, next) => Promise<Result<unknown>>`. [Writ
 | `request.body` | `unknown` | The serialized body: a JSON string for an object or array of params, or the body as you passed it, such as a `FormData`. `null` when there is none. |
 | `request.signal` | `AbortSignal \| undefined` | The caller's `signal` combined with the call's deadline, or `undefined` when there is neither. `fetch` receives it, merged with the dedupe signal under `dedupe`. Under `share` it is the signal this caller waits on, because the shared request has its own. A middleware can replace it ([Signals in middleware](/guide/writing-middleware/#signals-in-middleware)). |
 | `requestName` | `string` | The endpoint's key, such as `'getUser'`. |
+| `operationType` | `'query' \| 'mutation' \| undefined` | On a GraphQL call, whether it is a query or a mutation ([Query or mutation](#query-or-mutation)). Never set on a REST call. |
 
 liaise reads `method`, `url`, `headers`, `body`, `signal` and `fetchOptions` from `ctx.request` when it calls `fetch`, so a middleware that changes one of them changes what is sent. How a replaced signal works with `share` and `dedupe` is under [Signal-replacing middleware](/reference/behaviour-in-detail/#signal-replacing-middleware).
 
 On a GraphQL client, `request.method` is always `'POST'`, and changing it changes nothing. `request.url` and `request.path` are both the endpoint, `request.params` holds the variables, `request.body` is the JSON string of `{ query, variables }`, and `requestName` is the operation's key, such as `'getCategory'`.
+
+## Query or mutation
+
+On a GraphQL client, `ctx.operationType` says whether the call is a query or a mutation, so a middleware can treat writes differently from reads. `retryMiddleware` and `cacheMiddleware` use it to leave mutations alone.
+
+- **A split client** (`queries` and `mutations`) decides by the record: `graphql.query.team` is a query and `graphql.mutation.updateTeam` a mutation, whatever their documents say.
+- **A flat client** (`operations`) decides by each document's first operation keyword, read once when the client is built. An anonymous `{ … }` is a query. A document liaise can't read, such as a `subscription`, counts as a mutation: the safe side, since a mutation is never retried or cached by default.
+- **It describes the call.** Changing it in a middleware changes nothing liaise has already decided.
+
+This middleware reports each failed call by its key and type, and leaves the variables out, because they can hold personal data:
+
+<Example name="operation-type-context" />
 
 ## next
 

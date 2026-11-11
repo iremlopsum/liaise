@@ -2,6 +2,7 @@ import { describe, it, expect, afterEach, vi } from 'vitest'
 import { Operation, gql, createGraphQL } from '../src/graphql.js'
 import type { Middleware } from '../src/types.js'
 import { ABANDONED, wasJoined } from '../src/utils/share.js'
+import { withHeaders } from '../src/with-headers.js'
 
 afterEach(() => {
   vi.restoreAllMocks()
@@ -1650,5 +1651,78 @@ describe('share (5.1.0) — a replaced signal does not hold the shared operation
     expect(f.calls[0].reason()).toBe(ABANDONED)
     await flushShare()
     expect(onError).not.toHaveBeenCalled()
+  })
+})
+
+describe('createGraphQL — operationType on the context', () => {
+  const QUERY = gql`query User($id: String!) { user(id: $id) { id } }`
+  const MUTATION = gql`mutation User($id: String!) { touchUser(id: $id) { id } }`
+  const ok = () => new Response(JSON.stringify({ data: { user: { id: '1' } } }), { status: 200, headers: { 'Content-Type': 'application/json' } })
+  const recorder = () => {
+    const seen: Array<string | undefined> = []
+    const record: Middleware = async (ctx, next) => { seen.push(ctx.operationType); return next() }
+    return { seen, record }
+  }
+
+  it('in a split client, the record decides, even for a same-named query and mutation', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockImplementation(() => Promise.resolve(ok())))
+    const { seen, record } = recorder()
+    const client = createGraphQL({
+      endpoint: 'https://api.example.com/graphql',
+      middleware: [record],
+      queries: { user: new Operation<{ id: string }, { id: string }>({ operation: QUERY }) },
+      mutations: { user: new Operation<{ id: string }, { id: string }>({ operation: MUTATION }) },
+    })
+    await client.query.user({ id: '1' })
+    await client.mutation.user({ id: '1' })
+    expect(seen).toEqual(['query', 'mutation'])
+  })
+
+  it('in a split client, the record wins over what the document says', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockImplementation(() => Promise.resolve(ok())))
+    const { seen, record } = recorder()
+    const client = createGraphQL({
+      endpoint: 'https://api.example.com/graphql',
+      middleware: [record],
+      queries: { odd: new Operation<{ id: string }, { id: string }>({ operation: MUTATION }) },
+      mutations: { odd: new Operation<{ id: string }, { id: string }>({ operation: QUERY }) },
+    })
+    await client.query.odd({ id: '1' })
+    await client.mutation.odd({ id: '1' })
+    expect(seen).toEqual(['query', 'mutation'])
+  })
+
+  it('in a flat client, the document decides', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockImplementation(() => Promise.resolve(ok())))
+    const { seen, record } = recorder()
+    const client = createGraphQL({
+      endpoint: 'https://api.example.com/graphql',
+      middleware: [record],
+      operations: {
+        getUser: new Operation<{ id: string }, { id: string }>({ operation: QUERY }),
+        touchUser: new Operation<{ id: string }, { id: string }>({ operation: MUTATION }),
+        tick: new Operation<Record<string, never>, { id: string }>({ operation: 'subscription { tick }' }),
+      },
+    })
+    await client.getUser({ id: '1' })
+    await client.touchUser({ id: '1' })
+    await client.tick()
+    expect(seen).toEqual(['query', 'mutation', 'mutation'])
+  })
+
+  it('a withHeaders copy keeps each side', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockImplementation(() => Promise.resolve(ok())))
+    const { seen, record } = recorder()
+    const client = createGraphQL({
+      endpoint: 'https://api.example.com/graphql',
+      middleware: [record],
+      queries: { user: new Operation<{ id: string }, { id: string }>({ operation: QUERY }) },
+      mutations: { user: new Operation<{ id: string }, { id: string }>({ operation: MUTATION }) },
+    })
+    const copy = withHeaders(client, { 'x-a': '1' })
+    await copy.mutation.user({ id: '1' })
+    await copy.query.user({ id: '1' })
+    await withHeaders(client.mutation, { 'x-b': '1' }).user({ id: '1' })
+    expect(seen).toEqual(['mutation', 'query', 'mutation'])
   })
 })
