@@ -1030,6 +1030,14 @@ export interface GraphQLError {
 /**
  * Base configuration shared by both `createGraphQL` overloads.
  */
+/** `createGraphQL`'s `timeout` per operation type, in milliseconds. A side left out has no default. */
+export interface GraphQLTimeouts {
+  /** The default deadline for every query. */
+  queries?: number
+  /** The default deadline for every mutation. */
+  mutations?: number
+}
+
 export interface GraphQLBaseConfig {
   /** The full URL of the GraphQL endpoint, e.g. `'https://api.example.com/graphql'`. */
   endpoint: string
@@ -1044,8 +1052,15 @@ export interface GraphQLBaseConfig {
    * Like every liaise timeout it covers the whole operation, retries included.
    * Under `share`, it is also the shared request's deadline when the
    * operation sets none, measured from when that request is sent.
+   *
+   * An object sets a default per operation type instead (5.5.0):
+   * `{ queries: 45_000 }` gives every query a 45 s deadline and mutations
+   * none, since a mutation abandoned while the server may still commit it
+   * invites a double write on "try again". A side left out has no default.
+   * A flat client takes each operation's type from its document
+   * (`MiddlewareContext.operationType`).
    */
-  timeout?: number
+  timeout?: number | GraphQLTimeouts
 
   /**
    * Log every call to the console: `true`, or `{ enabled, data }`. Off by

@@ -138,6 +138,11 @@ export function createGraphQL(config: any): any {
   // dedupe lane a withHeaders copy adds after `lane`. The share key keeps `lane`
   // alone — sharing compares what is sent, and a copy's headers are in it.
   function buildMethod(name: string, operation: Operation<any, any>, copy: CopyState, lane: string, type: OperationType) {
+    // The client's default deadline for this operation's side: a number is
+    // every call's, an object is per type (5.5.0), and a side left out has none.
+    const sideTimeout: number | undefined = clientTimeout !== null && typeof clientTimeout === 'object'
+      ? clientTimeout[type === 'query' ? 'queries' : 'mutations']
+      : clientTimeout
     const method = (variables: object = {}, options: CallOptions = {}): Promise<Result<unknown>> => {
       const execute = (): Promise<Result<unknown>> => {
         /**
@@ -222,7 +227,7 @@ export function createGraphQL(config: any): any {
           const { signal: callerSignal, endpointDeadline } = callBudget(
             options.timeout,
             operation.config.timeout,
-            clientTimeout,
+            sideTimeout,
             options.signal
           )
           own(callerSignal, options.signal)
@@ -327,7 +332,7 @@ export function createGraphQL(config: any): any {
                   // bounds only its own caller, through waitSignal. Called
                   // synchronously, inside this try, so whatever it throws for
                   // a non-number becomes this caller's Result.
-                  () => timeoutSignalFor(undefined, operation.config.timeout, clientTimeout),
+                  () => timeoutSignalFor(undefined, operation.config.timeout, sideTimeout),
                   // When it aborts, run() rejects with its reason, classified
                   // in the catch as this caller's own abort or timeout.
                   waitSignal,

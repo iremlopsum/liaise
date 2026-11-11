@@ -83,4 +83,4 @@ export type {
 
 /** Factory and primitives for building a typed GraphQL client. */
 export { createGraphQL, Operation, gql } from './graphql.js'
-export type { GraphQLError, OperationConfig, GraphQLBaseConfig, OperationType } from './types.js'
+export type { GraphQLError, OperationConfig, GraphQLBaseConfig, GraphQLTimeouts, OperationType } from './types.js'
