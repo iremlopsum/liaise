@@ -33,8 +33,10 @@ const entries = {
 // middleware 13011 → 15366 B (13500 → 16300). core + pager is new, at 10089 B.
 // 5.5.0 (piece 1, query or mutation): error.request.name on both clients, poll's recorder
 // keeping the name and operation type, and the flat client's document reader in the core
-// entry (measured: REST only 7153 → 7208 B, core + polling 9650 → 9743 B, core entry
-// 14007 → 14426 B, core + middleware 15366 → 15781 B). Raised: core + polling 9740 → 10250.
+// entry, retry and cache skipping mutations, and the per-type GraphQL timeout (measured:
+// REST only 7153 → 7208 B, core + polling 9650 → 9743 B, core + pager 10089 → 10141 B,
+// core entry 14007 → 14574 B, core + middleware 15366 → 16002 B). Raised: core + polling
+// 9740 → 10250.
 const budgets = { 'REST only': 7700, 'core + polling': 10250, 'core + pager': 10700, 'core entry': 14900, 'core + middleware': 16300 }
 
 let failed = false

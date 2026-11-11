@@ -2,7 +2,7 @@
 // type. A side left out has no default; the per-call and per-operation levels still win.
 import { describe, it, expect, vi, afterEach } from 'vitest'
 import { createGraphQL, Operation, gql } from '../src/graphql.js'
-import type { GraphQLTimeouts } from '../src/types.js'
+import type { GraphQLTimeouts, Middleware } from '../src/types.js'
 
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals() })
 
@@ -84,6 +84,21 @@ describe('createGraphQL timeout per operation type', () => {
     const r = await Promise.all([settles(gql.query.user({}, { timeout: 0 })), settles(gql.query.user({}, { timeout: 0 }))])
     expect(fetch).toHaveBeenCalledTimes(1)
     expect(r).toEqual(['timeout', 'timeout'])
+  })
+
+  it('a middleware that changes ctx.operationType does not change the deadline already chosen', async () => {
+    hangs()
+    const relabel: Middleware = (ctx, next) => { (ctx as { operationType?: string }).operationType = 'mutation'; return next() }
+    const seen: Array<string | undefined> = []
+    const after: Middleware = (ctx, next) => { seen.push(ctx.operationType); return next() }
+    const gql = createGraphQL({
+      endpoint: 'https://x.test/graphql',
+      timeout: { queries: 20 },
+      middleware: [relabel, after],
+      queries: { user: new Operation<Record<string, never>, unknown>({ operation: QUERY }) },
+    })
+    expect(await settles(gql.query.user())).toBe('timeout')
+    expect(seen).toEqual(['mutation']) // the change was made, and later middleware sees it
   })
 
   it("a flat client uses each document's type", async () => {
