@@ -333,6 +333,7 @@ function syntheticResult(
   method: string,
   url: string,
   params: unknown,
+  name: string,
   retry: () => Promise<Result<unknown>>
 ): ErrorResult<unknown> {
   const isOurCancellation =
@@ -345,7 +346,7 @@ function syntheticResult(
     statusText: '',
     body: reason,
     headers: new Headers(),
-    request: { method, url, params }
+    request: { method, url, params, name }
   })
   return createNetworkErrorResult(error, retry)
 }
@@ -541,6 +542,7 @@ export function createApi<TRequests extends Record<string, Request<any, any>>>(
             request.config.method,
             url ?? urlForError(baseUrl, request, params),
             params,
+            name,
             retry
           )
         }
@@ -898,7 +900,7 @@ export function createApi<TRequests extends Record<string, Request<any, any>>>(
                     statusText: response.statusText,
                     body,
                     headers: response.headers,
-                    request: { method: ctx.request.method, url: ctx.request.url, params }
+                    request: { method: ctx.request.method, url: ctx.request.url, params, name }
                   })
 
                   // retry points to execute() — re-enters the full pipeline
@@ -939,7 +941,7 @@ export function createApi<TRequests extends Record<string, Request<any, any>>>(
                     statusText: response.statusText,
                     body: parseErr,
                     headers: response.headers,
-                    request: { method: ctx.request.method, url: ctx.request.url, params }
+                    request: { method: ctx.request.method, url: ctx.request.url, params, name }
                   })
                   return createErrorResult(error, response, retry)
                 }
@@ -969,7 +971,7 @@ export function createApi<TRequests extends Record<string, Request<any, any>>>(
                     statusText: response.statusText,
                     body: '',
                     headers: response.headers,
-                    request: { method: ctx.request.method, url: ctx.request.url, params }
+                    request: { method: ctx.request.method, url: ctx.request.url, params, name }
                   })
                   return createErrorResult(error, response, retry)
                 }
@@ -1000,7 +1002,7 @@ export function createApi<TRequests extends Record<string, Request<any, any>>>(
                       statusText: response.statusText,
                       body: validatorErr,
                       headers: response.headers,
-                      request: { method: ctx.request.method, url: ctx.request.url, params }
+                      request: { method: ctx.request.method, url: ctx.request.url, params, name }
                     })
                     return createErrorResult(error, response, retry)
                   }
@@ -1012,7 +1014,7 @@ export function createApi<TRequests extends Record<string, Request<any, any>>>(
                       statusText: response.statusText,
                       body: outcome.issues,
                       headers: response.headers,
-                      request: { method: ctx.request.method, url: ctx.request.url, params }
+                      request: { method: ctx.request.method, url: ctx.request.url, params, name }
                     })
                     return createErrorResult(error, response, retry)
                   }
@@ -1081,7 +1083,7 @@ export function createApi<TRequests extends Record<string, Request<any, any>>>(
                   statusText: '',
                   body: aborted ? err.cause : err,
                   headers: new Headers(),
-                  request: { method: ctx.request.method, url: ctx.request.url, params }
+                  request: { method: ctx.request.method, url: ctx.request.url, params, name }
                 })
 
                 return createNetworkErrorResult(error, retry)

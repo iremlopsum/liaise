@@ -31,7 +31,11 @@ const entries = {
 // (REST only 7153 B and core + polling 9650 B are unchanged), and costs 10089 - 7153 = 2936 B
 // over a REST client. Raised: core entry 11677 → 14007 B (budget 12100 → 14900), core +
 // middleware 13011 → 15366 B (13500 → 16300). core + pager is new, at 10089 B.
-const budgets = { 'REST only': 7700, 'core + polling': 9740, 'core + pager': 10700, 'core entry': 14900, 'core + middleware': 16300 }
+// 5.5.0 (piece 1, query or mutation): error.request.name on both clients, poll's recorder
+// keeping the name and operation type, and the flat client's document reader in the core
+// entry (measured: REST only 7153 → 7208 B, core + polling 9650 → 9743 B, core entry
+// 14007 → 14426 B, core + middleware 15366 → 15781 B). Raised: core + polling 9740 → 10250.
+const budgets = { 'REST only': 7700, 'core + polling': 10250, 'core + pager': 10700, 'core entry': 14900, 'core + middleware': 16300 }
 
 let failed = false
 for (const [name, contents] of Object.entries(entries)) {

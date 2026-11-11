@@ -173,7 +173,7 @@ export function createGraphQL(config: any): any {
             statusText: '',
             body: reason,
             headers: new Headers(),
-            request: { method: 'POST', url: endpoint, params: variables },
+            request: { method: 'POST', url: endpoint, params: variables, name, operationType: type },
           })
           return createNetworkErrorResult(error, execute)
         }
@@ -380,7 +380,7 @@ export function createGraphQL(config: any): any {
                   statusText: response.statusText,
                   body,
                   headers: response.headers,
-                  request: { method: 'POST', url: ctx.request.url, params: variables },
+                  request: { method: 'POST', url: ctx.request.url, params: variables, name, operationType: type },
                 })
                 return createErrorResult(error, response, execute)
               }
@@ -413,7 +413,7 @@ export function createGraphQL(config: any): any {
                   statusText: response.statusText,
                   body: parseErr,
                   headers: response.headers,
-                  request: { method: 'POST', url: ctx.request.url, params: variables },
+                  request: { method: 'POST', url: ctx.request.url, params: variables, name, operationType: type },
                 })
                 return createErrorResult(error, response, execute)
               }
@@ -428,7 +428,7 @@ export function createGraphQL(config: any): any {
                   statusText: 'GraphQL Error',
                   body: gqlBody.errors,
                   headers: response.headers,
-                  request: { method: 'POST', url: ctx.request.url, params: variables },
+                  request: { method: 'POST', url: ctx.request.url, params: variables, name, operationType: type },
                   partialData: gqlBody.data ?? undefined,
                 })
                 return createErrorResult(error, response, execute)
@@ -459,7 +459,7 @@ export function createGraphQL(config: any): any {
                   statusText: response.statusText,
                   body: text,
                   headers: response.headers,
-                  request: { method: 'POST', url: ctx.request.url, params: variables },
+                  request: { method: 'POST', url: ctx.request.url, params: variables, name, operationType: type },
                 })
                 return createErrorResult(error, response, execute)
               }
@@ -491,7 +491,7 @@ export function createGraphQL(config: any): any {
                     statusText: response.statusText,
                     body: validatorErr,
                     headers: response.headers,
-                    request: { method: 'POST', url: ctx.request.url, params: variables }
+                    request: { method: 'POST', url: ctx.request.url, params: variables, name, operationType: type }
                   })
                   return createErrorResult(error, response, execute)
                 }
@@ -503,7 +503,7 @@ export function createGraphQL(config: any): any {
                     statusText: response.statusText,
                     body: outcome.issues,
                     headers: response.headers,
-                    request: { method: 'POST', url: ctx.request.url, params: variables }
+                    request: { method: 'POST', url: ctx.request.url, params: variables, name, operationType: type }
                   })
                   return createErrorResult(error, response, execute)
                 }
@@ -552,7 +552,7 @@ export function createGraphQL(config: any): any {
                 statusText: '',
                 body: aborted ? err.cause : err,
                 headers: new Headers(),
-                request: { method: 'POST', url: ctx.request.url, params: variables },
+                request: { method: 'POST', url: ctx.request.url, params: variables, name, operationType: type },
               })
               return createNetworkErrorResult(error, execute)
             }
@@ -676,7 +676,7 @@ export function createGraphQL(config: any): any {
             statusText: '',
             body: err,
             headers: new Headers(),
-            request: { method: 'POST', url: endpoint, params: variables },
+            request: { method: 'POST', url: endpoint, params: variables, name, operationType: type },
           })
           fireOnError(error)
           return Promise.resolve(createNetworkErrorResult(error, execute))

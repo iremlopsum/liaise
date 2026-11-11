@@ -80,4 +80,14 @@ const api = createApi({
 
 [Report errors to Sentry](/recipes/report-errors-to-sentry/) uses `onError` to send unexpected failures to Sentry and skip the expected 4xx.
 
+### Which call failed
+
+On GraphQL every call goes to the same URL, so `error.request.url` doesn't say which operation failed. `error.request.name` does: it is the key you gave the endpoint or operation, such as `'createPayment'`. On GraphQL, `error.request.operationType` adds `'query'` or `'mutation'`, which tells you whether a write may have happened.
+
+Report those two and leave out `error.request.params`: it holds the variables as the caller passed them, which can be a card token or someone's email.
+
+<Example name="error-request-name" />
+
+`report` stands for your tracker. A middleware can read the same two facts as `ctx.requestName` and `ctx.operationType` ([Query or mutation](/reference/middlewarecontext/#query-or-mutation)).
+
 **Next:** [Sending data](/guide/sending-data/) shows where each param goes: the path, the query string or the body.

@@ -12,7 +12,7 @@
 // 3. Network error (offline, DNS, abort) → createNetworkErrorResult (no Response)
 // =============================================================================
 
-import type { Result, SuccessResult, ErrorResult } from './types.js'
+import type { Result, SuccessResult, ErrorResult, OperationType } from './types.js'
 
 // -----------------------------------------------------------------------------
 // ApiError Kind
@@ -79,6 +79,14 @@ interface ApiErrorOptions {
     method: string
     url: string
     params: unknown
+    /**
+     * The endpoint's key in the client (`getUser`, `team`). Optional here, so
+     * code that builds its own `ApiError` keeps compiling; the instance always
+     * has it, `''` when left out.
+     */
+    name?: string
+    /** On a GraphQL call, whether it was a query or a mutation. */
+    operationType?: OperationType
   }
 
   /**
@@ -155,10 +163,17 @@ export class ApiError {
   readonly headers: Headers
 
   /**
-   * Metadata about the request that caused this error.
-   * Includes the method, fully resolved URL, and the original params object.
+   * Metadata about the request that caused this error: the method, the fully
+   * resolved URL, the original params object, the endpoint's key (`name`) and,
+   * on GraphQL, whether it was a query or a mutation (`operationType`).
+   *
+   * `params` holds the variables as the caller passed them. `name` and
+   * `operationType` never do, so an error report that sends only those two
+   * sends no personal data; one that forwards the whole error sends `params`.
+   * `name` is `''` on an error liaise builds outside a call (a testing helper,
+   * a pager refusing its options).
    */
-  readonly request: { method: string; url: string; params: unknown }
+  readonly request: { method: string; url: string; params: unknown; name: string; operationType?: OperationType }
 
   /**
    * Data the server returned alongside the errors.
@@ -178,7 +193,11 @@ export class ApiError {
     this.statusText = options.statusText
     this.body = options.body
     this.headers = options.headers
-    this.request = options.request
+    // operationType only when it has one: a REST error never carries the key.
+    const { operationType, ...request } = options.request
+    this.request = operationType === undefined
+      ? { ...request, name: request.name ?? '' }
+      : { ...request, name: request.name ?? '', operationType }
     this.partialData = options.partialData
   }
 }

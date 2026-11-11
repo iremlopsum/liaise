@@ -452,15 +452,15 @@ describe('pollUntil: what the docs promise', () => {
     expect(early.error?.body).toBe(reason)
   })
 
-  it("names no request when none was sent: method and url are '', params as given", async () => {
+  it("names no request when none was sent: method, url and name are '', params as given", async () => {
     const api = jobs(['done'])
     const params = { id: '7' }
     const aborted = await pollUntil(api.getJob, params, { every: 1000, until: isDone, signal: AbortSignal.abort() })
-    expect(aborted.error?.request).toEqual({ method: '', url: '', params })
+    expect(aborted.error?.request).toEqual({ method: '', url: '', params, name: '' })
     tab().hide()
     const pending = pollUntil(api.getJob, params, { every: 1000, until: isDone, giveUpAfter: 1000 })
     await vi.advanceTimersByTimeAsync(1000)
-    expect((await pending).error?.request).toEqual({ method: '', url: '', params })
+    expect((await pending).error?.request).toEqual({ method: '', url: '', params, name: '' })
     expect(mock.calls).toHaveLength(0)
   })
 

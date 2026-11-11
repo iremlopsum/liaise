@@ -42,7 +42,7 @@ type Result<TResponse> = SuccessResult<TResponse> | ErrorResult<TResponse>
 | `statusText` | `string` | The response's status text, `'GraphQL Error'` for a GraphQL error, and `''` when no response arrived. |
 | `body` | `unknown` | The error body, the thrown value, or what a check refused. It depends on the kind, as [What body holds](#what-body-holds) lists. |
 | `headers` | `Headers` | The response headers. Empty when no response arrived. |
-| `request` | `{ method, url, params }` | The failed request. `url` is the address with the params filled in, and on GraphQL it is the endpoint. `url` is `baseUrl` plus the path template only when the URL couldn't be built. `params` is the params or variables as the caller passed them. |
+| `request` | `{ method, url, params, name, operationType? }` | The failed request. `url` is the address with the params filled in, and on GraphQL it is the endpoint. `url` is `baseUrl` plus the path template only when the URL couldn't be built. `params` is the params or variables as the caller passed them. `name` is the endpoint's key, such as `'getUser'`, or `''` on an error liaise built outside a call. `operationType` is `'query'` or `'mutation'` on a GraphQL call, and absent on REST. `name` and `operationType` never hold variables, so a report that sends only those sends no personal data; one that sends the whole error sends `params` ([Which call failed](/guide/handling-errors/#which-call-failed)). |
 | `partialData` | `unknown` (optional) | For a GraphQL error, the data the server sent with the errors. `undefined` for every REST error. |
 
 ```ts
