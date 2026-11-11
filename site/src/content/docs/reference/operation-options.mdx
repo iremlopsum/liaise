@@ -16,7 +16,7 @@ This page lists every option a GraphQL operation takes. Look here when you write
 | `dedupe` | `boolean` | `false` | A new call cancels the one still running ([Drop stale calls with dedupe](/guide/cancelling-deadlines-and-stale-requests/#drop-stale-calls-with-dedupe)). |
 | `share` | `boolean` | `false` | Calls that would send the identical request share one network request ([Sharing identical requests](/guide/sharing-identical-requests/)). Variables must match exactly, key order included. Can't be combined with `dedupe`: `createGraphQL` throws if both are set. |
 | `schema` | `StandardSchemaV1` | — | Checks the response's `data`. The response type stays explicit ([Validating responses](/guide/validating-responses/#graphql)). |
-| `timeout` | `number` (ms) | the client's `timeout` | One deadline for the whole call, retries included. Replaces the client's, and `0` turns it off. Under `share`, it is also the shared request's deadline. |
+| `timeout` | `number` (ms) | the client's `timeout` for its side | One deadline for the whole call, retries included. Replaces the client's (its `queries` or `mutations` default when the client's `timeout` is an object), and `0` turns it off. Under `share`, it is also the shared request's deadline. |
 
 An operation has no `method`, `path`, `responseType` or `bodyAs`. Every operation is a `POST` of `{ query, variables }`, and the response is always read as JSON ([Same as REST, and different](/guide/graphql/#same-as-rest-and-different)).
 

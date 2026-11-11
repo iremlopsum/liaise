@@ -35,7 +35,7 @@ const entries = {
 // keeping the name and operation type, and the flat client's document reader in the core
 // entry, retry and cache skipping mutations, and the per-type GraphQL timeout (measured:
 // REST only 7153 → 7208 B, core + polling 9650 → 9743 B, core + pager 10089 → 10141 B,
-// core entry 14007 → 14574 B, core + middleware 15366 → 16002 B). Raised: core + polling
+// core entry 14007 → 14586 B, core + middleware 15366 → 16023 B). Raised: core + polling
 // 9740 → 10250.
 const budgets = { 'REST only': 7700, 'core + polling': 10250, 'core + pager': 10700, 'core entry': 14900, 'core + middleware': 16300 }
 

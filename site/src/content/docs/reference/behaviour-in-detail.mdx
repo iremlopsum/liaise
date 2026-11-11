@@ -7,7 +7,7 @@ This page collects the edge cases the guide links to: exactly what the cache and
 
 ## Cache key
 
-`cacheMiddleware` keys each entry on the endpoint name, the method, the full URL, the params, every request header except `Content-Type`, the `fetchOptions`, and which `fetch` sends it. A different `Authorization`, base URL, query value or `credentials` gets its own entry.
+`cacheMiddleware` keys each entry on the endpoint name, on GraphQL whether it is a query or a mutation, the method, the full URL, the params, every request header except `Content-Type`, the `fetchOptions`, and which `fetch` sends it. A different `Authorization`, base URL, query value or `credentials` gets its own entry.
 
 Cookies the browser adds aren't in the key, because they are added below `fetch`, where no middleware can see them. A call with `credentials: 'include'` and one with `'omit'` never share an entry, but two `'include'` calls made before and after a login do. Clear the cache when the user changes (`getUserCache.clear()` in [Cache repeated reads](/guide/retries-caching-and-logging/#cache-repeated-reads)).
 

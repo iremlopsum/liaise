@@ -1027,9 +1027,6 @@ export interface GraphQLError {
   extensions?: Record<string, unknown>
 }
 
-/**
- * Base configuration shared by both `createGraphQL` overloads.
- */
 /** `createGraphQL`'s `timeout` per operation type, in milliseconds. A side left out has no default. */
 export interface GraphQLTimeouts {
   /** The default deadline for every query. */
@@ -1038,6 +1035,9 @@ export interface GraphQLTimeouts {
   mutations?: number
 }
 
+/**
+ * Base configuration shared by both `createGraphQL` overloads.
+ */
 export interface GraphQLBaseConfig {
   /** The full URL of the GraphQL endpoint, e.g. `'https://api.example.com/graphql'`. */
   endpoint: string

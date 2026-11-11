@@ -18,6 +18,14 @@ describe('operationTypeOf', () => {
     ['not graphql at all', 'mutation'],
     ['fragment F on User { id }', 'mutation'],
     ['queryX { a }', 'mutation'],
+    // Found in review: a fragment header holding `{` inside arguments or a comment.
+    ['fragment F on User @argumentDefinitions(count: {type: "Int", defaultValue: 10}) { id }\nmutation Charge { charge { id } }', 'mutation'],
+    ['fragment F on User # used by {UserCard}\n{ id }\nmutation Charge { charge { id } }', 'mutation'],
+    ['fragment F on User @x(list: [{a: 1}]) { id }\nquery Q { user { ...F } }', 'query'],
+    // Anything at the top level that isn't a name, a comment, a string or `{` is unreadable.
+    ['@query { a }', 'mutation'],
+    ['équery { a }', 'mutation'],
+    ['} query Q { a }', 'mutation'],
   ])('%j → %s', (doc, expected) => {
     expect(operationTypeOf(doc)).toBe(expected)
   })
