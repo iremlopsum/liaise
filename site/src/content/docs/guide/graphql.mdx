@@ -71,7 +71,7 @@ const getCategory = new Operation<{ id: string }, { category: Category }>({
 })
 ```
 
-Put it on the query operations you want cached, never on the client. A client-level cache would also wrap your mutations, and a cached mutation answers the second one with the first one's response.
+Put it on the query operations you want cached, or on the client to cache every query. Either way it never caches a mutation: a cached mutation would answer the second one with the first one's response, so the cache sends every mutation to the network unless you pass `mutations: true`. A query and a mutation with the same name never share an entry.
 
 ## GraphQL errors
 

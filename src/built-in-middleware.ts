@@ -436,6 +436,11 @@ export type CacheMiddleware = Middleware & { clear(): void }
  *   case. Defaults to `['GET', 'HEAD']`: a call with any other method goes
  *   straight to the network and is never stored. GraphQL sends every
  *   operation as a POST, so a cache on a query operation needs `['POST']`.
+ * @param options.mutations - Cache GraphQL mutations too. Defaults to false:
+ *   a call whose `ctx.operationType` is `'mutation'` goes straight to the
+ *   network and is never stored, even with `methods: ['POST']`. The operation
+ *   type is part of the key either way, so a split client's query and
+ *   mutation of the same name never share an entry.
  * @returns A middleware function with an attached `clear()` method.
  *
  * @example
@@ -469,6 +474,7 @@ export function cacheMiddleware(options?: {
   maxSize?: number
   debug?: boolean
   methods?: readonly string[]
+  mutations?: boolean
 }): CacheMiddleware {
   const store = new CacheStore({
     ttl: options?.ttl ?? 5 * 60_000,
@@ -482,11 +488,16 @@ export function cacheMiddleware(options?: {
   // must not throw.
   const listed = options?.methods
   const methods = (Array.isArray(listed) ? listed : ['GET', 'HEAD']).map(m => String(m).toUpperCase())
+  const mutations = options?.mutations === true
 
   const mw: Middleware = async (ctx, next) => {
     // A method it doesn't cache never touches the store: no lookup, no write,
     // no debug line.
     if (!methods.includes(String(ctx.request.method).toUpperCase())) return next()
+    // Nor does a GraphQL mutation, unless told otherwise (5.5.0): with
+    // methods: ['POST'] it would answer the next identical write with the first
+    // one's response.
+    if (!mutations && ctx.operationType === 'mutation') return next()
     // A null key means the params cannot be keyed soundly (see stable-key.ts):
     // neither cache nor serve. Declining is always safe; serving one caller
     // the response to a different payload never is.
@@ -546,7 +557,10 @@ export function cacheMiddleware(options?: {
       })
       urlKey = `${fullUrl.slice(0, qIndex)}?${segments.join('&')}`
     }
-    const key = `${ctx.requestName}|${ctx.request.method}|${urlKey}|${paramsStr}|${headerKey}|${optionsStr}|${senderStr}`
+    // The operation type sits next to the name: a split client's query and
+    // mutation may share a name, and nothing else in the key tells them apart
+    // (the document is in the body, which isn't keyed).
+    const key = `${ctx.requestName}|${ctx.operationType ?? ''}|${ctx.request.method}|${urlKey}|${paramsStr}|${headerKey}|${optionsStr}|${senderStr}`
 
     const cached = store.get<Result<unknown>>(key)
     if (cached !== null) {
