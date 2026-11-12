@@ -23,6 +23,13 @@
 
 import type { Middleware, MiddlewareContext, Result } from './types.js'
 
+/**
+ * Where a middleware keeps its stand-in: a function `composeMiddleware` runs in its place
+ * when a call skips it (`skipMiddleware`). Hidden and registered, never a public field.
+ * cacheMiddleware uses it so that skipping the cache still stores the fresh answer (5.5.0).
+ */
+export const WHEN_SKIPPED: unique symbol = Symbol.for('liaise.whenSkipped') as never
+
 // -----------------------------------------------------------------------------
 // Core Function Type
 // -----------------------------------------------------------------------------
@@ -70,7 +77,10 @@ export type CoreFn = (context: MiddlewareContext) => Promise<Result<unknown>>
  *
  * The `skip` parameter accepts an array of middleware references. Before
  * composing, any middleware whose reference (===) matches an entry in `skip`
- * is removed from the chain. This enables per-call overrides like:
+ * is removed from the chain, or, when it carries a stand-in under
+ * {@link WHEN_SKIPPED}, replaced by that stand-in in the same position
+ * (`cacheMiddleware`'s stand-in refreshes the entry instead of reading it).
+ * This enables per-call overrides like:
  *
  * ```ts
  * api.getUser({ id: '1' }, { skipMiddleware: [cacheMiddleware] })
@@ -119,8 +129,18 @@ export function composeMiddleware(
   // This means the caller must pass the exact same function reference that
   // was registered — factory-created middleware (e.g., `retryMiddleware(3)`)
   // must be stored in a variable to be skippable.
+  //
+  // A skipped middleware that carries a stand-in (a function under WHEN_SKIPPED)
+  // is replaced by it, in the same position (5.5.0): cacheMiddleware's stand-in
+  // sends the call on and stores the fresh answer, so skipping the cache refreshes
+  // it. Anything else under the symbol is ignored and the middleware is dropped.
   // -------------------------------------------------------------------------
-  const active = middleware.filter(mw => !skip.includes(mw))
+  const active: Middleware[] = []
+  for (const mw of middleware) {
+    if (!skip.includes(mw)) { active.push(mw); continue }
+    const standIn = (mw as { [WHEN_SKIPPED]?: unknown })[WHEN_SKIPPED]
+    if (typeof standIn === 'function') active.push(standIn as Middleware)
+  }
 
   // -------------------------------------------------------------------------
   // Step 2: Return the composed function.
