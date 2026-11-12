@@ -229,20 +229,20 @@ describe('stored data is frozen and shared', () => {
       '~standard': { version: 1, vendor: 'test', validate: v => ({ value: { at: new Date((v as { at: string }).at) } }) },
     }
     const cache = cacheMiddleware({ ttl: 60_000 })
-    const getEvent = new Request<void, { at: Date }>({ method: 'GET', path: '/event', schema: withDate, middleware: [cache] })
-    const getFile = new Request<void, Blob>({ method: 'GET', path: '/file', responseType: 'blob', middleware: [cache] })
+    const getEvent = new Request<Record<string, never>, { at: Date }>({ method: 'GET', path: '/event', schema: withDate, middleware: [cache] })
+    const getFile = new Request<Record<string, never>, Blob>({ method: 'GET', path: '/file', responseType: 'blob', middleware: [cache] })
     const api = createApi({ baseUrl: 'https://x.test', requests: { getEvent, getFile } })
 
-    const event = await api.getEvent()
+    const event = await api.getEvent({})
     expect(Object.isFrozen(event.data)).toBe(true)
     expect(Object.isFrozen(event.data!.at)).toBe(false)
     event.data!.at.setTime(0)
     expect(event.data!.at.getTime()).toBe(0)
 
-    const file = await api.getFile()
+    const file = await api.getFile({})
     expect(file.data).toBeInstanceOf(Blob)
     expect(Object.isFrozen(file.data)).toBe(false)
-    expect(await api.getFile()).toBe(file)
+    expect(await api.getFile({})).toBe(file)
     expect(n).toBe(2)
   })
 })
@@ -306,7 +306,7 @@ describe('pinned edges (final review)', () => {
     }
     const copying: Middleware = async (_ctx, next) => {
       const r = await next()
-      return r.data ? { ...r, data: { ...(r.data as { v: number }), v: (r.data as { v: number }).v + 100 } } : r
+      return r.error ? r : { ...r, data: { ...(r.data as { v: number }), v: (r.data as { v: number }).v + 100 } }
     }
     const getA = new Request<{ id: string }, { v: number }>({ method: 'GET', path: '/a/:id', middleware: [cache] })
     const getB = new Request<{ id: string }, { v: number }>({ method: 'GET', path: '/b/:id', middleware: [cache] })
