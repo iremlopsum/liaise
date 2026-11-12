@@ -496,6 +496,9 @@ export interface CallOptions {
   /**
    * Middleware to skip for this call, compared by reference identity.
    *
+   * Skipping a `cacheMiddleware` refreshes it: the call goes to the network and
+   * a success replaces the cached entry (5.5.0).
+   *
    * ⚠️  Factory-style middleware (like `retryMiddleware(3)`) must be stored
    * in a variable first — passing a new factory call here will create a
    * new reference that won't match the original.

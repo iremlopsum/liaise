@@ -21,6 +21,8 @@ import { clientFetchOf } from './utils/client-fetch.js'
 import { sendableFetchOptions } from './utils/fetch-options.js'
 import { stableKey } from './utils/stable-key.js'
 import { parseRetryAfter } from './utils/retry-after.js'
+import { deepFreeze } from './utils/freeze.js'
+import { WHEN_SKIPPED } from './middleware.js'
 
 // Re-exported so consumers of the `./middleware` entry point can name these
 // types directly (e.g. a shared `onRetry` handler, or a reusable options
@@ -404,10 +406,36 @@ export type CacheMiddleware = Middleware & { clear(): void }
  * will hit the network again.
  *
  * The full `Result` object is cached, including `response` (headers, status)
- * and `retry`. Calling `retry()` on a cached result re-enters the middleware
- * chain — if the TTL is still valid it returns the cached value; if expired,
- * it makes a fresh network call. To force a network call on a specific
- * invocation, use `skipMiddleware: [myCache]` in the call options.
+ * and `retry`, and every hit returns that same object. Calling `retry()` on a
+ * cached result repeats the call that produced it: a result stored by a normal
+ * read re-enters the cache (the cached value while the TTL is valid, a fresh
+ * network call after); a result stored by a refresh refreshes again.
+ *
+ * **Refreshing:**
+ *
+ * Passing the cache in `skipMiddleware` (`{ skipMiddleware: [myCache] }`)
+ * refreshes the entry: the call goes to the network, and a success replaces the
+ * entry, so the next normal read gets it at once. A failed refresh leaves the
+ * old entry in place. Calls the cache declines (a method it doesn't cache, a
+ * mutation without `mutations: true`, params it can't key) go to the network
+ * and store nothing, as before. (Before 5.5.0 a skipped call stored nothing.)
+ *
+ * **Frozen data:**
+ *
+ * The `data` of a stored result is deep-frozen when it is stored, so the first
+ * caller and every hit share one object that nobody can change: editing it
+ * throws a `TypeError` in strict code instead of changing it for every later
+ * hit. Copy it first to edit it (`[...data].sort()`). Only plain objects and
+ * arrays are frozen; a `Date`, `Map`, class instance or `Blob` inside is left as
+ * it is. Data the cache didn't store is never frozen.
+ *
+ * **Ordering:**
+ *
+ * A call's answer never replaces the answer of an identical call that started
+ * after it: a read that was already in flight when a refresh started doesn't put
+ * its older answer back when it finishes. And `clear()` fences every call in
+ * flight: none of them stores after it, so a reply that arrives after a logout's
+ * `clear()` never lands in the emptied cache.
  *
  * **Isolation:**
  *
@@ -423,15 +451,16 @@ export type CacheMiddleware = Middleware & { clear(): void }
  *
  * **Debugging:**
  *
- * Set `debug: true` to log cache hits and misses to the console:
+ * Set `debug: true` to log cache hits, misses and refreshes to the console:
  * ```
  * [liaise cache] HIT  getUser {"id":"42"}
  * [liaise cache] MISS getUser {"id":"42"}
+ * [liaise cache] REFRESH getUser {"id":"42"}
  * ```
  *
  * @param options.ttl - Time-to-live in milliseconds. Defaults to 5 minutes.
  * @param options.maxSize - Maximum number of entries. Defaults to 50.
- * @param options.debug - Log hits and misses to console. Defaults to false.
+ * @param options.debug - Log hits, misses and refreshes to console. Defaults to false.
  * @param options.methods - The methods it caches, compared without regard to
  *   case. Defaults to `['GET', 'HEAD']`: a call with any other method goes
  *   straight to the network and is never stored. GraphQL sends every
@@ -455,13 +484,15 @@ export type CacheMiddleware = Middleware & { clear(): void }
  *   middleware: [getUserCache],
  * })
  *
- * // Force a network call for a single invocation:
+ * // Refresh one entry (after an edit, or on a Refresh button): goes to the
+ * // network, and a success replaces the cached entry:
  * const { data } = await api.getUser({ id: '42' }, { skipMiddleware: [getUserCache] })
  * ```
  *
  * @example
  * ```ts
- * // Clear all cached entries on logout so the next user gets fresh data:
+ * // Clear all cached entries on logout so the next user gets fresh data
+ * // (a reply still in flight is not stored after it):
  * const getUserCache = cacheMiddleware({ ttl: 5 * 60_000 })
  *
  * function onLogout() {
@@ -490,19 +521,22 @@ export function cacheMiddleware(options?: {
   const methods = (Array.isArray(listed) ? listed : ['GET', 'HEAD']).map(m => String(m).toUpperCase())
   const mutations = options?.mutations === true
 
-  const mw: Middleware = async (ctx, next) => {
+  // One key function for the cache and its stand-in, so the two can never disagree
+  // about which entry a call owns. null: the cache declines the call (don't read,
+  // don't store).
+  const keyFor = (ctx: MiddlewareContext): string | null => {
     // A method it doesn't cache never touches the store: no lookup, no write,
     // no debug line.
-    if (!methods.includes(String(ctx.request.method).toUpperCase())) return next()
+    if (!methods.includes(String(ctx.request.method).toUpperCase())) return null
     // Nor does a GraphQL mutation, unless told otherwise (5.5.0): with
     // methods: ['POST'] it would answer the next identical write with the first
     // one's response.
-    if (!mutations && ctx.operationType === 'mutation') return next()
+    if (!mutations && ctx.operationType === 'mutation') return null
     // A null key means the params cannot be keyed soundly (see stable-key.ts):
     // neither cache nor serve. Declining is always safe; serving one caller
     // the response to a different payload never is.
     const paramsStr = stableKey(ctx.request.params)
-    if (paramsStr === null) return next()
+    if (paramsStr === null) return null
     // The fetch options are part of who asked (5.2.0): a credentials:
     // 'include' call sends cookies an 'omit' call doesn't, so the two never
     // share an entry. Keyed as they are sent (sendableFetchOptions: without
@@ -512,14 +546,14 @@ export function cacheMiddleware(options?: {
     // keyed by identity (see cacheOptionsKey in ./utils/cache.js). Options it
     // can't key are declined, never guessed.
     const optionsStr = cacheOptionsKey(sendableFetchOptions(ctx.request.fetchOptions))
-    if (optionsStr === null) return next()
+    if (optionsStr === null) return null
     // And which fetch sends it: two clients with their own fetch functions (a
     // cookie jar, a client certificate) sharing one module-level endpoint must
     // not share entries. The client stamps its own fetch on the context
     // (utils/client-fetch.ts); it is keyed by identity, and a client on the
     // global fetch adds nothing.
     const senderStr = cacheSenderKey(clientFetchOf(ctx))
-    if (senderStr === null) return next()
+    if (senderStr === null) return null
     // Who asked and where, not only what: before 5.0.1 the key was name +
     // params, so user B could be served user A's /me (different
     // Authorization), and one Request in two createApi instances shared
@@ -560,26 +594,51 @@ export function cacheMiddleware(options?: {
     // The operation type sits next to the name: a split client's query and
     // mutation may share a name, and nothing else in the key tells them apart
     // (the document is in the body, which isn't keyed).
-    const key = `${ctx.requestName}|${ctx.operationType ?? ''}|${ctx.request.method}|${urlKey}|${paramsStr}|${headerKey}|${optionsStr}|${senderStr}`
+    return `${ctx.requestName}|${ctx.operationType ?? ''}|${ctx.request.method}|${urlKey}|${paramsStr}|${headerKey}|${optionsStr}|${senderStr}`
+  }
+
+  // Stores a success under this call's ticket and freezes its data, in the same
+  // tick, only when the store took it (5.5.0): a newer call's answer, a clear()
+  // since this call started, or maxSize 0 refuses it, and data nobody else will
+  // be handed stays the caller's to change.
+  const keep = (key: string, result: Result<unknown>, ticket: number): void => {
+    if (!result.error && store.set(key, result, ticket)) deepFreeze(result.data)
+  }
+
+  const mw: Middleware = async (ctx, next) => {
+    const key = keyFor(ctx)
+    if (key === null) return next()
 
     const cached = store.get<Result<unknown>>(key)
     if (cached !== null) {
-      if (debug) console.log(`[liaise cache] HIT  ${ctx.requestName} ${paramsStr}`)
+      if (debug) console.log(`[liaise cache] HIT  ${ctx.requestName} ${stableKey(ctx.request.params)}`)
       return cached
     }
 
-    if (debug) console.log(`[liaise cache] MISS ${ctx.requestName} ${paramsStr}`)
+    if (debug) console.log(`[liaise cache] MISS ${ctx.requestName} ${stableKey(ctx.request.params)}`)
 
+    const ticket = store.begin()
     const result = await next()
+    keep(key, result, ticket)
+    return result
+  }
 
-    if (!result.error) {
-      store.set(key, result)
-    }
-
+  // What runs in the cache's place when a call skips it (skipMiddleware, through
+  // WHEN_SKIPPED in composeMiddleware): a refresh. It never reads the entry, sends
+  // the call on, and stores a success over the old entry; an error leaves the old
+  // entry where it is. It declines exactly what the cache declines.
+  const refresh: Middleware = async (ctx, next) => {
+    const key = keyFor(ctx)
+    if (key === null) return next()
+    if (debug) console.log(`[liaise cache] REFRESH ${ctx.requestName} ${stableKey(ctx.request.params)}`)
+    const ticket = store.begin()
+    const result = await next()
+    keep(key, result, ticket)
     return result
   }
 
   const fn = mw as CacheMiddleware
   fn.clear = () => store.clear()
+  Object.defineProperty(fn, WHEN_SKIPPED, { value: refresh })
   return fn
 }
