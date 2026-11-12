@@ -75,6 +75,62 @@ describe('CacheStore', () => {
     expect(store.get('b')).toBe('second')
     expect(store.get('c')).toBe('third')
   })
+
+  // 5.5.0: tickets (newer calls win), the clear() fence, and a replace that evicts nothing.
+  it('a newer ticket replaces, an older one is refused', () => {
+    const s = new CacheStore({ ttl: 60_000, maxSize: 10 })
+    const t1 = s.begin(), t2 = s.begin()
+    expect(t2).toBeGreaterThan(t1)
+    expect(s.set('k', 'new', t2)).toBe(true)
+    expect(s.set('k', 'old', t1)).toBe(false)
+    expect(s.get('k')).toBe('new')
+  })
+
+  it('an expired entry still blocks an older ticket', () => {
+    const now = vi.spyOn(Date, 'now').mockReturnValue(0)
+    const s = new CacheStore({ ttl: 1000, maxSize: 10 })
+    const t1 = s.begin(), t2 = s.begin()
+    s.set('k', 'new', t2)
+    now.mockReturnValue(5000)
+    expect(s.set('k', 'old', t1)).toBe(false)
+  })
+
+  it('clear() fences every ticket handed out before it', () => {
+    const s = new CacheStore({ ttl: 60_000, maxSize: 10 })
+    const before = s.begin()
+    s.clear()
+    const after = s.begin()
+    expect(s.set('k', 1, before)).toBe(false)
+    expect(s.get('k')).toBeNull()
+    expect(s.set('k', 2, after)).toBe(true)
+  })
+
+  it('replacing a key in a full store evicts nothing', () => {
+    const s = new CacheStore({ ttl: 60_000, maxSize: 2 })
+    const now = vi.spyOn(Date, 'now').mockReturnValue(0)
+    s.set('a', 1)
+    now.mockReturnValue(1)
+    s.set('b', 2)
+    now.mockReturnValue(2)
+    s.set('b', 3) // replacing the newer entry must not evict the oldest
+    expect(s.get('a')).toBe(1)
+    expect(s.get('b')).toBe(3)
+  })
+
+  it('replacing restarts the TTL', () => {
+    const now = vi.spyOn(Date, 'now').mockReturnValue(0)
+    const s = new CacheStore({ ttl: 1000, maxSize: 10 })
+    s.set('k', 'a', s.begin())
+    now.mockReturnValue(900)
+    s.set('k', 'b', s.begin())
+    now.mockReturnValue(1500)
+    expect(s.get('k')).toBe('b')
+  })
+
+  it('maxSize 0 refuses', () => {
+    const s = new CacheStore({ ttl: 1000, maxSize: 0 })
+    expect(s.set('k', 1, s.begin())).toBe(false)
+  })
 })
 
 // ---------------------------------------------------------------------------
