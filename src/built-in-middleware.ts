@@ -181,6 +181,10 @@ export function retryMiddleware(options: number | RetryOptions = 3): Middleware 
   const jitter = o.jitter ?? true
   const respectRetryAfter = o.respectRetryAfter ?? true
   const retryOn = o.retryOn ?? ((r: Result<unknown>) => (r.error?.status ?? 0) >= 500)
+  // A non-array `methods` (plain JS) counts as left out: every method, as
+  // before, rather than a throw from a factory.
+  const methods = Array.isArray(o.methods) ? o.methods.map(m => String(m).toUpperCase()) : null
+  const mutations = o.mutations === true
 
   // A user-supplied predicate must never be able to break the never-throws
   // contract. If it throws we cannot know whether to retry, so we stop —
@@ -221,6 +225,10 @@ export function retryMiddleware(options: number | RetryOptions = 3): Middleware 
   }
 
   return async (ctx, next) => {
+    // Calls it doesn't retry pass straight through: an unlisted method, then
+    // a GraphQL mutation (5.5.0). retryOn and onRetry are not asked.
+    if (methods && !methods.includes(String(ctx.request.method).toUpperCase())) return next()
+    if (!mutations && ctx.operationType === 'mutation') return next()
     // Make the initial request by calling next(). This traverses all
     // downstream middleware and eventually hits the core fetch function.
     let result = await next()
@@ -428,6 +436,11 @@ export type CacheMiddleware = Middleware & { clear(): void }
  *   case. Defaults to `['GET', 'HEAD']`: a call with any other method goes
  *   straight to the network and is never stored. GraphQL sends every
  *   operation as a POST, so a cache on a query operation needs `['POST']`.
+ * @param options.mutations - Cache GraphQL mutations too. Defaults to false:
+ *   a call whose `ctx.operationType` is `'mutation'` goes straight to the
+ *   network and is never stored, even with `methods: ['POST']`. The operation
+ *   type is part of the key either way, so a split client's query and
+ *   mutation of the same name never share an entry.
  * @returns A middleware function with an attached `clear()` method.
  *
  * @example
@@ -461,6 +474,7 @@ export function cacheMiddleware(options?: {
   maxSize?: number
   debug?: boolean
   methods?: readonly string[]
+  mutations?: boolean
 }): CacheMiddleware {
   const store = new CacheStore({
     ttl: options?.ttl ?? 5 * 60_000,
@@ -474,11 +488,16 @@ export function cacheMiddleware(options?: {
   // must not throw.
   const listed = options?.methods
   const methods = (Array.isArray(listed) ? listed : ['GET', 'HEAD']).map(m => String(m).toUpperCase())
+  const mutations = options?.mutations === true
 
   const mw: Middleware = async (ctx, next) => {
     // A method it doesn't cache never touches the store: no lookup, no write,
     // no debug line.
     if (!methods.includes(String(ctx.request.method).toUpperCase())) return next()
+    // Nor does a GraphQL mutation, unless told otherwise (5.5.0): with
+    // methods: ['POST'] it would answer the next identical write with the first
+    // one's response.
+    if (!mutations && ctx.operationType === 'mutation') return next()
     // A null key means the params cannot be keyed soundly (see stable-key.ts):
     // neither cache nor serve. Declining is always safe; serving one caller
     // the response to a different payload never is.
@@ -538,7 +557,10 @@ export function cacheMiddleware(options?: {
       })
       urlKey = `${fullUrl.slice(0, qIndex)}?${segments.join('&')}`
     }
-    const key = `${ctx.requestName}|${ctx.request.method}|${urlKey}|${paramsStr}|${headerKey}|${optionsStr}|${senderStr}`
+    // The operation type sits next to the name: a split client's query and
+    // mutation may share a name, and nothing else in the key tells them apart
+    // (the document is in the body, which isn't keyed).
+    const key = `${ctx.requestName}|${ctx.operationType ?? ''}|${ctx.request.method}|${urlKey}|${paramsStr}|${headerKey}|${optionsStr}|${senderStr}`
 
     const cached = store.get<Result<unknown>>(key)
     if (cached !== null) {

@@ -1044,3 +1044,67 @@ describe("the cache key includes a client's own fetch", () => {
     expect(clientFetchOf(seen!)).toBe(f)
   })
 })
+
+describe('cacheMiddleware: GraphQL operation types', () => {
+  afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals() })
+  const QUERY = 'query User($id: ID!) { user(id: $id) { id } }'
+  const MUTATION = 'mutation User($id: ID!) { touchUser(id: $id) { id } }'
+  /** Answers each document with its own payload, so a crossed entry shows. */
+  const byDocument = () => {
+    const fetch = vi.fn(async (_url: unknown, init?: RequestInit) => {
+      const { query } = JSON.parse(String(init?.body))
+      const data = String(query).startsWith('mutation') ? { touchUser: { id: 'm' } } : { user: { id: 'q' } }
+      return new Response(JSON.stringify({ data }), { status: 200, headers: { 'Content-Type': 'application/json' } })
+    })
+    vi.stubGlobal('fetch', fetch)
+    return fetch
+  }
+  const split = (cache: Middleware) => createGraphQL({
+    endpoint: 'https://x.test/graphql',
+    middleware: [cache],
+    queries: { user: new Operation<{ id: string }, unknown>({ operation: QUERY }) },
+    mutations: { user: new Operation<{ id: string }, unknown>({ operation: MUTATION }) },
+  })
+
+  it('never stores or serves a mutation, and logs nothing for it', async () => {
+    const fetch = byDocument()
+    const log = vi.spyOn(console, 'log').mockImplementation(() => {})
+    const gql = split(cacheMiddleware({ methods: ['POST'], debug: true }))
+    await gql.mutation.user({ id: '1' })
+    await gql.mutation.user({ id: '1' })
+    expect(fetch).toHaveBeenCalledTimes(2)
+    expect(log.mock.calls.filter(c => String(c[0]).startsWith('[liaise cache]'))).toEqual([])
+  })
+
+  it('still caches a query', async () => {
+    const fetch = byDocument()
+    const gql = split(cacheMiddleware({ methods: ['POST'] }))
+    await gql.query.user({ id: '1' })
+    await gql.query.user({ id: '1' })
+    expect(fetch).toHaveBeenCalledTimes(1)
+  })
+
+  it('with mutations: true, a same-named query and mutation keep separate entries', async () => {
+    const fetch = byDocument()
+    const gql = split(cacheMiddleware({ methods: ['POST'], mutations: true }))
+    const q = await gql.query.user({ id: '1' })
+    const m = await gql.mutation.user({ id: '1' })
+    expect(q.data).toEqual({ user: { id: 'q' } })
+    expect(m.data).toEqual({ touchUser: { id: 'm' } })
+    await gql.query.user({ id: '1' })
+    await gql.mutation.user({ id: '1' })
+    expect(fetch).toHaveBeenCalledTimes(2)
+  })
+
+  it("never caches a flat client's mutation document", async () => {
+    const fetch = byDocument()
+    const gql = createGraphQL({
+      endpoint: 'https://x.test/graphql',
+      middleware: [cacheMiddleware({ methods: ['POST'] })],
+      operations: { touch: new Operation<{ id: string }, unknown>({ operation: MUTATION }) },
+    })
+    await gql.touch({ id: '1' })
+    await gql.touch({ id: '1' })
+    expect(fetch).toHaveBeenCalledTimes(2)
+  })
+})

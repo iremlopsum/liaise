@@ -635,6 +635,22 @@ export interface MiddlewareContext {
 
   /** The key name of the request in the api object (e.g., 'getUser'). */
   requestName: string
+
+  /**
+   * Whether this GraphQL call is a query or a mutation. Never set on a REST
+   * call.
+   *
+   * A split client's record decides (`gql.query.x` is a query and
+   * `gql.mutation.x` a mutation, whatever the document says). A flat client's
+   * comes from the document's first operation keyword, read once when the
+   * client is built; a document liaise can't read (a `subscription`, text that
+   * isn't GraphQL) counts as a mutation, the safe side: `retryMiddleware` and
+   * `cacheMiddleware` skip mutations unless told otherwise.
+   *
+   * It describes the call. Changing it changes nothing liaise has already
+   * decided, such as the call's default timeout.
+   */
+  readonly operationType?: OperationType
 }
 
 /**
@@ -853,11 +869,33 @@ export interface RetryOptions {
    * promise stays pending through every attempt and resolves exactly once.
    */
   onRetry?: (info: RetryInfo) => void
+  /**
+   * Retry GraphQL mutations too. Default `false`: a call whose
+   * `ctx.operationType` is `'mutation'` is sent once, and `retryOn` and
+   * `onRetry` are not asked, because a mutation the server finished before
+   * failing would be written twice. Set it on a retry for operations that are
+   * safe to repeat. REST calls have no operation type, so this never affects
+   * them.
+   */
+  mutations?: boolean
+  /**
+   * The methods it retries, compared without regard to case, such as
+   * `['GET', 'HEAD', 'PUT', 'DELETE']`. A call with any other method is sent
+   * once and `retryOn` is not asked. Left out, every method is retried, as
+   * before. GraphQL sends every operation as a POST, so `['GET']` turns
+   * retries off on a GraphQL client.
+   *
+   * The checks run in this order: `methods`, then `mutations`, then `retryOn`.
+   */
+  methods?: readonly string[]
 }
 
 // ---------------------------------------------------------------------------
 // GraphQL Types
 // ---------------------------------------------------------------------------
+
+/** Whether a GraphQL operation is a query or a mutation. See `MiddlewareContext.operationType`. */
+export type OperationType = 'query' | 'mutation'
 
 /**
  * Configuration object for the `Operation` class constructor.
@@ -989,6 +1027,14 @@ export interface GraphQLError {
   extensions?: Record<string, unknown>
 }
 
+/** `createGraphQL`'s `timeout` per operation type, in milliseconds. A side left out has no default. */
+export interface GraphQLTimeouts {
+  /** The default deadline for every query. */
+  queries?: number
+  /** The default deadline for every mutation. */
+  mutations?: number
+}
+
 /**
  * Base configuration shared by both `createGraphQL` overloads.
  */
@@ -1006,8 +1052,15 @@ export interface GraphQLBaseConfig {
    * Like every liaise timeout it covers the whole operation, retries included.
    * Under `share`, it is also the shared request's deadline when the
    * operation sets none, measured from when that request is sent.
+   *
+   * An object sets a default per operation type instead (5.5.0):
+   * `{ queries: 45_000 }` gives every query a 45 s deadline and mutations
+   * none, since a mutation abandoned while the server may still commit it
+   * invites a double write on "try again". A side left out has no default.
+   * A flat client takes each operation's type from its document
+   * (`MiddlewareContext.operationType`).
    */
-  timeout?: number
+  timeout?: number | GraphQLTimeouts
 
   /**
    * Log every call to the console: `true`, or `{ enabled, data }`. Off by

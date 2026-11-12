@@ -8,7 +8,7 @@
 // per tick, every Result to all of them. On a server each caller polls on its own
 // (see join). Spec: docs/superpowers/specs/2026-10-07-polling-design.md (local).
 // =============================================================================
-import type { CallOptions, Middleware, Result, SuccessResult } from './types.js'
+import type { CallOptions, Middleware, Result, SuccessResult, OperationType } from './types.js'
 import { ApiError, createNetworkErrorResult } from './result.js'
 import { stableKey } from './utils/stable-key.js'
 import { parseRetryAfter } from './utils/retry-after.js'
@@ -78,7 +78,7 @@ class SharedPoll {
   readonly callers = new Set<Caller>()
   last: Result<unknown> | undefined
   /** The method and URL of the latest attempt, recorded as it is sent. */
-  request: { method: string; url: string } | undefined
+  request: { method: string; url: string; name: string; operationType?: OperationType } | undefined
   private failures = 0
   private timer: ReturnType<typeof setTimeout> | undefined
   private controller: AbortController | undefined
@@ -184,7 +184,7 @@ class SharedPoll {
    * name the attempt. Runs after every user middleware and leaves ctx alone.
    */
   private readonly record: Middleware = (ctx, next) => {
-    this.request = { method: ctx.request.method, url: ctx.request.url }
+    this.request = { method: ctx.request.method, url: ctx.request.url, name: ctx.requestName, operationType: ctx.operationType }
     return next()
   }
 
@@ -203,7 +203,7 @@ class SharedPoll {
     } catch (error) {
       report(error, 'poll: the endpoint')
       return createNetworkErrorResult(
-        new ApiError({ kind: 'middleware', status: 0, statusText: '', body: error, headers: new Headers(), request: { method: this.request?.method ?? '', url: this.request?.url ?? '', params: this.params } }),
+        new ApiError({ kind: 'middleware', status: 0, statusText: '', body: error, headers: new Headers(), request: { method: this.request?.method ?? '', url: this.request?.url ?? '', params: this.params, name: this.request?.name, operationType: this.request?.operationType } }),
         () => this.call(),
       )
     }
@@ -393,7 +393,7 @@ export function pollUntil<P extends object, R>(
             statusText: '',
             body,
             headers: new Headers(),
-            request: { method: shared?.request?.method ?? '', url: shared?.request?.url ?? '', params },
+            request: { method: shared?.request?.method ?? '', url: shared?.request?.url ?? '', params, name: shared?.request?.name, operationType: shared?.request?.operationType },
           }),
           retry,
         )

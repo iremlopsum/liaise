@@ -45,6 +45,17 @@ The endpoint's 3 seconds replace the client's 10, so a server that never answers
 - Under [`share`](/guide/sharing-identical-requests/), the endpoint's or the client's `timeout` also bounds the one shared request ([details](/reference/behaviour-in-detail/#share-key-and-refcount)).
 - A fractional `timeout` is rounded down to whole milliseconds, with a minimum of 1 ms ([CallOptions](/reference/calloptions/)).
 
+### Queries only
+
+On a GraphQL client, a deadline on a mutation has a cost: if the call is abandoned while the server is still committing the write, the user's "try again" can write it twice. Give `createGraphQL` an object to set a default per operation type:
+
+<Example name="graphql-timeout" />
+
+- **A side left out has no default.** `{ queries: 45_000 }` gives every query 45 seconds and every mutation none, unless the mutation sets its own, as `previewUpload` does.
+- **The levels don't change.** A call's `timeout` replaces the operation's, and the operation's replaces its side's default. `timeout: 0` on a query opts it out.
+- **Under `share`, the side's default is also the shared request's deadline,** as a number is.
+- How liaise tells a query from a mutation, including on a flat client, is under [Query or mutation](/reference/middlewarecontext/#query-or-mutation).
+
 ## Drop stale calls with dedupe
 
 `dedupe: true` makes each new call to an endpoint cancel the one still running. Use it for search-as-you-type and fast-changing filters, where only the latest answer matters:

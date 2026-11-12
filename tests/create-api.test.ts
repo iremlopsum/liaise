@@ -396,3 +396,14 @@ describe('5.0.2: a path param with no usable value', () => {
     vi.unstubAllGlobals()
   })
 })
+
+describe('createApi — operationType', () => {
+  it('is never set on a REST context', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('{}', { status: 200, headers: { 'Content-Type': 'application/json' } })))
+    let has: boolean | undefined
+    const record: Middleware = async (ctx, next) => { has = 'operationType' in ctx; return next() }
+    const api = createApi({ baseUrl: 'https://x.test', middleware: [record], requests: { getMe: new Request<Record<string, never>, unknown>({ method: 'GET', path: '/me' }) } })
+    await api.getMe()
+    expect(has).toBe(false)
+  })
+})

@@ -10,6 +10,7 @@ import { abortKind, propagatesReason } from './utils/abort-kind.js'
 import { callBudget } from './utils/budget.js'
 import { anySignal, releaseSignal } from './utils/any-signal.js'
 import { timeoutSignalFor } from './utils/timeout.js'
+import { operationTypeOf } from './utils/operation-type.js'
 import { createBackstop } from './utils/backstop.js'
 import { runSchema } from './utils/validate.js'
 import type { SchemaOutcome } from './utils/validate.js'
@@ -17,7 +18,7 @@ import { sendExchange, sendSharedExchange, AbortedRead } from './utils/exchange.
 import type { Exchange } from './utils/exchange.js'
 import { stampClientFetch } from './utils/client-fetch.js'
 import { originalState, stampCopier, stampPollId, type CopyState } from './utils/copy.js'
-import type { CallOptions, EndpointExtras, ErrorResult, Middleware, MiddlewareContext, Result, GraphQLBaseConfig, OperationConfig, GraphQLError } from './types.js'
+import type { CallOptions, EndpointExtras, ErrorResult, Middleware, MiddlewareContext, Result, GraphQLBaseConfig, OperationConfig, GraphQLError, OperationType } from './types.js'
 
 // ---------------------------------------------------------------------------
 // Operation — typed config container for GraphQL operations
@@ -136,7 +137,12 @@ export function createGraphQL(config: any): any {
   // `copy` is the client's state (src/utils/copy.ts): its header sources, and the
   // dedupe lane a withHeaders copy adds after `lane`. The share key keeps `lane`
   // alone — sharing compares what is sent, and a copy's headers are in it.
-  function buildMethod(name: string, operation: Operation<any, any>, copy: CopyState, lane: string = name) {
+  function buildMethod(name: string, operation: Operation<any, any>, copy: CopyState, lane: string, type: OperationType) {
+    // The client's default deadline for this operation's side: a number is
+    // every call's, an object is per type (5.5.0), and a side left out has none.
+    const sideTimeout: number | undefined = clientTimeout !== null && typeof clientTimeout === 'object'
+      ? clientTimeout[type === 'query' ? 'queries' : 'mutations']
+      : clientTimeout
     const method = (variables: object = {}, options: CallOptions = {}): Promise<Result<unknown>> => {
       const execute = (): Promise<Result<unknown>> => {
         /**
@@ -172,7 +178,7 @@ export function createGraphQL(config: any): any {
             statusText: '',
             body: reason,
             headers: new Headers(),
-            request: { method: 'POST', url: endpoint, params: variables },
+            request: { method: 'POST', url: endpoint, params: variables, name, operationType: type },
           })
           return createNetworkErrorResult(error, execute)
         }
@@ -221,7 +227,7 @@ export function createGraphQL(config: any): any {
           const { signal: callerSignal, endpointDeadline } = callBudget(
             options.timeout,
             operation.config.timeout,
-            clientTimeout,
+            sideTimeout,
             options.signal
           )
           own(callerSignal, options.signal)
@@ -326,7 +332,7 @@ export function createGraphQL(config: any): any {
                   // bounds only its own caller, through waitSignal. Called
                   // synchronously, inside this try, so whatever it throws for
                   // a non-number becomes this caller's Result.
-                  () => timeoutSignalFor(undefined, operation.config.timeout, clientTimeout),
+                  () => timeoutSignalFor(undefined, operation.config.timeout, sideTimeout),
                   // When it aborts, run() rejects with its reason, classified
                   // in the catch as this caller's own abort or timeout.
                   waitSignal,
@@ -379,7 +385,7 @@ export function createGraphQL(config: any): any {
                   statusText: response.statusText,
                   body,
                   headers: response.headers,
-                  request: { method: 'POST', url: ctx.request.url, params: variables },
+                  request: { method: 'POST', url: ctx.request.url, params: variables, name, operationType: type },
                 })
                 return createErrorResult(error, response, execute)
               }
@@ -412,7 +418,7 @@ export function createGraphQL(config: any): any {
                   statusText: response.statusText,
                   body: parseErr,
                   headers: response.headers,
-                  request: { method: 'POST', url: ctx.request.url, params: variables },
+                  request: { method: 'POST', url: ctx.request.url, params: variables, name, operationType: type },
                 })
                 return createErrorResult(error, response, execute)
               }
@@ -427,7 +433,7 @@ export function createGraphQL(config: any): any {
                   statusText: 'GraphQL Error',
                   body: gqlBody.errors,
                   headers: response.headers,
-                  request: { method: 'POST', url: ctx.request.url, params: variables },
+                  request: { method: 'POST', url: ctx.request.url, params: variables, name, operationType: type },
                   partialData: gqlBody.data ?? undefined,
                 })
                 return createErrorResult(error, response, execute)
@@ -458,7 +464,7 @@ export function createGraphQL(config: any): any {
                   statusText: response.statusText,
                   body: text,
                   headers: response.headers,
-                  request: { method: 'POST', url: ctx.request.url, params: variables },
+                  request: { method: 'POST', url: ctx.request.url, params: variables, name, operationType: type },
                 })
                 return createErrorResult(error, response, execute)
               }
@@ -490,7 +496,7 @@ export function createGraphQL(config: any): any {
                     statusText: response.statusText,
                     body: validatorErr,
                     headers: response.headers,
-                    request: { method: 'POST', url: ctx.request.url, params: variables }
+                    request: { method: 'POST', url: ctx.request.url, params: variables, name, operationType: type }
                   })
                   return createErrorResult(error, response, execute)
                 }
@@ -502,7 +508,7 @@ export function createGraphQL(config: any): any {
                     statusText: response.statusText,
                     body: outcome.issues,
                     headers: response.headers,
-                    request: { method: 'POST', url: ctx.request.url, params: variables }
+                    request: { method: 'POST', url: ctx.request.url, params: variables, name, operationType: type }
                   })
                   return createErrorResult(error, response, execute)
                 }
@@ -551,7 +557,7 @@ export function createGraphQL(config: any): any {
                 statusText: '',
                 body: aborted ? err.cause : err,
                 headers: new Headers(),
-                request: { method: 'POST', url: ctx.request.url, params: variables },
+                request: { method: 'POST', url: ctx.request.url, params: variables, name, operationType: type },
               })
               return createNetworkErrorResult(error, execute)
             }
@@ -594,6 +600,7 @@ export function createGraphQL(config: any): any {
               signal: callerSignal,
             },
             requestName: name,
+            operationType: type,
           }
           stampClientFetch(context, clientFetch)
 
@@ -674,7 +681,7 @@ export function createGraphQL(config: any): any {
             statusText: '',
             body: err,
             headers: new Headers(),
-            request: { method: 'POST', url: endpoint, params: variables },
+            request: { method: 'POST', url: endpoint, params: variables, name, operationType: type },
           })
           fireOnError(error)
           return Promise.resolve(createNetworkErrorResult(error, execute))
@@ -727,20 +734,28 @@ export function createGraphQL(config: any): any {
    * The copier on the result copies just this record, so `withHeaders(gql.query, h)`
    * returns that side.
    */
-  const buildSide = (record: Record<string, Operation<any, any>>, copy: CopyState, prefix: string, origin: Methods | null): Methods => {
+  const buildSide = (record: Record<string, Operation<any, any>>, copy: CopyState, prefix: string, origin: Methods | null, types: Record<string, OperationType>): Methods => {
     const methods: Methods = {}
     for (const [name, operation] of Object.entries(record)) {
-      methods[name] = buildMethod(name, operation, copy, prefix + name)
+      methods[name] = buildMethod(name, operation, copy, prefix + name, types[name])
       if (origin) stampPollId(methods[name], origin[name], copy.pollKey)
     }
-    stampCopier(methods, derive => buildSide(record, derive(copy), prefix, origin ?? methods))
+    stampCopier(methods, derive => buildSide(record, derive(copy), prefix, origin ?? methods, types))
     return methods
   }
+  /** Every operation in `record` given one type: a split client's side. */
+  const allOf = (record: Record<string, Operation<any, any>>, type: OperationType): Record<string, OperationType> =>
+    Object.fromEntries(Object.keys(record).map(name => [name, type]))
 
   if (config.operations) {
     // Flat mode merges any queries/mutations in, as before (the types forbid them).
     const all: Record<string, Operation<any, any>> = { ...config.operations, ...(config.queries ?? {}), ...(config.mutations ?? {}) }
-    return buildSide(all, originalState(globalHeaders), '', null)
+    // A flat client has only the documents: each is read once, here, for its
+    // operation type (utils/operation-type.ts). Unreadable counts as a mutation.
+    const types: Record<string, OperationType> = Object.fromEntries(
+      Object.entries(all).map(([name, op]) => [name, operationTypeOf(op.config.operation)])
+    )
+    return buildSide(all, originalState(globalHeaders), '', null, types)
   }
 
   // Each side is built from its own record, so a query and a mutation may share
@@ -750,10 +765,13 @@ export function createGraphQL(config: any): any {
   // after construction must not give a copy operations the original lacks.
   const queries: Record<string, Operation<any, any>> | undefined = config.queries && { ...config.queries }
   const mutations: Record<string, Operation<any, any>> | undefined = config.mutations && { ...config.mutations }
+  // The record decides a split client's types, whatever each document says.
+  const queryTypes = queries && allOf(queries, 'query')
+  const mutationTypes = mutations && allOf(mutations, 'mutation')
   const buildSplit = (copy: CopyState, origin: Record<string, Methods> | null): Record<string, Methods> => {
     const result: Record<string, Methods> = {}
-    if (queries) result.query = buildSide(queries, copy, 'query:', origin?.query ?? null)
-    if (mutations) result.mutation = buildSide(mutations, copy, 'mutation:', origin?.mutation ?? null)
+    if (queries) result.query = buildSide(queries, copy, 'query:', origin?.query ?? null, queryTypes!)
+    if (mutations) result.mutation = buildSide(mutations, copy, 'mutation:', origin?.mutation ?? null, mutationTypes!)
     stampCopier(result, derive => buildSplit(derive(copy), origin ?? result))
     return result
   }

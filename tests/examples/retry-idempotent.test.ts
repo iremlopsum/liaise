@@ -11,13 +11,11 @@ import { retryMiddleware } from 'liaise/middleware'
 
 type Order = { id: string }
 
-// Methods that are safe to send twice. A POST is not: a 5xx after it may
-// mean the server already created the order.
-const IDEMPOTENT = ['GET', 'HEAD', 'PUT', 'DELETE']
-
+// Only methods that are safe to send twice. A POST is not: a 5xx after it
+// may mean the server already created the order.
 const retry = retryMiddleware({
   max: 2,
-  retryOn: r => !!r.error && r.error.status >= 500 && IDEMPOTENT.includes(r.error.request.method),
+  methods: ['GET', 'HEAD', 'PUT', 'DELETE'],
 })
 
 const api = createApi({

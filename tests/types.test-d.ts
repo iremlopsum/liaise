@@ -517,9 +517,9 @@ describe('defineRequest — schema-inferred response types', () => {
 })
 
 describe('client-level timeout (5.1.0)', () => {
-  it('is an optional number on both client configs', () => {
+  it('is an optional number on createApi, and a number or { queries, mutations } on createGraphQL (5.5.0)', () => {
     expectTypeOf<ApiConfig<{}>['timeout']>().toEqualTypeOf<number | undefined>()
-    expectTypeOf<GraphQLBaseConfig['timeout']>().toEqualTypeOf<number | undefined>()
+    expectTypeOf<GraphQLBaseConfig['timeout']>().toEqualTypeOf<number | { queries?: number; mutations?: number } | undefined>()
   })
 })
 
@@ -631,5 +631,17 @@ describe('withHeaders types', () => {
 
   it('exports WithHeadersOptions', () => {
     expectTypeOf<WithHeadersOptions>().toEqualTypeOf<{ dedupe?: boolean }>()
+  })
+})
+
+describe('createGraphQL timeout per operation type', () => {
+  it('takes a number or { queries, mutations }, and refuses other keys', () => {
+    const getX = new Operation<Record<string, never>, { x: number }>({ operation: gql`query { x }` })
+    createGraphQL({ endpoint: '/graphql', timeout: 1000, queries: { getX } })
+    createGraphQL({ endpoint: '/graphql', timeout: { queries: 45_000 }, queries: { getX } })
+    createGraphQL({ endpoint: '/graphql', timeout: { queries: 45_000, mutations: 0 }, operations: { getX } })
+    // @ts-expect-error — the keys are `queries` and `mutations`
+    createGraphQL({ endpoint: '/graphql', timeout: { query: 45_000 }, queries: { getX } })
+    expectTypeOf<GraphQLBaseConfig['timeout']>().toEqualTypeOf<number | { queries?: number; mutations?: number } | undefined>()
   })
 })
