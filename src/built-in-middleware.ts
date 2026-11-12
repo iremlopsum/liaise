@@ -419,13 +419,18 @@ export type CacheMiddleware = Middleware & { clear(): void }
  * old entry in place. Calls the cache declines (a method it doesn't cache, a
  * mutation without `mutations: true`, params it can't key) go to the network
  * and store nothing, as before. (Before 5.5.0 a skipped call stored nothing.)
+ * `share` still applies below the cache: on a shared endpoint, a refresh made
+ * while an identical request is in flight joins it and stores its answer.
  *
  * **Frozen data:**
  *
  * The `data` of a stored result is deep-frozen when it is stored, so the first
  * caller and every hit share one object that nobody can change: editing it
  * throws a `TypeError` in strict code instead of changing it for every later
- * hit. Copy it first to edit it (`[...data].sort()`). Only plain objects and
+ * hit. Copy it first to edit it (`[...data].sort()`); a middleware outside
+ * the cache that transforms `data` must return new data, not edit it in place.
+ * Freezing is in place, so an object reachable from `data` that the app also
+ * holds is frozen too. Only plain objects and
  * arrays are frozen; a `Date`, `Map`, class instance or `Blob` inside is left as
  * it is. Data the cache didn't store is never frozen.
  *

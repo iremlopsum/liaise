@@ -6,7 +6,7 @@ import { Request } from '../src/request.js'
 import { createGraphQL, Operation, gql } from '../src/graphql.js'
 import { cacheMiddleware, retryMiddleware } from '../src/built-in-middleware.js'
 import { poll } from '../src/poll.js'
-import type { Result, StandardSchemaV1 } from '../src/types.js'
+import type { Middleware, Result, StandardSchemaV1 } from '../src/types.js'
 
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals() })
 
@@ -74,7 +74,8 @@ describe('a skipped cache refreshes its entry', () => {
     const cache = cacheMiddleware({ ttl: 60_000 })
     const createUser = new Request<{ name: string }, { v: number }>({ method: 'POST', path: '/users', middleware: [cache] })
     const api = createApi({ baseUrl: 'https://x.test', requests: { createUser } })
-    await api.createUser({ name: 'a' }, { skipMiddleware: [cache] })
+    const skipped = await api.createUser({ name: 'a' }, { skipMiddleware: [cache] })
+    expect(Object.isFrozen(skipped.data)).toBe(false) // the store didn't take it
     const again = await api.createUser({ name: 'a' })
     expect(again.data).toEqual({ v: 2 })
     expect(fetch).toHaveBeenCalledTimes(2)
@@ -165,7 +166,8 @@ describe('GraphQL: refresh a query, never a mutation unless asked', () => {
   it('a skipped mutation stores nothing', async () => {
     const fetch = gqlVersions()
     const { cache, c } = client()
-    await c.mutation.user({ id: '1' }, { skipMiddleware: [cache] })
+    const skipped = await c.mutation.user({ id: '1' }, { skipMiddleware: [cache] })
+    expect(Object.isFrozen(skipped.data)).toBe(false) // the store didn't take it
     await c.mutation.user({ id: '1' })
     expect(fetch).toHaveBeenCalledTimes(2)
   })
@@ -272,5 +274,46 @@ describe('newer calls win; clear() fences replies in flight', () => {
     const next = await api.getUser({ id: '1' })
     expect(next.data).toEqual({ v: 2 })
     expect(fetch).toHaveBeenCalledTimes(2)
+  })
+})
+
+describe('pinned edges (final review)', () => {
+  it('under share, a refresh that joins an identical read in flight stores that read’s answer', async () => {
+    let release!: () => void
+    const fetch = versions({ 1: () => new Promise<Response>(r => { release = () => r(json({ v: 'joined' })) }) })
+    const cache = cacheMiddleware({ ttl: 60_000 })
+    const getUser = new Request<{ id: string }, { v: number | string }>({ method: 'GET', path: '/users/:id', share: true, middleware: [cache] })
+    const api = createApi({ baseUrl: 'https://x.test', requests: { getUser } })
+    const read = api.getUser({ id: '1' })
+    await new Promise(r => setTimeout(r, 0))
+    const refresh = api.getUser({ id: '1' }, { skipMiddleware: [cache] })
+    await new Promise(r => setTimeout(r, 0))
+    release()
+    await read
+    const fresh = await refresh
+    expect(fetch).toHaveBeenCalledTimes(1)
+    expect(fresh.data).toEqual({ v: 'joined' })
+    expect(await api.getUser({ id: '1' })).toBe(fresh)
+  })
+
+  it('a middleware outside the cache that edits data in place fails; one that returns new data works', async () => {
+    versions()
+    const cache = cacheMiddleware({ ttl: 60_000 })
+    const inPlace: Middleware = async (_ctx, next) => {
+      const r = await next()
+      if (r.data) (r.data as { v: number }).v += 100
+      return r
+    }
+    const copying: Middleware = async (_ctx, next) => {
+      const r = await next()
+      return r.data ? { ...r, data: { ...(r.data as { v: number }), v: (r.data as { v: number }).v + 100 } } : r
+    }
+    const getA = new Request<{ id: string }, { v: number }>({ method: 'GET', path: '/a/:id', middleware: [cache] })
+    const getB = new Request<{ id: string }, { v: number }>({ method: 'GET', path: '/b/:id', middleware: [cache] })
+    const broken = createApi({ baseUrl: 'https://x.test', requests: { getA }, middleware: [inPlace] })
+    const works = createApi({ baseUrl: 'https://x.test', requests: { getB }, middleware: [copying] })
+    expect((await broken.getA({ id: '1' })).error?.kind).toBe('middleware')
+    expect((await works.getB({ id: '1' })).data).toEqual({ v: 102 })
+    expect((await works.getB({ id: '1' })).data).toEqual({ v: 102 }) // the stored v: 2 is untouched
   })
 })
