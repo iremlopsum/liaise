@@ -75,33 +75,15 @@ const retry = retryMiddleware({
 
 `cacheMiddleware()` keeps successful responses in memory, so a repeated read within the time-to-live skips the network. Each `cacheMiddleware()` call makes its own store. Give it to the endpoints you want cached:
 
-```ts
-import { createApi, defineRequest } from 'liaise'
-import { cacheMiddleware } from 'liaise/middleware'
+<Example name="cache-refresh" />
 
-type User = { id: string; name: string }
-
-const getUserCache = cacheMiddleware({ ttl: 5 * 60_000, maxSize: 100 })
-
-const getUser = defineRequest<User>()({
-  method: 'GET',
-  path: '/users/:id',
-  middleware: [getUserCache],
-})
-
-const api = createApi({ baseUrl: 'https://api.example.com', requests: { getUser } })
-
-// On logout, clear every cached entry:
-getUserCache.clear()
-
-// Skip the cache for one call:
-const { data } = await api.getUser({ id: '42' }, { skipMiddleware: [getUserCache] })
-```
-
+- **Passing the cache in `skipMiddleware` refreshes the entry.** The call goes to the network, and a successful answer replaces the cached one, so the next read gets it at once. A failed refresh keeps the old entry, so the next read still gets the last good answer. On an endpoint with [`share`](/guide/sharing-identical-requests/), a refresh made while an identical read is in flight joins that read and stores its answer, which may predate your edit. Leave `share` off endpoints you refresh after a write. Call options such as `skipMiddleware` go with `retry()`, so `retry()` on a refreshed result refreshes again.
+- **Cached data is frozen.** The first caller and every later hit get the same object, so it is frozen, to stop one caller's edit from reaching everyone else. Editing it throws a `TypeError`. Copy it first (`[...data].sort()`, `{ ...data, name }`). That includes a middleware outside the cache that transforms `data`: it should return new data, not edit it in place. Freezing works in place, so every plain object and array reachable from `data` is frozen, even one that came from somewhere else, such as a fixture a test middleware returned. A `Date`, `Map` or class instance inside stays as it is. Data the cache didn't store isn't frozen.
+- **An older answer never replaces a newer one.** A read already in flight when a refresh starts doesn't put its answer back when it finishes. After `clear()`, a reply still in flight isn't stored, so a request sent before logout can't refill the cache.
 - **Only successful `GET` and `HEAD` calls are cached.** An error always goes to the network again. A `POST`, `PUT`, `PATCH` or `DELETE` changes something, so the cache never answers one and never stores it. To cache a read that your API sends as a `POST`, such as a search, give that endpoint `cacheMiddleware({ methods: ['POST'] })`. On GraphQL, where every operation is a `POST`, a cache with `methods: ['POST']` still never caches a mutation, unless you also pass `mutations: true`.
 - **The key includes the URL, the params, the headers, the `fetchOptions` and the client's own `fetch`.** When your auth header is set before the cache runs, one user never sees another user's entry. [Cache key](/reference/behaviour-in-detail/#cache-key) has the details.
 - **Put a middleware that adds a unique header to each call after `cacheMiddleware`.** A request ID added before it makes every call look new, and nothing is ever cached. Client middleware always runs before endpoint middleware, so either list the request-ID middleware on the endpoint after the cache, or put the cache on the client before it.
-- **Entries last 5 minutes, and the store keeps 50 by default.** The oldest entry is dropped first. Set `ttl` and `maxSize` to change that, and `debug` to log hits and misses ([Cache options](/reference/built-in-middleware-options/#cache-options)).
+- **Entries last 5 minutes, and the store keeps 50 by default.** The oldest entry is dropped first. Set `ttl` and `maxSize` to change that, and `debug` to log hits, misses and refreshes ([Cache options](/reference/built-in-middleware-options/#cache-options)).
 - To merge identical calls made at the same time without keeping anything, use [`share`](/guide/sharing-identical-requests/) instead.
 
 ## Log every call

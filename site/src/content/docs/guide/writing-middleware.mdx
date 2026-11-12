@@ -22,7 +22,7 @@ A middleware can:
 - **Change the request.** Set headers, change the body, rewrite the URL.
 - **Answer early** without calling `next()`, for example from a cache.
 - **Call `next()` more than once**, for example to retry a 5xx.
-- **Read the result** to log it, report an error or transform `data`.
+- **Read the result** to log it, report an error or transform `data`. Return a new object (`{ ...result, data: transform(result.data) }`) rather than editing `data` in place: data the cache stored is frozen, and an in-place edit made by a middleware outside the cache throws. That makes the call fail with `kind: 'middleware'`.
 
 Middleware runs at three levels, the client's first and the call's last, as [Three levels of settings](/start/how-it-fits-together/#three-levels-of-settings) shows. A middleware that throws ends the call with `kind: 'middleware'` ([Handling errors](/guide/handling-errors/)).
 
@@ -52,6 +52,8 @@ await api.getUser({ id: '42' }, { skipMiddleware: [retry] })
 ```
 
 liaise compares by reference (`===`). Store what a factory such as `retryMiddleware(3)` returns in a variable first. Calling the factory again makes a new function, which won't match.
+
+Skipping a `cacheMiddleware` refreshes its entry instead of ignoring it: the call goes to the network, and a success replaces what was cached ([Cache repeated reads](/guide/retries-caching-and-logging/#cache-repeated-reads)).
 
 ## What a middleware sees
 

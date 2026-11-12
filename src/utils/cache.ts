@@ -110,6 +110,8 @@ function identity(obj: object): string {
 interface CacheEntry {
   value: unknown
   timestamp: number
+  /** The ticket of the call that wrote it (0 when written without one). */
+  ticket: number
 }
 
 /**
@@ -138,6 +140,10 @@ export class CacheStore {
   private cache = new Map<string, CacheEntry>()
   private readonly ttl: number
   private readonly maxSize: number
+  /** The last ticket handed out by `begin()`. */
+  private lastTicket = 0
+  /** Tickets at or below this were handed out before the last `clear()`. */
+  private fence = 0
 
   constructor(options: { ttl: number; maxSize: number }) {
     this.ttl = options.ttl
@@ -162,15 +168,38 @@ export class CacheStore {
   }
 
   /**
-   * Stores a value under the given key with the current timestamp.
+   * Hands out the next ticket: one per call, taken when the call starts (before
+   * `next()`), strictly increasing per store. `set` with a ticket only lets a call
+   * replace the answer of a call that started before it (5.5.0).
+   */
+  begin(): number {
+    return ++this.lastTicket
+  }
+
+  /**
+   * Stores a value under the given key with the current timestamp, and returns
+   * whether it did.
    *
-   * If the store has reached `maxSize`, the entry with the oldest insertion
-   * timestamp is evicted before the new entry is added. Eviction is O(n) —
+   * With a `ticket` (from `begin()`), the write is refused when the ticket was
+   * handed out before the last `clear()`, or when the key's entry, expired or not,
+   * came from a call with the same or a later ticket: a read that started before a
+   * refresh and finished after it must not put the older answer back, and a reply
+   * in flight at sign-out must not land in the emptied store. Without a ticket it
+   * always writes.
+   *
+   * Replacing an existing key keeps the store's size, so it evicts nothing (before
+   * 5.5.0 it evicted the oldest entry even then). Adding a key to a full store
+   * evicts the entry with the oldest insertion timestamp first. Eviction is O(n) —
    * acceptable because `maxSize` is designed to be small (≤ 200).
    */
-  set(key: string, value: unknown): void {
-    if (this.maxSize === 0) return
-    if (this.cache.size >= this.maxSize) {
+  set(key: string, value: unknown, ticket?: number): boolean {
+    if (this.maxSize === 0) return false
+    const current = this.cache.get(key)
+    if (ticket !== undefined) {
+      if (ticket <= this.fence) return false
+      if (current !== undefined && current.ticket >= ticket) return false
+    }
+    if (current === undefined && this.cache.size >= this.maxSize) {
       let oldestKey: string | null = null
       let oldestTimestamp = Infinity
       for (const [k, entry] of this.cache) {
@@ -181,16 +210,19 @@ export class CacheStore {
       }
       if (oldestKey !== null) this.cache.delete(oldestKey)
     }
-    this.cache.set(key, { value, timestamp: Date.now() })
+    this.cache.set(key, { value, timestamp: Date.now(), ticket: ticket ?? 0 })
+    return true
   }
 
   /**
    * Removes all entries from the store immediately.
    *
    * Useful for invalidating the entire cache — for example, on user logout
-   * to prevent the next user from seeing stale data.
+   * to prevent the next user from seeing stale data. Every ticket handed out
+   * before it is fenced: a call already in flight never stores after it.
    */
   clear(): void {
     this.cache.clear()
+    this.fence = this.lastTicket
   }
 }

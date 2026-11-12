@@ -37,7 +37,12 @@ const entries = {
 // REST only 7153 → 7208 B, core + polling 9650 → 9743 B, core + pager 10089 → 10141 B,
 // core entry 14007 → 14586 B, core + middleware 15366 → 16023 B). Raised: core + polling
 // 9740 → 10250.
-const budgets = { 'REST only': 7700, 'core + polling': 10250, 'core + pager': 10700, 'core entry': 14900, 'core + middleware': 16300 }
+// 5.5.0 (piece 2, cache refresh and frozen hits): the composer's stand-in lookup in every
+// client, and the cache's refresh stand-in, tickets and deepFreeze in the middleware entry
+// (measured: REST only 7208 → 7257 B, core + polling 9743 → 9789 B, core + pager 10141 →
+// 10193 B, core entry 14586 → 14639 B, core + middleware 16023 → 16314 B). Raised: core +
+// middleware 16300 → 17100.
+const budgets = { 'REST only': 7700, 'core + polling': 10250, 'core + pager': 10700, 'core entry': 14900, 'core + middleware': 17100 }
 
 let failed = false
 for (const [name, contents] of Object.entries(entries)) {
