@@ -71,7 +71,7 @@ const getCategory = new Operation<{ id: string }, { category: Category }>({
 })
 ```
 
-Put it on the query operations you want cached, or on the client to cache every query. Either way it never caches a mutation: a cached mutation would answer the second one with the first one's response, so the cache sends every mutation to the network unless you pass `mutations: true`. A query and a mutation with the same name never share an entry.
+Put it on the query operations you want cached, or on the client to cache every query. Either way it never caches a mutation: a cached mutation would answer the second one with the first one's response, so the cache sends every mutation to the network unless you pass `mutations: true`. A query and a mutation with the same name never share an entry. To refresh a cached query after a mutation, call it with the cache in `skipMiddleware`. The fresh answer replaces the entry ([Cache repeated reads](/guide/retries-caching-and-logging/#cache-repeated-reads)).
 
 ## GraphQL errors
 

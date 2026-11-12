@@ -53,6 +53,8 @@ await api.getUser({ id: '42' }, { skipMiddleware: [retry] })
 
 liaise compares by reference (`===`). Store what a factory such as `retryMiddleware(3)` returns in a variable first. Calling the factory again makes a new function, which won't match.
 
+Skipping a `cacheMiddleware` refreshes its entry instead of ignoring it: the call goes to the network, and a success replaces what was cached ([Cache repeated reads](/guide/retries-caching-and-logging/#cache-repeated-reads)).
+
 ## What a middleware sees
 
 `ctx.requestName` is the endpoint's key, such as `'getUser'`. `ctx.request` holds the request as it will be sent, with the URL filled in and the body serialized. Every field is listed under [MiddlewareContext](/reference/middlewarecontext/).
